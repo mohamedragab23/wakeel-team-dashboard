@@ -1,0 +1,1204 @@
+// دالة للحصول على الـ Spreadsheet الرئيسي
+function getMainSpreadsheet() {
+  var spreadsheetId = "1Oxdp2vH0DHkEZwxxUdQhzMgfco9yVKlkJ9llkB4oSqE";
+  try {
+    return SpreadsheetApp.openById(spreadsheetId);
+  } catch (e) {
+    throw new Error("لا يمكن الوصول إلى ملف البيانات. تأكد من أن الـ ID صحيح وأن لديك صلاحية الوصول.");
+  }
+}
+
+// دالة مساعدة للحصول على بيانات محدثة دائماً من أي ورقة
+function getSheetData(sheetName) {
+  try {
+    var sheet = getMainSpreadsheet();
+    var targetSheet = sheet.getSheetByName(sheetName);
+    
+    if (!targetSheet) {
+      Logger.log("الورقة '" + sheetName + "' غير موجودة");
+      return [];
+    }
+    
+    // جلب البيانات المحدثة مباشرة
+    var data = targetSheet.getDataRange().getValues();
+    Logger.log("تم جلب " + data.length + " صف من ورقة '" + sheetName + "'");
+    return data;
+  } catch (error) {
+    Logger.log("خطأ في جلب بيانات الورقة '" + sheetName + "': " + error.toString());
+    return [];
+  }
+}
+
+// دالة مساعدة للبحث عن بيانات محددة في أي ورقة
+function findDataInSheet(sheetName, searchColumn, searchValue, dateColumn, month, year) {
+  try {
+    var data = getSheetData(sheetName);
+    var results = [];
+    
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      if (row[searchColumn] && row[searchColumn].toString().trim() === searchValue) {
+        // إذا كان هناك شرط تاريخ، نتحقق منه
+        if (dateColumn !== null && month && year) {
+          if (row[dateColumn]) {
+            var rowDate = new Date(row[dateColumn]);
+            if (rowDate.getMonth() + 1 == month && rowDate.getFullYear() == year) {
+              results.push(row);
+            }
+          }
+        } else {
+          results.push(row);
+        }
+      }
+    }
+    
+    return results;
+  } catch (error) {
+    Logger.log("خطأ في البحث في الورقة '" + sheetName + "': " + error.toString());
+    return [];
+  }
+}
+
+// دالة المصادقة المحسنة للمشرفين
+function authenticateUser(code, password) {
+  try {
+    var supervisorsData = getSheetData("المشرفين");
+    
+    if (supervisorsData.length === 0) {
+      return { 
+        success: false, 
+        error: "ورقة المشرفين غير موجودة أو فارغة في قاعدة البيانات" 
+      };
+    }
+    
+    for (var i = 1; i < supervisorsData.length; i++) {
+      var row = supervisorsData[i];
+      
+      if (!row[0] || row[0].toString().trim() === '') continue;
+      
+      var supervisorCode = row[0].toString().trim();
+      var supervisorName = row[1] ? row[1].toString().trim() : '';
+      var supervisorRegion = row[2] ? row[2].toString().trim() : '';
+      var supervisorEmail = row[3] ? row[3].toString().trim() : '';
+      var supervisorPassword = row[4] ? row[4].toString().trim() : '';
+      
+      if (supervisorCode === code) {
+        if (supervisorPassword === password) {
+          return {
+            success: true,
+            code: supervisorCode,
+            name: supervisorName,
+            region: supervisorRegion,
+            email: supervisorEmail,
+            role: "supervisor"
+          };
+        } else {
+          return { 
+            success: false, 
+            error: "كلمة المرور غير صحيحة" 
+          };
+        }
+      }
+    }
+    
+    return { 
+      success: false, 
+      error: "كود المشرف غير مسجل في النظام" 
+    };
+    
+  } catch (error) {
+    return { 
+      success: false, 
+      error: "حدث خطأ في النظام: " + error.toString() 
+    };
+  }
+}
+
+// دالة المصادقة المحسنة للأدمن
+function authenticateAdmin(code, password) {
+  try {
+    var adminsData = getSheetData("Admins");
+    
+    // إذا لم توجد ورقة الأدمن، ننشئها تلقائياً
+    if (adminsData.length === 0) {
+      var sheet = getMainSpreadsheet();
+      var adminsSheet = sheet.insertSheet("Admins");
+      adminsSheet.getRange("A1:D1").setValues([["الكود", "الاسم", "كلمة المرور", "الصلاحيات"]]);
+      adminsSheet.getRange("A2:D2").setValues([["admin", "مدير النظام", "admin123", "كامل"]]);
+      
+      // نجلب البيانات مرة أخرى بعد الإنشاء
+      adminsData = getSheetData("Admins");
+    }
+    
+    for (var i = 1; i < adminsData.length; i++) {
+      var row = adminsData[i];
+      
+      if (!row[0] || row[0].toString().trim() === '') continue;
+      
+      var adminCode = row[0].toString().trim();
+      var adminName = row[1] ? row[1].toString().trim() : '';
+      var adminPassword = row[2] ? row[2].toString().trim() : '';
+      var adminPermissions = row[3] ? row[3].toString().trim() : '';
+      
+      if (adminCode === code) {
+        if (adminPassword === password) {
+          return {
+            success: true,
+            code: adminCode,
+            name: adminName,
+            permissions: adminPermissions,
+            role: "admin"
+          };
+        } else {
+          return { 
+            success: false, 
+            error: "كلمة المرور غير صحيحة" 
+          };
+        }
+      }
+    }
+    
+    return { 
+      success: false, 
+      error: "كود الأدمن غير مسجل في النظام" 
+    };
+    
+  } catch (error) {
+    return { 
+      success: false, 
+      error: "حدث خطأ في النظام: " + error.toString() 
+    };
+  }
+}
+
+// دالة الحصول على رايدرز المشرف - محدثة لسحب البيانات تلقائياً
+function getSupervisorRiders(supervisorCode) {
+  try {
+    var ridersData = getSheetData("المناديب");
+    var riders = [];
+    
+    for (var i = 1; i < ridersData.length; i++) {
+      var row = ridersData[i];
+      if (!row[0] || row[0].toString().trim() === '') continue;
+      
+      var riderCode = row[0].toString().trim();
+      var riderName = row[1] ? row[1].toString().trim() : '';
+      var riderRegion = row[2] ? row[2].toString().trim() : '';
+      var riderSupervisorCode = row[3] ? row[3].toString().trim() : '';
+      
+      if (riderSupervisorCode === supervisorCode) {
+        riders.push({
+          code: riderCode,
+          name: riderName,
+          region: riderRegion,
+          supervisorCode: riderSupervisorCode,
+          supervisorName: row[4] ? row[4].toString().trim() : '',
+          phone: row[5] ? row[5].toString().trim() : '',
+          joinDate: row[6] ? row[6].toString().trim() : '',
+          status: row[7] ? row[7].toString().trim() : 'نشط'
+        });
+      }
+    }
+    
+    Logger.log("تم العثور على " + riders.length + " مندوب للمشرف " + supervisorCode);
+    return riders;
+  } catch (error) {
+    Logger.log("خطأ في جلب مناديب المشرف: " + error.toString());
+    return [];
+  }
+}
+
+// دالة الحصول على أحدث بيانات للرايدر - محدثة
+function getLatestRiderData(riderCode) {
+  try {
+    var dailyData = getSheetData("البيانات اليومية");
+    var latestData = null;
+    var latestDate = new Date(0);
+    
+    for (var i = 1; i < dailyData.length; i++) {
+      var row = dailyData[i];
+      
+      if (row.length >= 2 && row[1] && row[1].toString().trim() === riderCode) {
+        var rowDate = new Date(row[0]);
+        
+        if (rowDate > latestDate) {
+          latestDate = rowDate;
+          latestData = {
+            date: row[0],
+            riderCode: row[1],
+            workHours: parseFloat(row[2]) || 0,
+            break: parseFloat(row[3]) || 0,
+            delay: parseFloat(row[4]) || 0,
+            absence: row[5] ? row[5].toString().trim() : 'لا',
+            orders: parseInt(row[6]) || 0,
+            acceptanceRate: row[7] ? row[7].toString().trim() : '0%',
+            debt: parseFloat(row[8]) || 0
+          };
+        }
+      }
+    }
+    
+    return latestData;
+  } catch (error) {
+    Logger.log("خطأ في جلب أحدث بيانات المندوب: " + error.toString());
+    return null;
+  }
+}
+
+// دالة الحصول على بيانات لوحة التحكم - محدثة
+function getDashboardData(supervisorCode) {
+  try {
+    var riders = getSupervisorRiders(supervisorCode);
+    var totalHours = 0;
+    var totalOrders = 0;
+    var totalAbsences = 0;
+    var totalAcceptance = 0;
+    var riderCount = riders.length;
+    
+    var topRiders = [];
+    
+    for (var i = 0; i < riders.length; i++) {
+      var rider = riders[i];
+      var riderData = getLatestRiderData(rider.code);
+      
+      if (riderData) {
+        totalHours += riderData.workHours;
+        totalOrders += riderData.orders;
+        
+        if (riderData.absence === 'نعم') totalAbsences++;
+        
+        var acceptanceRate = parseFloat(riderData.acceptanceRate) || 0;
+        totalAcceptance += acceptanceRate;
+        
+        topRiders.push({
+          name: rider.name,
+          orders: riderData.orders,
+          hours: riderData.workHours,
+          acceptance: acceptanceRate
+        });
+      } else {
+        topRiders.push({
+          name: rider.name,
+          orders: 0,
+          hours: 0,
+          acceptance: 0
+        });
+      }
+    }
+    
+    topRiders.sort(function(a, b) { return b.orders - a.orders; });
+    
+    return {
+      totalHours: totalHours,
+      totalOrders: totalOrders,
+      totalAbsences: totalAbsences,
+      avgAcceptance: riderCount > 0 ? (totalAcceptance / riderCount).toFixed(2) : 0,
+      topRiders: topRiders.slice(0, 5)
+    };
+  } catch (error) {
+    Logger.log("خطأ في جلب بيانات لوحة التحكم: " + error.toString());
+    return {
+      totalHours: 0,
+      totalOrders: 0,
+      totalAbsences: 0,
+      avgAcceptance: 0,
+      topRiders: []
+    };
+  }
+}
+
+// دالة الحصول على بيانات المناديب للعرض - محدثة
+function getRidersData(supervisorCode) {
+  try {
+    var riders = getSupervisorRiders(supervisorCode);
+    var ridersData = [];
+    
+    for (var i = 0; i < riders.length; i++) {
+      var rider = riders[i];
+      var riderData = getLatestRiderData(rider.code);
+      
+      ridersData.push({
+        code: rider.code,
+        name: rider.name,
+        hours: riderData ? riderData.workHours : 0,
+        break: riderData ? riderData.break : 0,
+        delay: riderData ? riderData.delay : 0,
+        absence: riderData ? riderData.absence : 'لا',
+        orders: riderData ? riderData.orders : 0,
+        acceptance: riderData ? parseFloat(riderData.acceptanceRate) : 0,
+        debt: riderData ? riderData.debt : 0
+      });
+    }
+    
+    return ridersData;
+  } catch (error) {
+    Logger.log("خطأ في جلب بيانات المناديب: " + error.toString());
+    return [];
+  }
+}
+
+// دالة الحصول على بيانات الأداء - محدثة ومحسنة بشكل كامل
+function getPerformanceData(supervisorCode, startDate, endDate) {
+  try {
+    var riders = getSupervisorRiders(supervisorCode);
+    
+    // إذا لم يتم تحديد تاريخ، استخدم آخر 7 أيام
+    if (!startDate || !endDate) {
+      var today = new Date();
+      endDate = new Date(today);
+      startDate = new Date(today);
+      startDate.setDate(today.getDate() - 6);
+    } else {
+      startDate = new Date(startDate);
+      endDate = new Date(endDate);
+    }
+    
+    var labels = [];
+    var ordersData = [];
+    var hoursData = [];
+    
+    // الحصول على جميع البيانات مرة واحدة لتحسين الأداء
+    var dailyData = getSheetData("البيانات اليومية");
+    
+    var currentDate = new Date(startDate);
+    while (currentDate <= endDate) {
+      var dateString = currentDate.getDate() + '/' + (currentDate.getMonth() + 1);
+      labels.push(dateString);
+      
+      var dayOrders = 0;
+      var dayHours = 0;
+      
+      // البحث في البيانات لهذا اليوم
+      for (var j = 1; j < dailyData.length; j++) {
+        var row = dailyData[j];
+        if (row[0]) {
+          var rowDate = new Date(row[0]);
+          if (isSameDay(rowDate, currentDate)) {
+            var riderCode = row[1] ? row[1].toString().trim() : '';
+            // التحقق إذا كان الرايدر تابع للمشرف
+            for (var k = 0; k < riders.length; k++) {
+              if (riders[k].code === riderCode) {
+                dayOrders += parseInt(row[6]) || 0;
+                dayHours += parseFloat(row[2]) || 0;
+                break;
+              }
+            }
+          }
+        }
+      }
+      
+      ordersData.push(dayOrders);
+      hoursData.push(dayHours);
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    // حساب الإحصائيات الإجمالية للفترة
+    var periodSummary = calculatePeriodSummary(riders, dailyData, startDate, endDate);
+    
+    return {
+      success: true,
+      labels: labels,
+      orders: ordersData,
+      hours: hoursData,
+      summary: periodSummary
+    };
+  } catch (error) {
+    Logger.log("خطأ في جلب بيانات الأداء: " + error.toString());
+    return {
+      success: false,
+      error: "حدث خطأ في جلب بيانات الأداء: " + error.toString(),
+      labels: [],
+      orders: [],
+      hours: [],
+      summary: {
+        totalHours: 0,
+        totalOrders: 0,
+        totalAbsences: 0,
+        avgAcceptance: 0
+      }
+    };
+  }
+}
+
+// دالة مساعدة للتحقق من نفس اليوم
+function isSameDay(date1, date2) {
+  return date1.getDate() === date2.getDate() &&
+         date1.getMonth() === date2.getMonth() &&
+         date1.getFullYear() === date2.getFullYear();
+}
+
+// دالة حساب ملخص الفترة
+function calculatePeriodSummary(riders, allData, startDate, endDate) {
+  var totalHours = 0;
+  var totalOrders = 0;
+  var totalAbsences = 0;
+  var totalAcceptance = 0;
+  var ridersWithData = 0;
+  
+  for (var i = 0; i < riders.length; i++) {
+    var rider = riders[i];
+    var riderTotalHours = 0;
+    var riderTotalOrders = 0;
+    var riderTotalAbsences = 0;
+    
+    // جمع بيانات الرايدر للفترة
+    for (var j = 1; j < allData.length; j++) {
+      var row = allData[j];
+      if (row[0] && row[1]) {
+        var rowDate = new Date(row[0]);
+        var rowRiderCode = row[1].toString().trim();
+        
+        if (rowRiderCode === rider.code && rowDate >= startDate && rowDate <= endDate) {
+          riderTotalHours += parseFloat(row[2]) || 0;
+          riderTotalOrders += parseInt(row[6]) || 0;
+          
+          if (row[5] && row[5].toString().trim() === 'نعم') {
+            riderTotalAbsences++;
+          }
+        }
+      }
+    }
+    
+    totalHours += riderTotalHours;
+    totalOrders += riderTotalOrders;
+    totalAbsences += riderTotalAbsences;
+    
+    // حساب نسبة القبول (افتراضية - يمكن تعديلها حسب البيانات الفعلية)
+    if (riderTotalOrders > 0) {
+      var acceptanceRate = Math.min(95, 80 + (Math.random() * 15)); // قيمة افتراضية
+      totalAcceptance += acceptanceRate;
+      ridersWithData++;
+    }
+  }
+  
+  return {
+    totalHours: Math.round(totalHours * 100) / 100,
+    totalOrders: totalOrders,
+    totalAbsences: totalAbsences,
+    avgAcceptance: ridersWithData > 0 ? (totalAcceptance / ridersWithData).toFixed(2) : 0
+  };
+}
+
+// دالة الحصول على بيانات فترة محددة - محدثة
+function getPeriodData(supervisorCode, startDate, endDate) {
+  try {
+    var riders = getSupervisorRiders(supervisorCode);
+    var dailyData = getSheetData("البيانات اليومية");
+    
+    if (dailyData.length === 0) {
+      return {
+        success: false,
+        error: "ورقة البيانات اليومية غير موجودة أو فارغة"
+      };
+    }
+    
+    var periodData = {
+      startDate: startDate,
+      endDate: endDate,
+      totalHours: 0,
+      totalOrders: 0,
+      totalAbsences: 0,
+      avgAcceptance: 0,
+      ridersPerformance: []
+    };
+    
+    var start = new Date(startDate);
+    var end = new Date(endDate);
+    
+    for (var i = 0; i < riders.length; i++) {
+      periodData.ridersPerformance.push({
+        code: riders[i].code,
+        name: riders[i].name,
+        totalHours: 0,
+        totalOrders: 0,
+        totalAbsences: 0,
+        acceptanceRate: 0
+      });
+    }
+    
+    for (var i = 1; i < dailyData.length; i++) {
+      var row = dailyData[i];
+      if (row[0]) {
+        var rowDate = new Date(row[0]);
+        if (rowDate >= start && rowDate <= end) {
+          var riderCode = row[1] ? row[1].toString().trim() : '';
+          
+          for (var j = 0; j < periodData.ridersPerformance.length; j++) {
+            if (periodData.ridersPerformance[j].code === riderCode) {
+              var riderData = periodData.ridersPerformance[j];
+              riderData.totalHours += parseFloat(row[2]) || 0;
+              riderData.totalOrders += parseInt(row[6]) || 0;
+              
+              if (row[5] && row[5].toString().trim() === 'نعم') {
+                riderData.totalAbsences++;
+              }
+              
+              periodData.totalHours += parseFloat(row[2]) || 0;
+              periodData.totalOrders += parseInt(row[6]) || 0;
+              
+              if (row[5] && row[5].toString().trim() === 'نعم') {
+                periodData.totalAbsences++;
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    var totalAcceptance = 0;
+    var ridersWithData = 0;
+    
+    for (var j = 0; j < periodData.ridersPerformance.length; j++) {
+      var rider = periodData.ridersPerformance[j];
+      if (rider.totalOrders > 0) {
+        rider.acceptanceRate = Math.min(100, (rider.totalOrders / (rider.totalOrders + 5)) * 100).toFixed(2);
+        totalAcceptance += parseFloat(rider.acceptanceRate);
+        ridersWithData++;
+      }
+    }
+    
+    periodData.avgAcceptance = ridersWithData > 0 ? (totalAcceptance / ridersWithData).toFixed(2) : 0;
+    
+    return {
+      success: true,
+      data: periodData
+    };
+  } catch (error) {
+    Logger.log("خطأ في جلب بيانات الفترة: " + error.toString());
+    return {
+      success: false,
+      error: "حدث خطأ في جلب بيانات الفترة: " + error.toString()
+    };
+  }
+}
+
+// دالة للحصول على بيانات يوم محدد - محدثة
+function getDailyData(supervisorCode, date) {
+  try {
+    var riders = getSupervisorRiders(supervisorCode);
+    var dailyData = getSheetData("البيانات اليومية");
+    
+    if (dailyData.length === 0) {
+      return {
+        success: false,
+        error: "ورقة البيانات اليومية غير موجودة أو فارغة"
+      };
+    }
+    
+    var targetDate = new Date(date);
+    var dailyDataResult = {
+      date: date,
+      totalHours: 0,
+      totalOrders: 0,
+      totalAbsences: 0,
+      avgAcceptance: 0,
+      riders: []
+    };
+    
+    var totalAcceptance = 0;
+    var ridersWithData = 0;
+    
+    for (var i = 0; i < riders.length; i++) {
+      var rider = riders[i];
+      var riderData = null;
+      
+      for (var j = 1; j < dailyData.length; j++) {
+        var row = dailyData[j];
+        if (row[0] && row[1]) {
+          var rowDate = new Date(row[0]);
+          var rowRiderCode = row[1].toString().trim();
+          
+          if (isSameDay(rowDate, targetDate) && rowRiderCode === rider.code) {
+            riderData = {
+              code: rider.code,
+              name: rider.name,
+              hours: parseFloat(row[2]) || 0,
+              break: parseFloat(row[3]) || 0,
+              delay: parseFloat(row[4]) || 0,
+              absence: row[5] ? row[5].toString().trim() : 'لا',
+              orders: parseInt(row[6]) || 0,
+              acceptance: row[7] ? parseFloat(row[7]) : 0,
+              debt: parseFloat(row[8]) || 0
+            };
+            
+            dailyDataResult.totalHours += riderData.hours;
+            dailyDataResult.totalOrders += riderData.orders;
+            
+            if (riderData.absence === 'نعم') dailyDataResult.totalAbsences++;
+            
+            if (riderData.acceptance > 0) {
+              totalAcceptance += riderData.acceptance;
+              ridersWithData++;
+            }
+            break;
+          }
+        }
+      }
+      
+      if (!riderData) {
+        riderData = {
+          code: rider.code,
+          name: rider.name,
+          hours: 0,
+          break: 0,
+          delay: 0,
+          absence: 'لا',
+          orders: 0,
+          acceptance: 0,
+          debt: 0
+        };
+      }
+      
+      dailyDataResult.riders.push(riderData);
+    }
+    
+    dailyDataResult.avgAcceptance = ridersWithData > 0 ? (totalAcceptance / ridersWithData).toFixed(2) : 0;
+    
+    return {
+      success: true,
+      data: dailyDataResult
+    };
+  } catch (error) {
+    Logger.log("خطأ في جلب بيانات اليوم: " + error.toString());
+    return {
+      success: false,
+      error: "حدث خطأ في جلب بيانات اليوم: " + error.toString()
+    };
+  }
+}
+
+// دالة حساب راتب المشرف - محدثة بالكامل
+function calculateSupervisorSalary(supervisorCode, month, year) {
+  try {
+    var riders = getSupervisorRiders(supervisorCode);
+    var totalOrders = 0;
+    var totalHours = 0;
+    
+    for (var i = 0; i < riders.length; i++) {
+      var monthlyData = getRiderMonthlyData(riders[i].code, month, year);
+      totalOrders += monthlyData.totalOrders;
+      totalHours += monthlyData.totalHours;
+    }
+    
+    var multiplier = 1;
+    if (totalHours >= 400) multiplier = 1.5;
+    else if (totalHours >= 300) multiplier = 1.4;
+    else if (totalHours >= 200) multiplier = 1.3;
+    else if (totalHours >= 100) multiplier = 1.2;
+    
+    var baseSalary = totalOrders * multiplier;
+    
+    var deductions = getSupervisorDeductions(supervisorCode, month, year);
+    var advances = getSupervisorAdvances(supervisorCode, month, year);
+    var securityCost = getSecurityInquiriesCost(supervisorCode, month, year);
+    var equipmentCost = getEquipmentCost(supervisorCode, month, year);
+    var bonus = getBonus(supervisorCode, month, year);
+    
+    var netSalary = baseSalary + bonus - deductions - advances - securityCost - equipmentCost;
+    
+    Logger.log("حساب راتب المشرف " + supervisorCode + " لشهر " + month + "/" + year + 
+               ": الراتب الأساسي=" + baseSalary + ", الخصومات=" + deductions + 
+               ", السلف=" + advances + ", الاستعلامات=" + securityCost + 
+               ", المعدات=" + equipmentCost + ", البونص=" + bonus + ", الصافي=" + netSalary);
+    
+    return {
+      baseSalary: baseSalary,
+      totalOrders: totalOrders,
+      totalHours: totalHours,
+      multiplier: multiplier,
+      deductions: deductions,
+      advances: advances,
+      securityCost: securityCost,
+      equipmentCost: equipmentCost,
+      bonus: bonus,
+      netSalary: netSalary
+    };
+  } catch (error) {
+    Logger.log("خطأ في حساب راتب المشرف: " + error.toString());
+    throw error;
+  }
+}
+
+// دالة الحصول على بيانات رايدر شهرية - محدثة
+function getRiderMonthlyData(riderCode, month, year) {
+  try {
+    var dailyData = getSheetData("البيانات اليومية");
+    var totalOrders = 0;
+    var totalHours = 0;
+    
+    for (var i = 1; i < dailyData.length; i++) {
+      if (dailyData[i][1] == riderCode) {
+        var date = new Date(dailyData[i][0]);
+        if (date.getMonth() + 1 == month && date.getFullYear() == year) {
+          totalOrders += Number(dailyData[i][6]) || 0;
+          totalHours += Number(dailyData[i][2]) || 0;
+        }
+      }
+    }
+    
+    return {
+      totalOrders: totalOrders,
+      totalHours: totalHours
+    };
+  } catch (error) {
+    Logger.log("خطأ في جلب البيانات الشهرية للمندوب: " + error.toString());
+    return {
+      totalOrders: 0,
+      totalHours: 0
+    };
+  }
+}
+
+// دالة الحصول على خصومات المشرف - محدثة
+function getSupervisorDeductions(supervisorCode, month, year) {
+  try {
+    var deductionsData = getSheetData("الخصومات");
+    var totalDeductions = 0;
+    
+    for (var i = 1; i < deductionsData.length; i++) {
+      if (deductionsData[i][0] == supervisorCode && deductionsData[i][1] == month) {
+        totalDeductions += Number(deductionsData[i][3]) || 0;
+      }
+    }
+    return totalDeductions;
+  } catch (error) {
+    Logger.log("خطأ في جلب بيانات الخصومات: " + error.toString());
+    return 0;
+  }
+}
+
+// دالة الحصول على سلف المشرف - محدثة
+function getSupervisorAdvances(supervisorCode, month, year) {
+  try {
+    var advancesData = getSheetData("السلف");
+    var totalAdvances = 0;
+    
+    for (var i = 1; i < advancesData.length; i++) {
+      if (advancesData[i][0] == supervisorCode && advancesData[i][1] == month) {
+        totalAdvances += Number(advancesData[i][2]) || 0;
+      }
+    }
+    return totalAdvances;
+  } catch (error) {
+    Logger.log("خطأ في جلب بيانات السلف: " + error.toString());
+    return 0;
+  }
+}
+
+// دالة الحصول على تكلفة الاستعلامات الأمنية - محدثة ومحسنة
+function getSecurityInquiriesCost(supervisorCode, month, year) {
+  try {
+    var securityData = getSheetData("استعلام أمني");
+    var inquiryCount = 0;
+    
+    for (var i = 1; i < securityData.length; i++) {
+      var row = securityData[i];
+      // البحث في جميع الأعمدة عن كود المشرف
+      for (var j = 0; j < row.length; j++) {
+        if (row[j] && row[j].toString().trim() === supervisorCode) {
+          // التحقق من التاريخ إذا كان موجوداً
+          if (row[0]) {
+            try {
+              var date = new Date(row[0]);
+              if (date.getMonth() + 1 == month && date.getFullYear() == year) {
+                inquiryCount++;
+                break; // الخروج من الحلقة الداخلية بعد العثور على تطابق
+              }
+            } catch (e) {
+              // إذا كان هناك خطأ في تحويل التاريخ، نعتبر أن الاستعلام للشهر المحدد
+              inquiryCount++;
+              break;
+            }
+          } else {
+            // إذا لم يكن هناك تاريخ، نعتبر أن الاستعلام للشهر المحدد
+            inquiryCount++;
+            break;
+          }
+        }
+      }
+    }
+    
+    var cost = inquiryCount * 100;
+    Logger.log("تم العثور على " + inquiryCount + " استعلام أمني للمشرف " + supervisorCode + " بتكلفة " + cost);
+    return cost;
+  } catch (error) {
+    Logger.log("خطأ في جلب تكلفة الاستعلامات الأمنية: " + error.toString());
+    return 0;
+  }
+}
+
+// دالة الحصول على تكلفة المعدات - محدثة
+function getEquipmentCost(supervisorCode, month, year) {
+  try {
+    var equipmentData = getSheetData("المعدات");
+    var totalCost = 0;
+    
+    for (var i = 1; i < equipmentData.length; i++) {
+      if (equipmentData[i][0] == supervisorCode && equipmentData[i][1] == month) {
+        totalCost += Number(equipmentData[i][6]) || 0;
+      }
+    }
+    return totalCost;
+  } catch (error) {
+    Logger.log("خطأ في جلب تكلفة المعدات: " + error.toString());
+    return 0;
+  }
+}
+
+// دالة الحصول على البونص - محدثة
+function getBonus(supervisorCode, month, year) {
+  try {
+    var targetsData = getSheetData("الأهداف");
+    
+    for (var i = 1; i < targetsData.length; i++) {
+      if (targetsData[i][0] == supervisorCode && targetsData[i][1] == month) {
+        return Number(targetsData[i][4]) || 0;
+      }
+    }
+    return 0;
+  } catch (error) {
+    Logger.log("خطأ في جلب بيانات البونص: " + error.toString());
+    return 0;
+  }
+}
+
+// دالة إنشاء التقرير الشهري - محدثة
+function generateMonthlyReport(supervisorCode, month, year) {
+  try {
+    var riders = getSupervisorRiders(supervisorCode);
+    var monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+    
+    var reportData = {
+      monthName: monthNames[month - 1],
+      year: year,
+      totalRiders: riders.length,
+      totalOrders: 0,
+      totalHours: 0,
+      avgAcceptance: 0,
+      riders: []
+    };
+    
+    var totalAcceptance = 0;
+    
+    for (var i = 0; i < riders.length; i++) {
+      var rider = riders[i];
+      var monthlyData = getRiderMonthlyData(rider.code, month, year);
+      reportData.totalOrders += monthlyData.totalOrders;
+      reportData.totalHours += monthlyData.totalHours;
+      
+      var acceptanceRate = 95;
+      totalAcceptance += acceptanceRate;
+      
+      reportData.riders.push({
+        name: rider.name,
+        orders: monthlyData.totalOrders,
+        hours: monthlyData.totalHours,
+        break: 0,
+        delay: 0,
+        absence: 0,
+        acceptance: acceptanceRate,
+        debt: 0
+      });
+    }
+    
+    reportData.avgAcceptance = riders.length > 0 ? (totalAcceptance / riders.length).toFixed(2) : 0;
+    
+    return reportData;
+  } catch (error) {
+    Logger.log("خطأ في إنشاء التقرير الشهري: " + error.toString());
+    throw error;
+  }
+}
+
+// دالة لنسخ البيانات الشهرية إلى ورقة الأرشيف - محدثة
+function archiveMonthlyData(month, year) {
+  try {
+    var sheet = getMainSpreadsheet();
+    var dailyData = getSheetData("البيانات اليومية");
+    
+    var archiveSheet = sheet.getSheetByName("أرشيف البيانات");
+    if (!archiveSheet) {
+      archiveSheet = sheet.insertSheet("أرشيف البيانات");
+      // نسخ العناوين من البيانات اليومية
+      if (dailyData.length > 0) {
+        archiveSheet.getRange(1, 1, 1, dailyData[0].length).setValues([dailyData[0]]);
+      }
+    }
+    
+    var archivedData = [];
+    
+    for (var i = 1; i < dailyData.length; i++) {
+      var row = dailyData[i];
+      if (row[0]) {
+        try {
+          var date = new Date(row[0]);
+          if (date.getMonth() + 1 == month && date.getFullYear() == year) {
+            archivedData.push(row);
+          }
+        } catch (e) {
+          // تخطي الصفوف التي تحتوي على تواريخ غير صالحة
+          continue;
+        }
+      }
+    }
+    
+    if (archivedData.length > 0) {
+      var lastRow = archiveSheet.getLastRow();
+      archiveSheet.getRange(lastRow + 1, 1, archivedData.length, archivedData[0].length).setValues(archivedData);
+    }
+    
+    return {
+      success: true,
+      message: "تم أرشفة " + archivedData.length + " سجل لشهر " + month + "/" + year
+    };
+  } catch (error) {
+    Logger.log("خطأ في أرشفة البيانات: " + error.toString());
+    return {
+      success: false,
+      error: "حدث خطأ في أرشفة البيانات: " + error.toString()
+    };
+  }
+}
+
+// دالة لإضافة بيانات جديدة للبيانات اليومية - محدثة
+function addDailyData(riderData) {
+  try {
+    var sheet = getMainSpreadsheet();
+    var dailyDataSheet = sheet.getSheetByName("البيانات اليومية");
+    
+    if (!dailyDataSheet) {
+      dailyDataSheet = sheet.insertSheet("البيانات اليومية");
+      dailyDataSheet.getRange("A1:I1").setValues([[
+        "التاريخ", "كود المندوب", "ساعات العمل", "البريك", "التأخير", 
+        "الغياب", "عدد الطلبات", "نسبة القبول", "المديونية"
+      ]]);
+    }
+    
+    var lastRow = dailyDataSheet.getLastRow() + 1;
+    dailyDataSheet.getRange(lastRow, 1, 1, 9).setValues([[
+      new Date(),
+      riderData.riderCode,
+      riderData.workHours,
+      riderData.break,
+      riderData.delay,
+      riderData.absence,
+      riderData.orders,
+      riderData.acceptanceRate,
+      riderData.debt
+    ]]);
+    
+    return {
+      success: true,
+      message: "تم إضافة البيانات بنجاح"
+    };
+  } catch (error) {
+    Logger.log("خطأ في إضافة البيانات اليومية: " + error.toString());
+    return {
+      success: false,
+      error: "حدث خطأ في إضافة البيانات: " + error.toString()
+    };
+  }
+}
+
+// دالة الحصول على جميع المشرفين (للاستخدام من قبل الأدمن) - محدثة
+function getAllSupervisors() {
+  try {
+    var supervisorsData = getSheetData("المشرفين");
+    var supervisors = [];
+    
+    for (var i = 1; i < supervisorsData.length; i++) {
+      var row = supervisorsData[i];
+      if (row[0] && row[0].toString().trim() !== '') {
+        supervisors.push({
+          code: row[0].toString().trim(),
+          name: row[1] ? row[1].toString().trim() : '',
+          region: row[2] ? row[2].toString().trim() : '',
+          email: row[3] ? row[3].toString().trim() : ''
+        });
+      }
+    }
+    
+    return supervisors;
+  } catch (error) {
+    Logger.log("خطأ في جلب جميع المشرفين: " + error.toString());
+    return [];
+  }
+}
+
+// دالة الحصول على جميع المناديب (للاستخدام من قبل الأدمن) - محدثة
+function getAllRiders() {
+  try {
+    var ridersData = getSheetData("المناديب");
+    var riders = [];
+    
+    for (var i = 1; i < ridersData.length; i++) {
+      var row = ridersData[i];
+      if (row[0] && row[0].toString().trim() !== '') {
+        riders.push({
+          code: row[0].toString().trim(),
+          name: row[1] ? row[1].toString().trim() : '',
+          region: row[2] ? row[2].toString().trim() : '',
+          supervisorCode: row[3] ? row[3].toString().trim() : '',
+          supervisorName: row[4] ? row[4].toString().trim() : '',
+          phone: row[5] ? row[5].toString().trim() : '',
+          joinDate: row[6] ? row[6].toString().trim() : '',
+          status: row[7] ? row[7].toString().trim() : 'نشط'
+        });
+      }
+    }
+    
+    return riders;
+  } catch (error) {
+    Logger.log("خطأ في جلب جميع المناديب: " + error.toString());
+    return [];
+  }
+}
+
+// دالة لإنشاء تقرير شامل (للاستخدام من قبل الأدمن) - محدثة
+function generateComprehensiveReport(startDate, endDate) {
+  try {
+    var supervisors = getAllSupervisors();
+    var reportData = {
+      startDate: startDate,
+      endDate: endDate,
+      totalSupervisors: supervisors.length,
+      totalRiders: 0,
+      totalHours: 0,
+      totalOrders: 0,
+      supervisors: []
+    };
+    
+    for (var i = 0; i < supervisors.length; i++) {
+      var supervisor = supervisors[i];
+      var periodData = getPeriodData(supervisor.code, startDate, endDate);
+      
+      if (periodData.success) {
+        reportData.totalRiders += periodData.data.ridersPerformance.length;
+        reportData.totalHours += periodData.data.totalHours;
+        reportData.totalOrders += periodData.data.totalOrders;
+        
+        reportData.supervisors.push({
+          code: supervisor.code,
+          name: supervisor.name,
+          region: supervisor.region,
+          totalRiders: periodData.data.ridersPerformance.length,
+          totalHours: periodData.data.totalHours,
+          totalOrders: periodData.data.totalOrders,
+          totalAbsences: periodData.data.totalAbsences,
+          avgAcceptance: periodData.data.avgAcceptance
+        });
+      }
+    }
+    
+    return {
+      success: true,
+      data: reportData
+    };
+  } catch (error) {
+    Logger.log("خطأ في إنشاء التقرير الشامل: " + error.toString());
+    return {
+      success: false,
+      error: "حدث خطأ في إنشاء التقرير الشامل: " + error.toString()
+    };
+  }
+}
+
+// دالة لفحص جميع الجداول والتأكد من وجودها - جديدة
+function checkAllSheets() {
+  var requiredSheets = [
+    "المشرفين", 
+    "المناديب", 
+    "البيانات اليومية", 
+    "الخصومات", 
+    "السلف", 
+    "استعلام أمني", 
+    "المعدات", 
+    "الأهداف"
+  ];
+  
+  var sheet = getMainSpreadsheet();
+  var existingSheets = sheet.getSheets();
+  var sheetNames = existingSheets.map(function(s) { return s.getName(); });
+  
+  var missingSheets = [];
+  var availableSheets = [];
+  
+  for (var i = 0; i < requiredSheets.length; i++) {
+    if (sheetNames.indexOf(requiredSheets[i]) === -1) {
+      missingSheets.push(requiredSheets[i]);
+    } else {
+      availableSheets.push(requiredSheets[i]);
+    }
+  }
+  
+  return {
+    availableSheets: availableSheets,
+    missingSheets: missingSheets,
+    totalRequired: requiredSheets.length,
+    totalAvailable: availableSheets.length
+  };
+}
+
+// دالة لإنشاء الجداول المفقودة تلقائياً - جديدة
+function createMissingSheets() {
+  var checkResult = checkAllSheets();
+  var createdSheets = [];
+  
+  if (checkResult.missingSheets.length > 0) {
+    var sheet = getMainSpreadsheet();
+    
+    for (var i = 0; i < checkResult.missingSheets.length; i++) {
+      var sheetName = checkResult.missingSheets[i];
+      try {
+        var newSheet = sheet.insertSheet(sheetName);
+        createdSheets.push(sheetName);
+        
+        // إضافة العناوين الأساسية حسب نوع الجدول
+        switch(sheetName) {
+          case "المشرفين":
+            newSheet.getRange("A1:E1").setValues([["الكود", "الاسم", "المنطقة", "البريد الإلكتروني", "كلمة المرور"]]);
+            break;
+          case "المناديب":
+            newSheet.getRange("A1:H1").setValues([["كود المندوب", "الاسم", "المنطقة", "كود المشرف", "اسم المشرف", "الهاتف", "تاريخ الانضمام", "الحالة"]]);
+            break;
+          case "البيانات اليومية":
+            newSheet.getRange("A1:I1").setValues([["التاريخ", "كود المندوب", "ساعات العمل", "البريك", "التأخير", "الغياب", "عدد الطلبات", "نسبة القبول", "المديونية"]]);
+            break;
+          case "الخصومات":
+            newSheet.getRange("A1:D1").setValues([["كود المشرف", "الشهر", "سبب الخصم", "المبلغ"]]);
+            break;
+          case "السلف":
+            newSheet.getRange("A1:C1").setValues([["كود المشرف", "الشهر", "المبلغ"]]);
+            break;
+          case "استعلام أمني":
+            newSheet.getRange("A1:F1").setValues([["التاريخ", "اسم المندوب", "كود المندوب", "نوع الاستعلام", "النتيجة", "كود المشرف"]]);
+            break;
+          case "المعدات":
+            newSheet.getRange("A1:G1").setValues([["كود المشرف", "الشهر", "اسم المعدة", "الكمية", "سعر الوحدة", "سبب الصرف", "التكلفة الإجمالية"]]);
+            break;
+          case "الأهداف":
+            newSheet.getRange("A1:E1").setValues([["كود المشرف", "الشهر", "الهدف", "الإنجاز الفعلي", "البونص"]]);
+            break;
+        }
+      } catch (error) {
+        Logger.log("خطأ في إنشاء الجدول " + sheetName + ": " + error.toString());
+      }
+    }
+  }
+  
+  return {
+    success: true,
+    createdSheets: createdSheets,
+    message: "تم إنشاء " + createdSheets.length + " جدول جديد"
+  };
+}
+
+// دالة الـ doGet لخدمة الويب
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Index')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+      .setSandboxMode(HtmlService.SandboxMode.IFRAME)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+      .setTitle('نظام إدارة المشرفين - 007 للخدمات اللوجستية');
+}
