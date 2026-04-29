@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { deleteSheetRow, getSheetData } from '@/lib/googleSheets';
+import { getSheetData } from '@/lib/googleSheets';
 import { invalidateSupervisorCaches, notifySupervisorsOfChange } from '@/lib/realtimeSync';
 import { cache, CACHE_KEYS } from '@/lib/cache';
+import { getMainSpreadsheetId, getSheetsClientFor } from '@/lib/googleSheetsAuth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -33,6 +34,63 @@ function normalizeAnyDateToIso(v: any): string | null {
   }
   const d = new Date(s);
   return Number.isFinite(d.getTime()) ? toLocalIsoDate(d) : null;
+}
+
+function groupContiguousDescending(rows: number[]): Array<{ startRow: number; endRow: number }> {
+  // rows are 1-based sheet row numbers, expected sorted DESC.
+  const ranges: Array<{ startRow: number; endRow: number }> = [];
+  let start = -1;
+  let end = -1;
+  for (const r of rows) {
+    if (start === -1) {
+      start = r;
+      end = r;
+      continue;
+    }
+    // contiguous downward: e.g., 100, 99, 98...
+    if (r === end - 1) {
+      end = r;
+    } else {
+      ranges.push({ startRow: end, endRow: start });
+      start = r;
+      end = r;
+    }
+  }
+  if (start !== -1) ranges.push({ startRow: end, endRow: start });
+  return ranges;
+}
+
+async function deleteRowsBatch(sheetName: string, rowNumbersDesc: number[]) {
+  if (rowNumbersDesc.length === 0) return { deleted: 0 };
+
+  const spreadsheetId = getMainSpreadsheetId();
+  const sheets = await getSheetsClientFor('main');
+
+  // Get sheetId once
+  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
+  const sheet = spreadsheet.data.sheets?.find((s: any) => s.properties?.title === sheetName);
+  if (!sheet) throw new Error(`Sheet "${sheetName}" not found`);
+  const sheetId = sheet.properties.sheetId;
+
+  const ranges = groupContiguousDescending(rowNumbersDesc);
+  const requests = ranges.map((r) => ({
+    deleteDimension: {
+      range: {
+        sheetId,
+        dimension: 'ROWS',
+        startIndex: r.startRow - 1, // 0-based inclusive
+        endIndex: r.endRow, // 0-based exclusive (row number)
+      },
+    },
+  }));
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: { requests },
+  });
+
+  const deleted = rowNumbersDesc.length;
+  return { deleted };
 }
 
 export async function POST(request: NextRequest) {
@@ -68,11 +126,7 @@ export async function POST(request: NextRequest) {
 
     // Delete from bottom to top to keep indices valid
     rowsToDelete.sort((a, b) => b - a);
-    let deleted = 0;
-    for (const rowNumber of rowsToDelete) {
-      const ok = await deleteSheetRow('البيانات اليومية', rowNumber);
-      if (ok) deleted++;
-    }
+    const { deleted } = await deleteRowsBatch('البيانات اليومية', rowsToDelete);
 
     // Clear caches and notify
     cache.clear(CACHE_KEYS.sheetData('البيانات اليومية'));

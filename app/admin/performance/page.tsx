@@ -96,16 +96,23 @@ export default function AdminPerformancePage() {
                     },
                     body: JSON.stringify({ date: performanceDate }),
                   });
-                  const data = await res.json();
-                  if (data.success) {
-                    alert(`✅ ${data.message}`);
+                  const text = await res.text();
+                  const data = (() => {
+                    try {
+                      return JSON.parse(text);
+                    } catch {
+                      return { success: false, error: text || `HTTP ${res.status}` };
+                    }
+                  })();
+                  if (res.ok && data.success) {
+                    alert(`✅ ${data.message || 'تم الحذف بنجاح'}`);
                     queryClient.invalidateQueries({ queryKey: ['admin', 'performance-stats'] });
                     queryClient.invalidateQueries({ queryKey: ['performance'] });
                     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
                     queryClient.invalidateQueries({ queryKey: ['riders'] });
                     queryClient.refetchQueries({ queryKey: ['admin', 'performance-stats'] });
                   } else {
-                    alert(`❌ ${data.error || 'فشل حذف اليوم'}`);
+                    alert(`❌ ${data.error || `فشل حذف اليوم (HTTP ${res.status})`}`);
                   }
                 } catch (e: any) {
                   alert(`❌ حدث خطأ: ${e?.message || 'خطأ غير معروف'}`);
