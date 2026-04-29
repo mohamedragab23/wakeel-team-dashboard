@@ -262,6 +262,8 @@ export default function ExcelUploadEnhanced({ type, performanceDate, onSuccess, 
         } catch (chunkError: any) {
           console.error(`[ExcelUpload] Error uploading chunk ${chunkIndex + 1}:`, chunkError);
           lastError = chunkError.message || 'خطأ في رفع جزء من الملف';
+          // Stop uploading further chunks if a chunk fails (prevents partial writes / noise)
+          break;
         }
       }
 

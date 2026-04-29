@@ -20,6 +20,51 @@ function safeNum(v: any): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function toLocalIsoDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function normalizeAnyDateToIso(v: any): string | null {
+  if (!v) return null;
+  if (v instanceof Date && Number.isFinite(v.getTime())) return toLocalIsoDate(v);
+  const s = String(v).trim();
+  if (!s) return null;
+  // Already ISO
+  const mIso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (mIso) return `${mIso[1]}-${mIso[2]}-${mIso[3]}`;
+  // M/D/YYYY or D/M/YYYY (best-effort)
+  const mSlash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (mSlash) {
+    const a = parseInt(mSlash[1], 10);
+    const b = parseInt(mSlash[2], 10);
+    const y = parseInt(mSlash[3], 10);
+    // If first part > 12 assume D/M/YYYY else assume M/D/YYYY
+    const month = a > 12 ? b : a;
+    const day = a > 12 ? a : b;
+    const d = new Date(y, month - 1, day);
+    return Number.isFinite(d.getTime()) ? toLocalIsoDate(d) : null;
+  }
+  const d = new Date(s);
+  return Number.isFinite(d.getTime()) ? toLocalIsoDate(d) : null;
+}
+
+async function performanceDateExists(dateIso: string): Promise<boolean> {
+  try {
+    const sheet = await getSheetData('البيانات اليومية', false);
+    for (let i = 1; i < sheet.length; i++) {
+      const row = sheet[i] || [];
+      const iso = normalizeAnyDateToIso(row[0]);
+      if (iso === dateIso) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 async function syncTerminationDebtsFromPerformanceRows(performanceRows: any[][]) {
   // performanceRows shape: [date, riderCode, hours, break, delay, absence, orders, acceptance, debt]
   const debtByRider = new Map<string, number>();
@@ -262,6 +307,24 @@ export async function POST(request: NextRequest) {
           },
           { status: 400 }
         );
+      }
+
+      // Prevent duplicate upload for the same day (check only on first chunk / single upload)
+      const dateIso = (processed.data[0]?.date ?? '').toString().trim();
+      const isFirstChunk = chunkIndex === undefined || chunkIndex === 0;
+      if (isFirstChunk && dateIso) {
+        const exists = await performanceDateExists(dateIso);
+        if (exists) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `تم رفع ملف الأداء لهذا التاريخ مسبقاً (${dateIso}). احذف أداء هذا اليوم أولاً ثم أعد الرفع.`,
+              code: 'PERFORMANCE_DATE_ALREADY_UPLOADED',
+              date: dateIso,
+            },
+            { status: 409 }
+          );
+        }
       }
 
       // Step 2: Write to Google Sheets FIRST

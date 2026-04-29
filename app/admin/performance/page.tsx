@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 export default function AdminPerformancePage() {
   const [performanceDate, setPerformanceDate] = useState<string>('');
   const [clearing, setClearing] = useState(false);
+  const [deletingDay, setDeletingDay] = useState(false);
   const queryClient = useQueryClient();
   const { data: performanceStats } = useQuery({
     queryKey: ['admin', 'performance-stats'],
@@ -73,6 +74,53 @@ export default function AdminPerformancePage() {
           <p className="text-xs text-gray-500 mt-2">
             سيتم اعتماد هذا التاريخ لجميع السجلات المرفوعة في الملف
           </p>
+
+          <div className="mt-4 flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              disabled={!performanceDate || deletingDay}
+              onClick={async () => {
+                if (!performanceDate) return;
+                const confirmed = confirm(
+                  `⚠️ سيتم حذف جميع سجلات الأداء ليوم ${performanceDate} من النظام.\n\nهل تريد المتابعة؟`
+                );
+                if (!confirmed) return;
+                setDeletingDay(true);
+                try {
+                  const token = localStorage.getItem('token');
+                  const res = await fetch('/api/admin/performance/delete-day', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ date: performanceDate }),
+                  });
+                  const data = await res.json();
+                  if (data.success) {
+                    alert(`✅ ${data.message}`);
+                    queryClient.invalidateQueries({ queryKey: ['admin', 'performance-stats'] });
+                    queryClient.invalidateQueries({ queryKey: ['performance'] });
+                    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+                    queryClient.invalidateQueries({ queryKey: ['riders'] });
+                    queryClient.refetchQueries({ queryKey: ['admin', 'performance-stats'] });
+                  } else {
+                    alert(`❌ ${data.error || 'فشل حذف اليوم'}`);
+                  }
+                } catch (e: any) {
+                  alert(`❌ حدث خطأ: ${e?.message || 'خطأ غير معروف'}`);
+                } finally {
+                  setDeletingDay(false);
+                }
+              }}
+              className="sm:w-auto w-full px-4 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {deletingDay ? 'جاري حذف اليوم...' : '🗑️ حذف أداء هذا اليوم ثم إعادة رفعه'}
+            </button>
+            <div className="text-xs text-gray-500 sm:self-center">
+              لو ظهر لك “تم رفع ملف الأداء مسبقاً”، احذف اليوم من هنا ثم ارفع الملف من جديد.
+            </div>
+          </div>
         </div>
 
         <ExcelUpload
