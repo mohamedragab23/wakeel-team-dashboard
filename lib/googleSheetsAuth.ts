@@ -15,7 +15,27 @@ function normalizePrivateKey(raw: string): string {
   }
   // Normalize line endings and escaped newlines
   k = k.replace(/\r\n/g, '\n').replace(/\\n/g, '\n');
-  return k.trim();
+  k = k.trim();
+
+  // If the key is pasted as a single line (or has extra whitespace),
+  // re-wrap it into a valid PEM block to avoid OpenSSL decoder errors.
+  const header = '-----BEGIN PRIVATE KEY-----';
+  const footer = '-----END PRIVATE KEY-----';
+  const hIdx = k.indexOf(header);
+  const fIdx = k.indexOf(footer);
+  if (hIdx !== -1 && fIdx !== -1 && fIdx > hIdx) {
+    const between = k
+      .slice(hIdx + header.length, fIdx)
+      .replace(/[\s\r\n]+/g, ''); // remove all whitespace/newlines
+    // Rewrap base64 content to 64-char lines
+    const lines: string[] = [];
+    for (let i = 0; i < between.length; i += 64) {
+      lines.push(between.slice(i, i + 64));
+    }
+    return [header, ...lines, footer, ''].join('\n');
+  }
+
+  return k;
 }
 
 function parseServiceAccountJson(raw: string): { client_email: string; private_key: string } {
