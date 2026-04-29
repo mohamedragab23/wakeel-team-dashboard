@@ -17,7 +17,7 @@ export type NumFilterOp =
 
 export type TextFilterState = { op: TextFilterOp; value: string };
 export type NumFilterState = { op: NumFilterOp; value: string; value2: string };
-export type AbsenceFilterState = { op: 'none' | 'equals'; value: '' | 'نعم' | 'لا' };
+export type AbsenceFilterState = { op: 'none' | 'equals'; value: '' | '1' | '0' | 'نعم' | 'لا' };
 
 type Variant = 'text' | 'number' | 'absence';
 
@@ -277,13 +277,15 @@ export function RidersExcelColumnMenu({
                 onChange={(e) => {
                   const v = e.target.value;
                   if (v === 'none') onAbsenceChange({ op: 'none', value: '' });
-                  else onAbsenceChange({ op: 'equals', value: v as 'نعم' | 'لا' });
+                  else onAbsenceChange({ op: 'equals', value: v as '1' | '0' | 'نعم' | 'لا' });
                 }}
                 className="w-full rounded border border-gray-300 bg-white px-2 py-1.5"
               >
                 <option value="none">الكل</option>
-                <option value="نعم">نعم</option>
-                <option value="لا">لا</option>
+                <option value="1">1</option>
+                <option value="0">0</option>
+                <option value="نعم">نعم (قديم)</option>
+                <option value="لا">لا (قديم)</option>
               </select>
             </div>
           )}

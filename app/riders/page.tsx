@@ -714,7 +714,7 @@ export default function RidersPage() {
                       <td className="py-4 px-4 text-sm">
                         <span
                           className={`px-2 py-1 rounded-full text-xs ${
-                            rider.absence === 'نعم'
+                            rider.absence === '1' || rider.absence === 'نعم'
                               ? 'bg-red-100 text-red-800'
                               : 'bg-green-100 text-green-800'
                           }`}

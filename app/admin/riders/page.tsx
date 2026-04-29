@@ -694,7 +694,7 @@ export default function AdminRidersPage() {
                       <td className="py-2 px-3">
                         <span
                           className={`inline-block rounded-full px-2 py-0.5 text-xs ${
-                            r.absence === 'نعم' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
+                            r.absence === '1' || r.absence === 'نعم' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
                           }`}
                         >
                           {r.absence}

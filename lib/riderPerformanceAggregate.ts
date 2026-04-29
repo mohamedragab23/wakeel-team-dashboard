@@ -179,7 +179,9 @@ export function aggregateRidersInDateRange(
       debt: r.debt,
       date: dateLabel,
       workDays: workDaysMap.get(code) ?? 0,
-      absence: r.absenceCount > 0 ? 'نعم' : 'لا',
+      // Display 1/0 for absence to match performance uploads that use numeric flags.
+      // Keep the underlying detection tolerant (isAbsentDay handles نعم/لا/1/0).
+      absence: r.absenceCount > 0 ? '1' : '0',
       acceptance: r.acceptanceCount > 0 ? r.acceptanceSum / r.acceptanceCount : 0,
     });
   });
