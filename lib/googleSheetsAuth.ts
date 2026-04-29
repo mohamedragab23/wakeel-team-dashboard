@@ -4,6 +4,20 @@ import { google } from 'googleapis';
 
 export type SheetsCredentialTarget = 'main' | 'shifts';
 
+function normalizePrivateKey(raw: string): string {
+  let k = String(raw ?? '');
+  // Remove accidental wrapping quotes from env pastes
+  if (
+    (k.startsWith('"') && k.endsWith('"')) ||
+    (k.startsWith("'") && k.endsWith("'"))
+  ) {
+    k = k.slice(1, -1);
+  }
+  // Normalize line endings and escaped newlines
+  k = k.replace(/\r\n/g, '\n').replace(/\\n/g, '\n');
+  return k.trim();
+}
+
 function parseServiceAccountJson(raw: string): { client_email: string; private_key: string } {
   const parsed = JSON.parse(raw) as { client_email?: string; private_key?: string };
   if (!parsed.client_email || !parsed.private_key) {
@@ -11,7 +25,7 @@ function parseServiceAccountJson(raw: string): { client_email: string; private_k
   }
   return {
     client_email: parsed.client_email,
-    private_key: String(parsed.private_key).replace(/\\n/g, '\n'),
+    private_key: normalizePrivateKey(parsed.private_key),
   };
 }
 
@@ -19,7 +33,17 @@ function loadFromJsonEnv(envName: string): { client_email: string; private_key: 
   const raw = process.env[envName]?.trim();
   if (!raw) return null;
   try {
-    return parseServiceAccountJson(raw);
+    // Some platforms store JSON env values wrapped as a JSON-string.
+    // Try direct parse first; if it fails, try JSON.parse(raw) as a string then parse again.
+    try {
+      return parseServiceAccountJson(raw);
+    } catch {
+      const maybeString = JSON.parse(raw);
+      if (typeof maybeString === 'string') {
+        return parseServiceAccountJson(maybeString);
+      }
+      throw new Error('Invalid service account JSON');
+    }
   } catch (e: any) {
     // On platforms like Vercel, env vars are frequently pasted with accidental quotes/newlines,
     // which makes the JSON invalid. Treat invalid JSON as "unset" so we can fall back
@@ -54,7 +78,7 @@ export function getMainServiceAccountCredentials(): { client_email: string; priv
   if (fromFile) return fromFile;
 
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
-  const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY ? normalizePrivateKey(process.env.GOOGLE_PRIVATE_KEY) : undefined;
   if (email && privateKey) {
     return { client_email: email, private_key: privateKey };
   }
