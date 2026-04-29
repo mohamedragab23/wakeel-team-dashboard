@@ -19,21 +19,28 @@ function normalizePrivateKey(raw: string): string {
 
   // If the key is pasted as a single line (or has extra whitespace),
   // re-wrap it into a valid PEM block to avoid OpenSSL decoder errors.
-  const header = '-----BEGIN PRIVATE KEY-----';
-  const footer = '-----END PRIVATE KEY-----';
-  const hIdx = k.indexOf(header);
-  const fIdx = k.indexOf(footer);
-  if (hIdx !== -1 && fIdx !== -1 && fIdx > hIdx) {
+  const tryRewrap = (header: string, footer: string): string | null => {
+    const hIdx = k.indexOf(header);
+    const fIdx = k.indexOf(footer);
+    if (hIdx === -1 || fIdx === -1 || fIdx <= hIdx) return null;
     const between = k
       .slice(hIdx + header.length, fIdx)
       .replace(/[\s\r\n]+/g, ''); // remove all whitespace/newlines
-    // Rewrap base64 content to 64-char lines
+    if (!between) return null;
     const lines: string[] = [];
     for (let i = 0; i < between.length; i += 64) {
       lines.push(between.slice(i, i + 64));
     }
     return [header, ...lines, footer, ''].join('\n');
-  }
+  };
+
+  // PKCS8
+  const pkcs8 = tryRewrap('-----BEGIN PRIVATE KEY-----', '-----END PRIVATE KEY-----');
+  if (pkcs8) return pkcs8;
+
+  // PKCS1 (common older format)
+  const pkcs1 = tryRewrap('-----BEGIN RSA PRIVATE KEY-----', '-----END RSA PRIVATE KEY-----');
+  if (pkcs1) return pkcs1;
 
   return k;
 }
