@@ -18,7 +18,15 @@ function parseServiceAccountJson(raw: string): { client_email: string; private_k
 function loadFromJsonEnv(envName: string): { client_email: string; private_key: string } | null {
   const raw = process.env[envName]?.trim();
   if (!raw) return null;
-  return parseServiceAccountJson(raw);
+  try {
+    return parseServiceAccountJson(raw);
+  } catch (e: any) {
+    // On platforms like Vercel, env vars are frequently pasted with accidental quotes/newlines,
+    // which makes the JSON invalid. Treat invalid JSON as "unset" so we can fall back
+    // to other credential sources (file path or classic email+key).
+    console.warn(`[googleSheetsAuth] Invalid JSON in ${envName}: ${e?.message || e}`);
+    return null;
+  }
 }
 
 function loadFromFileEnv(envName: string): { client_email: string; private_key: string } | null {
