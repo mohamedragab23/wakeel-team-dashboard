@@ -3,6 +3,12 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install --legacy-peer-deps",
   "framework": "nextjs",
-  "regions": ["iad1"]
+  "regions": ["iad1"],
+  "crons": [
+    {
+      "path": "/api/cron/rooster-sync",
+      "schedule": "0 * * * *"
+    }
+  ]
 }
 
