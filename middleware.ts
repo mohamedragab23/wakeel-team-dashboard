@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 
 export function middleware(request: NextRequest) {
   // Allow public routes
-  const publicRoutes = ['/', '/api/auth/login', '/api/auth/verify'];
+  const publicRoutes = ['/', '/api/auth/login', '/api/auth/verify', '/api/health/google-sheets'];
   const isPublicRoute = publicRoutes.some((route) => request.nextUrl.pathname === route);
 
   if (isPublicRoute) {
