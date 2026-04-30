@@ -1,5 +1,7 @@
 import { Resvg } from '@resvg/resvg-js';
 import type { SupervisorShiftSummary } from '@/lib/supervisorNotifier';
+import fs from 'node:fs';
+import path from 'node:path';
 
 function esc(s: string) {
   return String(s ?? '')
@@ -26,6 +28,13 @@ export function renderSupervisorSummaryPng(params: {
   rows: SupervisorShiftSummary[];
 }): Uint8Array {
   const { title, date, cityLabel, rows } = params;
+
+  // Embed Arabic fonts to ensure text renders on Vercel (no system fonts).
+  const fontDir = path.join(process.cwd(), 'lib', 'fonts');
+  const regularTtf = fs.readFileSync(path.join(fontDir, 'NotoNaskhArabic-Regular.ttf'));
+  const boldTtf = fs.readFileSync(path.join(fontDir, 'NotoNaskhArabic-Bold.ttf'));
+  const regularB64 = regularTtf.toString('base64');
+  const boldB64 = boldTtf.toString('base64');
 
   const width = 1400;
   const pad = 28;
@@ -109,6 +118,21 @@ ${tds}
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
   <defs>
+    <style>
+      @font-face {
+        font-family: 'NotoNaskhArabic';
+        src: url("data:font/ttf;base64,${regularB64}") format("truetype");
+        font-weight: 400;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: 'NotoNaskhArabic';
+        src: url("data:font/ttf;base64,${boldB64}") format("truetype");
+        font-weight: 700;
+        font-style: normal;
+      }
+      text { font-family: 'NotoNaskhArabic', Arial, sans-serif; }
+    </style>
     <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
       <stop offset="0%" stop-color="#0B0F19"/>
       <stop offset="55%" stop-color="#0F1628"/>
@@ -118,10 +142,10 @@ ${tds}
 
   <rect x="0" y="0" width="${width}" height="${height}" fill="url(#bg)" />
 
-  <text x="${pad}" y="46" fill="#EAF0FF" font-size="24" font-weight="800" font-family="Arial, sans-serif" direction="rtl">${esc(
+  <text x="${pad}" y="46" fill="#EAF0FF" font-size="24" font-weight="800" direction="rtl">${esc(
     title
   )}</text>
-  <text x="${pad}" y="78" fill="rgba(234,240,255,0.75)" font-size="14" font-weight="500" font-family="Arial, sans-serif" direction="rtl">${esc(
+  <text x="${pad}" y="78" fill="rgba(234,240,255,0.75)" font-size="14" font-weight="500" direction="rtl">${esc(
     `المحافظة/المدينة: ${cityLabel}`
   )}</text>
 
