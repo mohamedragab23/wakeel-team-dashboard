@@ -72,6 +72,12 @@ export async function GET(req: NextRequest) {
         notBooked: analyzed.metrics?.notBooked ?? null,
         supervisorsCount: Array.isArray(summaryForToday) ? summaryForToday.length : 0,
       },
+      envCheck: {
+        hasTelegramBotToken: !!process.env.TELEGRAM_BOT_TOKEN?.trim(),
+        hasTelegramDefaultChatId: !!process.env.TELEGRAM_DEFAULT_CHAT_ID?.trim(),
+        hasWhatsApp: !!(process.env.WHATSAPP_TOKEN?.trim() && process.env.WHATSAPP_PHONE_NUMBER_ID?.trim()),
+        hasEmailResend: !!(process.env.RESEND_API_KEY?.trim() && process.env.RESEND_FROM_EMAIL?.trim()),
+      },
       notify: notifyResult,
     });
   } catch (error: any) {
