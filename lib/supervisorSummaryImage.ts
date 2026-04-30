@@ -29,6 +29,9 @@ function renderFallbackLatinPng(params: {
   rows: SupervisorShiftSummary[];
 }): Uint8Array {
   const { title, date, cityLabel, rows } = params;
+  const fontDir = path.join(process.cwd(), 'lib', 'fonts');
+  const fontRegularPath = path.join(fontDir, 'NotoSans-Regular.ttf');
+  const fontBoldPath = path.join(fontDir, 'NotoSans-Bold.ttf');
   const width = 1400;
   const pad = 28;
   const headerH = 58;
@@ -123,8 +126,9 @@ ${tds}
     fitTo: { mode: 'width', value: width },
     background: 'transparent',
     font: {
-      loadSystemFonts: true,
-      defaultFontFamily: 'Arial',
+      loadSystemFonts: false,
+      fontFiles: [fontRegularPath, fontBoldPath],
+      defaultFontFamily: 'NotoSans',
     },
   });
   return resvg.render().asPng();
