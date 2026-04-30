@@ -22,12 +22,20 @@ const nextConfig = {
   },
   
   // Webpack optimizations - minimal to avoid build issues
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     // Ensure proper encoding
     config.resolve = {
       ...config.resolve,
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
     };
+
+    // Native modules (e.g. .node) must not be bundled by webpack.
+    // We load them at runtime in the Node.js server environment.
+    if (isServer) {
+      config.externals = config.externals || [];
+      config.externals.push('@resvg/resvg-js');
+    }
+
     return config;
   },
   
