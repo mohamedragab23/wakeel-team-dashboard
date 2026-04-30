@@ -155,14 +155,15 @@ export async function renderSupervisorSummaryPng(params: {
   const headerH = 58;
   const rowH = 48;
 
+  // English-only labels to avoid unreadable squares on some renderers.
   const columns: Array<{ key: keyof SupervisorShiftSummary | 'date' | 'pct'; label: string; w: number }> = [
-    { key: 'supervisor', label: 'المشرف', w: 360 },
-    { key: 'date', label: 'التاريخ', w: 150 },
-    { key: 'total', label: 'الإجمالي', w: 110 },
-    { key: 'booked', label: 'الحاجزين', w: 110 },
-    { key: 'notBooked', label: 'غير الحاجزين', w: 130 },
-    { key: 'pct', label: 'نسبة الحاجزين', w: 140 },
-    { key: 'totalBookedHours', label: 'إجمالي ساعات الحاجزين', w: 200 },
+    { key: 'supervisor', label: 'Supervisor', w: 360 },
+    { key: 'date', label: 'Date', w: 150 },
+    { key: 'total', label: 'Total', w: 110 },
+    { key: 'booked', label: 'Booked', w: 110 },
+    { key: 'notBooked', label: 'Not booked', w: 130 },
+    { key: 'pct', label: 'Booked %', w: 140 },
+    { key: 'totalBookedHours', label: 'Booked hours', w: 200 },
   ];
 
   const tableW = columns.reduce((s, c) => s + c.w, 0);
@@ -180,7 +181,7 @@ export async function renderSupervisorSummaryPng(params: {
         display: 'flex',
         flexDirection: 'column',
         gap: 14,
-        direction: 'rtl',
+        direction: 'ltr',
         fontFamily: 'NotoNaskhArabic',
       },
       children: [
@@ -195,7 +196,7 @@ export async function renderSupervisorSummaryPng(params: {
           type: 'div',
           props: {
             style: { fontSize: 16, opacity: 0.8 },
-            children: `المحافظة/المدينة: ${cityLabel}`,
+            children: `City: ${cityLabel} — Date: ${date}`,
           },
         },
         {
