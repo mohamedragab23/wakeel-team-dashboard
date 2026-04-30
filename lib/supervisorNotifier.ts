@@ -1,4 +1,6 @@
 import { getSupervisorContacts } from '@/lib/supervisorContacts';
+import { renderSupervisorSummaryPng } from '@/lib/supervisorSummaryImage';
+import { Buffer } from 'buffer';
 
 export type SupervisorShiftSummary = {
   supervisor: string;
@@ -131,9 +133,16 @@ export async function notifySupervisorsShiftSummary(params: {
 
   // If a default (group) chat is configured, send one consolidated message and stop.
   if (preferTelegram && defaultTelegramChatId) {
-    await sendViaTelegram({
+    const png = renderSupervisorSummaryPng({
+      title,
+      date,
+      cityLabel,
+      rows: summaryBySupervisor,
+    });
+    await sendViaTelegramPhoto({
       chatId: defaultTelegramChatId,
-      text: buildGroupSummaryText({ title, rows: summaryBySupervisor }),
+      caption: title,
+      pngBytes: png,
     });
     return { sent: 1, skipped: [], failed: [] };
   }
@@ -272,6 +281,29 @@ async function sendViaTelegram(params: { chatId: string; text: string }) {
   if (!res.ok) {
     const t = await res.text().catch(() => '');
     throw new Error(`Telegram send failed: ${res.status} ${t}`.trim());
+  }
+}
+
+async function sendViaTelegramPhoto(params: { chatId: string; caption: string; pngBytes: Uint8Array }) {
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token) throw new Error('Telegram is not configured (TELEGRAM_BOT_TOKEN).');
+
+  const url = `https://api.telegram.org/bot${token}/sendPhoto`;
+
+  const fd = new FormData();
+  fd.append('chat_id', params.chatId);
+  fd.append('caption', params.caption);
+  const buf = Buffer.from(params.pngBytes);
+  fd.append('photo', new Blob([buf as any], { type: 'image/png' }), 'supervisors-summary.png');
+
+  const res = await fetch(url, {
+    method: 'POST',
+    body: fd as any,
+  });
+
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`Telegram sendPhoto failed: ${res.status} ${t}`.trim());
   }
 }
 
