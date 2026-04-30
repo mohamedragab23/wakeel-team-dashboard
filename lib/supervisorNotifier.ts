@@ -106,6 +106,7 @@ export async function notifySupervisorsShiftSummary(params: {
   const byName = new Map(contacts.map((c) => [norm(c.name).toLowerCase(), c]));
 
   const title = `ملخص الشفتات — ${date} — ${cityLabel || '—'}`;
+  const defaultTelegramChatId = process.env.TELEGRAM_DEFAULT_CHAT_ID?.trim();
   const linesFor = (r: SupervisorShiftSummary) => {
     const pct = `${Number(r.pct || 0).toFixed(1)}%`;
     const hrs = Number(r.totalBookedHours || 0).toFixed(2);
@@ -127,6 +128,15 @@ export async function notifySupervisorsShiftSummary(params: {
   let sent = 0;
   const skipped: Array<{ supervisor: string; reason: string }> = [];
   const failed: Array<{ supervisor: string; error: string }> = [];
+
+  // If a default (group) chat is configured, send one consolidated message and stop.
+  if (preferTelegram && defaultTelegramChatId) {
+    await sendViaTelegram({
+      chatId: defaultTelegramChatId,
+      text: buildGroupSummaryText({ title, rows: summaryBySupervisor }),
+    });
+    return { sent: 1, skipped: [], failed: [] };
+  }
 
   for (const row of summaryBySupervisor) {
     const c = byName.get(norm(row.supervisor).toLowerCase());
@@ -156,12 +166,13 @@ export async function notifySupervisorsShiftSummary(params: {
 
     // 2) Telegram
     if (preferTelegram) {
-      if (!c.telegramChatId) {
+      const chatId = c.telegramChatId || defaultTelegramChatId;
+      if (!chatId) {
         skipped.push({ supervisor: row.supervisor, reason: 'لا يوجد Telegram Chat ID في جدول المشرفين' });
       } else {
         try {
           await sendViaTelegram({
-            chatId: c.telegramChatId,
+            chatId,
             text: `${title}\n\n${linesFor(row)}`,
           });
           sent += 1;
@@ -262,5 +273,24 @@ async function sendViaTelegram(params: { chatId: string; text: string }) {
     const t = await res.text().catch(() => '');
     throw new Error(`Telegram send failed: ${res.status} ${t}`.trim());
   }
+}
+
+function buildGroupSummaryText(params: { title: string; rows: SupervisorShiftSummary[] }) {
+  const { title, rows } = params;
+  const lines: string[] = [title, ''];
+  for (const r of rows) {
+    const pct = `${Number(r.pct || 0).toFixed(1)}%`;
+    const hrs = Number(r.totalBookedHours || 0).toFixed(2);
+    lines.push(
+      `*${r.supervisor}*`,
+      `- الإجمالي: ${r.total}`,
+      `- الحاجزين: ${r.booked}`,
+      `- غير الحاجزين: ${r.notBooked}`,
+      `- نسبة الحاجزين: ${pct}`,
+      `- ساعات الحاجزين: ${hrs}`,
+      ''
+    );
+  }
+  return lines.join('\n').trim();
 }
 
