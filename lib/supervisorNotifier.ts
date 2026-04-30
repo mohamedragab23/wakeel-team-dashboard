@@ -133,7 +133,7 @@ export async function notifySupervisorsShiftSummary(params: {
 
   // If a default (group) chat is configured, send one consolidated message and stop.
   if (preferTelegram && defaultTelegramChatId) {
-    const png = renderSupervisorSummaryPng({
+    const png = await renderSupervisorSummaryPng({
       title,
       date,
       cityLabel,

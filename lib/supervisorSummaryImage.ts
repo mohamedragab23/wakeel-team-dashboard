@@ -1,4 +1,5 @@
 import { Resvg } from '@resvg/resvg-js';
+import satori from 'satori';
 import type { SupervisorShiftSummary } from '@/lib/supervisorNotifier';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,142 +22,157 @@ function fmtNum(n: number) {
   return String(Math.round(n * 100) / 100);
 }
 
-export function renderSupervisorSummaryPng(params: {
+export async function renderSupervisorSummaryPng(params: {
   title: string;
   date: string;
   cityLabel: string;
   rows: SupervisorShiftSummary[];
-}): Uint8Array {
+}): Promise<Uint8Array> {
   const { title, date, cityLabel, rows } = params;
 
   // Embed Arabic fonts to ensure text renders on Vercel (no system fonts).
   const fontDir = path.join(process.cwd(), 'lib', 'fonts');
   const regularTtf = fs.readFileSync(path.join(fontDir, 'NotoNaskhArabic-Regular.ttf'));
   const boldTtf = fs.readFileSync(path.join(fontDir, 'NotoNaskhArabic-Bold.ttf'));
-  const regularB64 = regularTtf.toString('base64');
-  const boldB64 = boldTtf.toString('base64');
 
   const width = 1400;
   const pad = 28;
-  const headerH = 64;
-  const rowH = 52;
-  const tableTop = 110;
-  const tableW = width - pad * 2;
-  const height = tableTop + headerH + rows.length * rowH + 40;
+  const headerH = 58;
+  const rowH = 48;
 
-  const col = {
-    supervisor: 360,
-    date: 150,
-    total: 110,
-    booked: 110,
-    notBooked: 130,
-    pct: 140,
-    hours: 200,
-  };
-
-  const cols = [
-    { key: 'supervisor', label: 'المشرف', w: col.supervisor, align: 'start' as const },
-    { key: 'date', label: 'التاريخ', w: col.date, align: 'middle' as const },
-    { key: 'total', label: 'الإجمالي', w: col.total, align: 'end' as const },
-    { key: 'booked', label: 'الحاجزين', w: col.booked, align: 'end' as const },
-    { key: 'notBooked', label: 'غير الحاجزين', w: col.notBooked, align: 'end' as const },
-    { key: 'pct', label: 'نسبة الحاجزين', w: col.pct, align: 'end' as const },
-    { key: 'hours', label: 'إجمالي ساعات الحاجزين', w: col.hours, align: 'end' as const },
+  const columns: Array<{ key: keyof SupervisorShiftSummary | 'date' | 'pct'; label: string; w: number }> = [
+    { key: 'supervisor', label: 'المشرف', w: 360 },
+    { key: 'date', label: 'التاريخ', w: 150 },
+    { key: 'total', label: 'الإجمالي', w: 110 },
+    { key: 'booked', label: 'الحاجزين', w: 110 },
+    { key: 'notBooked', label: 'غير الحاجزين', w: 130 },
+    { key: 'pct', label: 'نسبة الحاجزين', w: 140 },
+    { key: 'totalBookedHours', label: 'إجمالي ساعات الحاجزين', w: 200 },
   ];
 
-  const headerCells = (() => {
-    let x = pad;
-    return cols
-      .map((c) => {
-        const cx = x;
-        x += c.w;
-        const tx = c.align === 'start' ? cx + 16 : c.align === 'middle' ? cx + c.w / 2 : cx + c.w - 16;
-        const anchor = c.align === 'start' ? 'start' : c.align === 'middle' ? 'middle' : 'end';
-        return `<text x="${tx}" y="${tableTop + 40}" fill="#EAF0FF" font-size="16" font-weight="700" text-anchor="${anchor}" direction="rtl">${esc(
-          c.label
-        )}</text>
-<line x1="${cx}" y1="${tableTop}" x2="${cx}" y2="${tableTop + headerH + rows.length * rowH}" stroke="rgba(255,255,255,0.06)" />`;
-      })
-      .join('\n');
-  })();
+  const tableW = columns.reduce((s, c) => s + c.w, 0);
 
-  const rowCells = rows
-    .map((r, i) => {
-      const y = tableTop + headerH + i * rowH;
-      const bg = i % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0)';
-      let x = pad;
+  // Build a React-like tree for satori (no JSX required).
+  const el: any = {
+    type: 'div',
+    props: {
+      style: {
+        width,
+        height: 200 + headerH + rows.length * rowH,
+        padding: pad,
+        background: 'linear-gradient(135deg, #0B0F19 0%, #0F1628 55%, #0A1020 100%)',
+        color: '#EAF0FF',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+        direction: 'rtl',
+        fontFamily: 'NotoNaskhArabic',
+      },
+      children: [
+        {
+          type: 'div',
+          props: {
+            style: { fontSize: 28, fontWeight: 700, lineHeight: 1.2 },
+            children: title,
+          },
+        },
+        {
+          type: 'div',
+          props: {
+            style: { fontSize: 16, opacity: 0.8 },
+            children: `المحافظة/المدينة: ${cityLabel}`,
+          },
+        },
+        {
+          type: 'div',
+          props: {
+            style: {
+              width: tableW,
+              borderRadius: 16,
+              overflow: 'hidden',
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(0,0,0,0.28)',
+            },
+            children: [
+              // Header
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    height: headerH,
+                    background: 'rgba(20,24,35,0.85)',
+                    borderBottom: '1px solid rgba(255,255,255,0.12)',
+                  },
+                  children: columns.map((c) => ({
+                    type: 'div',
+                    props: {
+                      style: {
+                        width: c.w,
+                        padding: '0 14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: c.key === 'supervisor' ? 'flex-start' : 'flex-end',
+                        fontSize: 16,
+                        fontWeight: 700,
+                      },
+                      children: c.label,
+                    },
+                  })),
+                },
+              },
+              // Rows
+              ...rows.map((r, idx) => ({
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    height: rowH,
+                    background: idx % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'transparent',
+                    borderBottom: '1px solid rgba(255,255,255,0.08)',
+                  },
+                  children: columns.map((c) => {
+                    let v: any = '';
+                    if (c.key === 'date') v = date;
+                    else if (c.key === 'pct') v = fmtPct(r.pct);
+                    else if (c.key === 'totalBookedHours') v = fmtNum(Number(r.totalBookedHours || 0));
+                    else v = (r as any)[c.key] ?? '';
 
-      const values: Record<string, string> = {
-        supervisor: esc(r.supervisor),
-        date: esc(date),
-        total: esc(String(r.total ?? 0)),
-        booked: esc(String(r.booked ?? 0)),
-        notBooked: esc(String(r.notBooked ?? 0)),
-        pct: esc(fmtPct(r.pct)),
-        hours: esc(fmtNum(Number(r.totalBookedHours || 0))),
-      };
+                    const color = c.key === 'pct' ? '#66E3FF' : 'rgba(215,226,255,0.95)';
+                    return {
+                      type: 'div',
+                      props: {
+                        style: {
+                          width: c.w,
+                          padding: '0 14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: c.key === 'supervisor' ? 'flex-start' : 'flex-end',
+                          fontSize: 15,
+                          fontWeight: 500,
+                          color,
+                        },
+                        children: String(v),
+                      },
+                    };
+                  }),
+                },
+              })),
+            ],
+          },
+        },
+      ],
+    },
+  };
 
-      const tds = cols
-        .map((c) => {
-          const cx = x;
-          x += c.w;
-          const tx = c.align === 'start' ? cx + 16 : c.align === 'middle' ? cx + c.w / 2 : cx + c.w - 16;
-          const anchor = c.align === 'start' ? 'start' : c.align === 'middle' ? 'middle' : 'end';
-          const color = c.key === 'pct' ? '#66E3FF' : '#D7E2FF';
-          return `<text x="${tx}" y="${y + 34}" fill="${color}" font-size="15" font-weight="500" text-anchor="${anchor}" direction="rtl">${
-            values[c.key] ?? ''
-          }</text>`;
-        })
-        .join('\n');
-
-      return `<rect x="${pad}" y="${y}" width="${tableW}" height="${rowH}" fill="${bg}" />
-${tds}
-<line x1="${pad}" y1="${y + rowH}" x2="${pad + tableW}" y2="${y + rowH}" stroke="rgba(255,255,255,0.06)" />`;
-    })
-    .join('\n');
-
-  const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-  <defs>
-    <style>
-      @font-face {
-        font-family: 'NotoNaskhArabic';
-        src: url("data:font/ttf;base64,${regularB64}") format("truetype");
-        font-weight: 400;
-        font-style: normal;
-      }
-      @font-face {
-        font-family: 'NotoNaskhArabic';
-        src: url("data:font/ttf;base64,${boldB64}") format("truetype");
-        font-weight: 700;
-        font-style: normal;
-      }
-      text { font-family: 'NotoNaskhArabic', Arial, sans-serif; }
-    </style>
-    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0%" stop-color="#0B0F19"/>
-      <stop offset="55%" stop-color="#0F1628"/>
-      <stop offset="100%" stop-color="#0A1020"/>
-    </linearGradient>
-  </defs>
-
-  <rect x="0" y="0" width="${width}" height="${height}" fill="url(#bg)" />
-
-  <text x="${pad}" y="46" fill="#EAF0FF" font-size="24" font-weight="800" direction="rtl">${esc(
-    title
-  )}</text>
-  <text x="${pad}" y="78" fill="rgba(234,240,255,0.75)" font-size="14" font-weight="500" direction="rtl">${esc(
-    `المحافظة/المدينة: ${cityLabel}`
-  )}</text>
-
-  <rect x="${pad}" y="${tableTop}" width="${tableW}" height="${headerH + rows.length * rowH}" rx="14" ry="14" fill="rgba(0,0,0,0.28)" stroke="rgba(255,255,255,0.10)" />
-  <rect x="${pad}" y="${tableTop}" width="${tableW}" height="${headerH}" rx="14" ry="14" fill="rgba(20,24,35,0.85)" />
-
-  ${headerCells}
-  <line x1="${pad}" y1="${tableTop + headerH}" x2="${pad + tableW}" y2="${tableTop + headerH}" stroke="rgba(255,255,255,0.10)" />
-
-  ${rowCells}
-</svg>`;
+  const svg = await satori(el, {
+    width,
+    height: 200 + headerH + rows.length * rowH,
+    fonts: [
+      { name: 'NotoNaskhArabic', data: regularTtf, weight: 400, style: 'normal' },
+      { name: 'NotoNaskhArabic', data: boldTtf, weight: 700, style: 'normal' },
+    ],
+  });
 
   const resvg = new Resvg(svg, {
     fitTo: { mode: 'width', value: width },
