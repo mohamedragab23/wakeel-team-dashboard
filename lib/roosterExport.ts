@@ -1,4 +1,5 @@
 import { formatIsoDateInTimeZone, addDays } from '@/lib/timezone';
+import { getRoosterSessionFromSheet } from '@/lib/roosterSession';
 
 export type RoosterExportParams = {
   cityId: string; // e.g. 200
@@ -58,6 +59,13 @@ export async function exportRoosterCsv(params: RoosterExportParams): Promise<{ f
     } catch {
       throw new Error('ROOSTER_EXPORT_HEADERS_JSON must be valid JSON object.');
     }
+  }
+
+  // Prefer runtime cookie stored in Google Sheet (avoids redeploy on cookie refresh).
+  // If present, it overrides any Cookie header in ROOSTER_EXPORT_HEADERS_JSON.
+  const session = await getRoosterSessionFromSheet();
+  if (session?.cookie) {
+    extraHeaders = { ...extraHeaders, Cookie: session.cookie };
   }
 
   const res = await fetch(url, {
