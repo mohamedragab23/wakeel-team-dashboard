@@ -29,6 +29,9 @@ function renderFallbackLatinPng(params: {
   rows: SupervisorShiftSummary[];
 }): Uint8Array {
   const { title, date, cityLabel, rows } = params;
+  const fontDir = path.join(process.cwd(), 'lib', 'fonts');
+  const fontRegularPath = path.join(fontDir, 'NotoNaskhArabic-Regular.ttf');
+  const fontBoldPath = path.join(fontDir, 'NotoNaskhArabic-Bold.ttf');
   const width = 1400;
   const pad = 28;
   const headerH = 58;
@@ -119,7 +122,15 @@ ${tds}
   ${rowCells}
 </svg>`;
 
-  const resvg = new Resvg(svg, { fitTo: { mode: 'width', value: width }, background: 'transparent' });
+  const resvg = new Resvg(svg, {
+    fitTo: { mode: 'width', value: width },
+    background: 'transparent',
+    font: {
+      loadSystemFonts: false,
+      fontFiles: [fontRegularPath, fontBoldPath],
+      defaultFontFamily: 'NotoNaskhArabic',
+    },
+  });
   return resvg.render().asPng();
 }
 
@@ -134,6 +145,8 @@ export async function renderSupervisorSummaryPng(params: {
   // Embed Arabic fonts (best effort). If Arabic shaping isn't supported in the renderer runtime,
   // we fall back to a Latin table to avoid sending an empty image.
   const fontDir = path.join(process.cwd(), 'lib', 'fonts');
+  const fontRegularPath = path.join(fontDir, 'NotoNaskhArabic-Regular.ttf');
+  const fontBoldPath = path.join(fontDir, 'NotoNaskhArabic-Bold.ttf');
   const regularTtf = fs.readFileSync(path.join(fontDir, 'NotoNaskhArabic-Regular.ttf'));
   const boldTtf = fs.readFileSync(path.join(fontDir, 'NotoNaskhArabic-Bold.ttf'));
 
@@ -280,6 +293,11 @@ export async function renderSupervisorSummaryPng(params: {
     const resvg = new Resvg(svg, {
       fitTo: { mode: 'width', value: width },
       background: 'transparent',
+      font: {
+        loadSystemFonts: false,
+        fontFiles: [fontRegularPath, fontBoldPath],
+        defaultFontFamily: 'NotoNaskhArabic',
+      },
     });
 
     return resvg.render().asPng();
