@@ -108,6 +108,7 @@ export async function notifySupervisorsShiftSummary(params: {
   const byName = new Map(contacts.map((c) => [norm(c.name).toLowerCase(), c]));
 
   const title = `ملخص الشفتات — ${date} — ${cityLabel || '—'}`;
+  const imageTitle = `Shifts summary — ${cityLabel || '—'} — ${date}`;
   const defaultTelegramChatId = process.env.TELEGRAM_DEFAULT_CHAT_ID?.trim();
   const linesFor = (r: SupervisorShiftSummary) => {
     const pct = `${Number(r.pct || 0).toFixed(1)}%`;
@@ -134,14 +135,14 @@ export async function notifySupervisorsShiftSummary(params: {
   // If a default (group) chat is configured, send one consolidated message and stop.
   if (preferTelegram && defaultTelegramChatId) {
     const png = await renderSupervisorSummaryPng({
-      title,
+      title: imageTitle,
       date,
       cityLabel,
       rows: summaryBySupervisor,
     });
     await sendViaTelegramPhoto({
       chatId: defaultTelegramChatId,
-      caption: title,
+      caption: imageTitle,
       pngBytes: png,
     });
     return { sent: 1, skipped: [], failed: [] };
