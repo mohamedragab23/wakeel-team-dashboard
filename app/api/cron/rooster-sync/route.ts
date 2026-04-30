@@ -42,23 +42,42 @@ export async function GET(req: NextRequest) {
       selectedDates: [],
     });
 
-    const summaryForToday = analyzed.reports?.supervisorSummaryByDate?.[startDate] || [];
+    const summaryForStart = analyzed.reports?.supervisorSummaryByDate?.[startDate] || [];
+    const summaryForEnd = analyzed.reports?.supervisorSummaryByDate?.[endDate] || [];
 
-    const notifyResult = summaryForToday.length
-      ? await notifySupervisorsShiftSummary({
-          date: startDate,
-          cityLabel,
-          summaryBySupervisor: summaryForToday.map((r: any) => ({
-            supervisor: String(r.supervisor || '').trim(),
+    const notifyStart =
+      summaryForStart.length > 0
+        ? await notifySupervisorsShiftSummary({
             date: startDate,
-            total: Number(r.total || 0),
-            booked: Number(r.booked || 0),
-            notBooked: Number(r.notBooked || 0),
-            pct: Number(r.pct || 0),
-            totalBookedHours: Number(r.totalBookedHours || 0),
-          })),
-        })
-      : { sent: 0, skipped: [], failed: [{ supervisor: '*', error: 'No supervisors summary for today' }] };
+            cityLabel,
+            summaryBySupervisor: summaryForStart.map((r: any) => ({
+              supervisor: String(r.supervisor || '').trim(),
+              date: startDate,
+              total: Number(r.total || 0),
+              booked: Number(r.booked || 0),
+              notBooked: Number(r.notBooked || 0),
+              pct: Number(r.pct || 0),
+              totalBookedHours: Number(r.totalBookedHours || 0),
+            })),
+          })
+        : { sent: 0, skipped: [], failed: [{ supervisor: '*', error: 'No supervisors summary for startDate' }] };
+
+    const notifyEnd =
+      summaryForEnd.length > 0
+        ? await notifySupervisorsShiftSummary({
+            date: endDate,
+            cityLabel,
+            summaryBySupervisor: summaryForEnd.map((r: any) => ({
+              supervisor: String(r.supervisor || '').trim(),
+              date: endDate,
+              total: Number(r.total || 0),
+              booked: Number(r.booked || 0),
+              notBooked: Number(r.notBooked || 0),
+              pct: Number(r.pct || 0),
+              totalBookedHours: Number(r.totalBookedHours || 0),
+            })),
+          })
+        : { sent: 0, skipped: [], failed: [{ supervisor: '*', error: 'No supervisors summary for endDate' }] };
 
     return NextResponse.json({
       success: true,
@@ -70,7 +89,8 @@ export async function GET(req: NextRequest) {
         totalEmployees: analyzed.metrics?.totalEmployees ?? null,
         booked: analyzed.metrics?.booked ?? null,
         notBooked: analyzed.metrics?.notBooked ?? null,
-        supervisorsCount: Array.isArray(summaryForToday) ? summaryForToday.length : 0,
+        supervisorsCountStart: Array.isArray(summaryForStart) ? summaryForStart.length : 0,
+        supervisorsCountEnd: Array.isArray(summaryForEnd) ? summaryForEnd.length : 0,
       },
       envCheck: {
         hasTelegramBotToken: !!process.env.TELEGRAM_BOT_TOKEN?.trim(),
@@ -78,7 +98,10 @@ export async function GET(req: NextRequest) {
         hasWhatsApp: !!(process.env.WHATSAPP_TOKEN?.trim() && process.env.WHATSAPP_PHONE_NUMBER_ID?.trim()),
         hasEmailResend: !!(process.env.RESEND_API_KEY?.trim() && process.env.RESEND_FROM_EMAIL?.trim()),
       },
-      notify: notifyResult,
+      notify: {
+        startDate: notifyStart,
+        endDate: notifyEnd,
+      },
     });
   } catch (error: any) {
     console.error('[api/cron/rooster-sync]', error);
