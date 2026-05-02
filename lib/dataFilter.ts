@@ -2,6 +2,59 @@ import { getSupervisorRiders } from './dataService';
 import { getSheetData } from './googleSheets';
 
 /**
+ * Rider codes from approved termination requests for this supervisor.
+ * يُحسب أداؤهم مع المشرف ما لم يُعاد تعيين المندوب لمشرف آخر (يظل في الإقالة أو غير معيّن).
+ */
+export async function getApprovedTerminatedRiderCodesForSupervisor(
+  supervisorCode: string
+): Promise<Set<string>> {
+  const codes = new Set<string>();
+  const supTrim = (supervisorCode ?? '').toString().trim();
+  if (!supTrim) return codes;
+  try {
+    let assignmentByCode = new Map<string, string>();
+    try {
+      const ridersSheet = await getSheetData('المناديب');
+      for (let i = 1; i < ridersSheet.length; i++) {
+        const row = ridersSheet[i];
+        if (!row?.[0]) continue;
+        const code = row[0].toString().trim();
+        const sup = row[3] != null ? row[3].toString().trim() : '';
+        if (code) assignmentByCode.set(code, sup);
+      }
+    } catch {
+      assignmentByCode = new Map();
+    }
+
+    const data = await getSheetData('طلبات_الإقالة');
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row || row.length < 6) continue;
+      if (row[0]?.toString().trim() !== supTrim) continue;
+      if (row[5]?.toString().trim().toLowerCase() !== 'approved') continue;
+      const rc = row[2]?.toString().trim();
+      if (!rc) continue;
+
+      const currentSup = assignmentByCode.has(rc) ? assignmentByCode.get(rc)! : '';
+      // مندوب محذوف من الورقة: لا يزال يُحسب للمشرف الأصلي
+      if (!assignmentByCode.has(rc)) {
+        codes.add(rc);
+        continue;
+      }
+      // غير معيّن بعد الإقالة، أو ما زال تحت نفس المشرف (نادر)
+      if (currentSup === '' || currentSup === supTrim) {
+        codes.add(rc);
+        continue;
+      }
+      // معيّن لمشرف آخر بعد الموافقة — لا يُدمج في أداء هذا المشرف
+    }
+  } catch {
+    // sheet missing
+  }
+  return codes;
+}
+
+/**
  * Centralized data filtering system for supervisor-specific data
  */
 export async function getSupervisorFilteredData<T extends { riderCode: string }>(
@@ -84,8 +137,13 @@ export async function getSupervisorPerformanceFiltered(
 
     if (!allRidersMode) {
       const riders = await getSupervisorRiders(supervisorCode);
-      riderCodesExact = new Set(riders.map((r) => (r.code ?? '').toString().trim()));
+      const terminatedCodes = await getApprovedTerminatedRiderCodesForSupervisor(supervisorCode);
+      riderCodesExact = new Set(riders.map((r) => (r.code ?? '').toString().trim()).filter(Boolean));
       riderCodesNormalized = new Set(riders.map((r) => normalizeCode(r.code)));
+      for (const code of terminatedCodes) {
+        riderCodesExact.add(code);
+        riderCodesNormalized.add(normalizeCode(code));
+      }
 
       if (riderCodesExact.size === 0) {
         return [];

@@ -4,6 +4,17 @@ import { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
+interface PeriodStats {
+  orders: number;
+  hours: number;
+  break: number;
+  delay: number;
+  avgAcceptance: number;
+  records: number;
+  workDays: number;
+  debtAtEndOfPeriod: number | null;
+}
+
 interface TerminationRequest {
   id: number;
   supervisorCode: string;
@@ -15,6 +26,15 @@ interface TerminationRequest {
   requestDate: string;
   approvalDate: string;
   approvedBy: string;
+  debt?: number;
+  periodStats?: PeriodStats | null;
+}
+
+function defaultAdminStatsRange(): { from: string; to: string } {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 29);
+  return { from: start.toISOString().split('T')[0], to: end.toISOString().split('T')[0] };
 }
 
 export default function TerminationRequestsPage() {
@@ -27,17 +47,20 @@ export default function TerminationRequestsPage() {
   const [bulkApprovalOpen, setBulkApprovalOpen] = useState(false);
   const [bulkNewSupervisorCode, setBulkNewSupervisorCode] = useState('');
   const [bulkDeleteRider, setBulkDeleteRider] = useState(false);
+  const [{ from: statsFrom, to: statsTo }, setStatsRange] = useState(defaultAdminStatsRange);
   const queryClient = useQueryClient();
 
   const { data: requests, isLoading, refetch } = useQuery({
-    queryKey: ['termination-requests', statusFilter],
+    queryKey: ['termination-requests', statusFilter, statsFrom, statsTo],
     queryFn: async () => {
       const token = localStorage.getItem('token');
       const url = new URL('/api/termination-requests', window.location.origin);
       if (statusFilter !== 'all') {
         url.searchParams.append('status', statusFilter);
       }
-      
+      url.searchParams.set('statsFrom', statsFrom);
+      url.searchParams.set('statsTo', statsTo);
+
       const res = await fetch(url.toString(), {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -230,7 +253,40 @@ export default function TerminationRequestsPage() {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-semibold text-[#EAF0FF] mb-2">طلبات الإقالة</h1>
-          <p className="text-[rgba(234,240,255,0.70)]">إدارة طلبات إقالة المناديب من المشرفين</p>
+          <p className="text-[rgba(234,240,255,0.70)]">
+            إدارة طلبات الإقالة؛ الأداء المعروض يخص المشرف صاحب الطلب والفترة المحددة (يُحسب المندوب المقال ضمن إجمالي مشرفه للفترة ما لم يُنقل لمشرف آخر).
+          </p>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm p-4 border border-gray-100 space-y-3">
+          <p className="text-sm font-medium text-gray-800">فترة أداء المندوب (البيانات اليومية)</p>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-xs text-gray-600">
+              من
+              <input
+                type="date"
+                value={statsFrom}
+                onChange={(e) => setStatsRange((r) => ({ ...r, from: e.target.value }))}
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-gray-600">
+              إلى
+              <input
+                type="date"
+                value={statsTo}
+                onChange={(e) => setStatsRange((r) => ({ ...r, to: e.target.value }))}
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => setStatsRange(defaultAdminStatsRange())}
+              className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+            >
+              آخر 30 يوماً
+            </button>
+          </div>
         </div>
 
         {/* Status Filter */}
@@ -322,7 +378,7 @@ export default function TerminationRequestsPage() {
               </div>
             )}
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1100px]">
+              <table className="w-full min-w-[1500px]">
                 <thead className="bg-gray-50">
                   <tr>
                     {pendingRequests.length > 0 && (
@@ -338,6 +394,12 @@ export default function TerminationRequestsPage() {
                     )}
                     <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">المشرف</th>
                     <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">المندوب</th>
+                    <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">مديونية عند الطلب</th>
+                    <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">أوردرات الفترة</th>
+                    <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">ساعات</th>
+                    <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">أيام عمل</th>
+                    <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">قبول %</th>
+                    <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">مديونية آخر يوم</th>
                     <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">السبب</th>
                     <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">تاريخ الطلب</th>
                     <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الحالة</th>
@@ -372,6 +434,26 @@ export default function TerminationRequestsPage() {
                           <p className="font-medium text-gray-800">{request.riderName}</p>
                           <p className="text-xs text-gray-500">{request.riderCode}</p>
                         </div>
+                      </td>
+                      <td className="py-4 px-6 text-sm tabular-nums text-gray-800">
+                        {(Number(request.debt) || 0).toFixed(2)}
+                      </td>
+                      <td className="py-4 px-6 text-sm tabular-nums text-gray-800">
+                        {request.periodStats != null ? request.periodStats.orders : '—'}
+                      </td>
+                      <td className="py-4 px-6 text-sm tabular-nums text-gray-800">
+                        {request.periodStats != null ? request.periodStats.hours.toFixed(1) : '—'}
+                      </td>
+                      <td className="py-4 px-6 text-sm tabular-nums text-gray-800">
+                        {request.periodStats != null ? request.periodStats.workDays : '—'}
+                      </td>
+                      <td className="py-4 px-6 text-sm tabular-nums text-gray-800">
+                        {request.periodStats != null ? `${request.periodStats.avgAcceptance}%` : '—'}
+                      </td>
+                      <td className="py-4 px-6 text-sm tabular-nums text-gray-800">
+                        {request.periodStats != null && request.periodStats.debtAtEndOfPeriod != null
+                          ? Number(request.periodStats.debtAtEndOfPeriod).toFixed(2)
+                          : '—'}
                       </td>
                       <td className="py-4 px-6 text-sm text-gray-600 max-w-xs">
                         <p className="truncate" title={request.reason}>

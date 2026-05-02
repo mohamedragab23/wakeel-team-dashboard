@@ -8,6 +8,8 @@ import { verifyToken } from '@/lib/auth';
 import { getSupervisorRiders } from '@/lib/dataService';
 import { appendToSheet, getSheetData, updateSheetRow, ensureSheetExists } from '@/lib/googleSheets';
 import { updateRider } from '@/lib/adminService';
+import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
+import { computeWorkDaysByRider, type PerformanceRecord } from '@/lib/riderPerformanceAggregate';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +26,69 @@ function parseSheetDateValueToMs(v: any): number {
   // Prefer ISO-ish (YYYY-MM-DD) and common strings. Fallback: try Date().
   const d = /^\d{4}-\d{2}-\d{2}/.test(s) ? new Date(`${s}T00:00:00`) : new Date(s);
   return Number.isFinite(d.getTime()) ? d.getTime() : 0;
+}
+
+function normalizeRiderCodeMatch(code: any): string {
+  const s = (code ?? '').toString().trim();
+  if (!s) return '';
+  return s.replace(/^0+/, '') || '0';
+}
+
+function filterPerfForRider(perf: PerformanceRecord[], riderCode: string): PerformanceRecord[] {
+  const t = (riderCode ?? '').toString().trim();
+  const nt = normalizeRiderCodeMatch(t);
+  return perf.filter((p) => {
+    const c = (p.riderCode ?? '').toString().trim();
+    return c === t || normalizeRiderCodeMatch(c) === nt;
+  });
+}
+
+function aggregateRiderPeriodStats(perf: PerformanceRecord[]) {
+  let orders = 0;
+  let hours = 0;
+  let breakM = 0;
+  let delayM = 0;
+  let accSum = 0;
+  let accCnt = 0;
+  let latestDebt = 0;
+  let latestDebtMs = 0;
+
+  for (const p of perf) {
+    orders += p.orders || 0;
+    hours += Number(p.hours) || 0;
+    breakM += Number(p.break) || 0;
+    delayM += Number(p.delay) || 0;
+    const acceptanceStr = p.acceptance?.toString() || '0';
+    let acceptanceNum = parseFloat(acceptanceStr.replace('%', '').replace('٪', '')) || 0;
+    if (acceptanceNum > 0 && acceptanceNum <= 1) acceptanceNum *= 100;
+    if (acceptanceNum > 0) {
+      accSum += acceptanceNum;
+      accCnt += 1;
+    }
+    const d = new Date((p.date ?? '').toString().split('T')[0] + 'T12:00:00');
+    const ms = d.getTime();
+    if (Number.isFinite(ms) && ms >= latestDebtMs) {
+      latestDebtMs = ms;
+      latestDebt = Number(p.debt) || 0;
+    }
+  }
+
+  const codeSet = new Set(perf.map((r) => (r.riderCode ?? '').toString().trim()).filter(Boolean));
+  const workDaysMap = computeWorkDaysByRider(perf, codeSet);
+  let workDays = 0;
+  for (const v of workDaysMap.values()) workDays += v;
+
+  return {
+    orders,
+    hours,
+    break: breakM,
+    delay: delayM,
+    avgAcceptance: accCnt > 0 ? Math.round((accSum / accCnt) * 100) / 100 : 0,
+    records: perf.length,
+    workDays,
+    /** آخر مديونية مسجلة في البيانات اليومية ضمن الفترة */
+    debtAtEndOfPeriod: latestDebtMs > 0 ? latestDebt : null as number | null,
+  };
 }
 
 async function buildLatestDebtMapForRiders(riderCodes: Set<string>): Promise<Map<string, number>> {
@@ -127,6 +192,56 @@ export async function GET(request: NextRequest) {
     // Filter by status if provided
     if (status) {
       allRequests = allRequests.filter((req) => req.status === status);
+    }
+
+    // Optional: أداء المندوب ضمن فترة يحددها المستخدم (للمشرف والمدير)
+    const statsFrom = searchParams.get('statsFrom');
+    const statsTo = searchParams.get('statsTo');
+    if (statsFrom && statsTo && /^\d{4}-\d{2}-\d{2}$/.test(statsFrom) && /^\d{4}-\d{2}-\d{2}$/.test(statsTo)) {
+      const startD = new Date(statsFrom + 'T00:00:00');
+      const endD = new Date(statsTo + 'T23:59:59');
+      if (!isNaN(startD.getTime()) && !isNaN(endD.getTime()) && startD <= endD) {
+        const perfBySupervisor = new Map<string, PerformanceRecord[]>();
+
+        const getPerfForSupervisor = async (supCode: string) => {
+          const key = (supCode ?? '').toString().trim();
+          if (!key) return [] as PerformanceRecord[];
+          let cached = perfBySupervisor.get(key);
+          if (!cached) {
+            const rows = await getSupervisorPerformanceFiltered(key, startD, endD);
+            cached = rows as PerformanceRecord[];
+            perfBySupervisor.set(key, cached);
+          }
+          return cached;
+        };
+
+        allRequests = await Promise.all(
+          allRequests.map(async (req: any) => {
+            const sup = (req.supervisorCode ?? '').toString().trim();
+            const riderCode = (req.riderCode ?? '').toString().trim();
+            if (!sup || !riderCode) return { ...req, periodStats: null };
+
+            const perf = await getPerfForSupervisor(sup);
+            const sub = filterPerfForRider(perf, riderCode);
+            if (sub.length === 0) {
+              return {
+                ...req,
+                periodStats: {
+                  orders: 0,
+                  hours: 0,
+                  break: 0,
+                  delay: 0,
+                  avgAcceptance: 0,
+                  records: 0,
+                  workDays: 0,
+                  debtAtEndOfPeriod: null as number | null,
+                },
+              };
+            }
+            return { ...req, periodStats: aggregateRiderPeriodStats(sub) };
+          })
+        );
+      }
     }
 
     return NextResponse.json({

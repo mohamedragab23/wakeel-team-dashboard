@@ -510,35 +510,13 @@ export async function getRidersData(supervisorCode: string): Promise<RiderData[]
   }
 }
 
-// Get performance data with supervisor filtering
+// Get performance data with supervisor filtering (includes مناديب بإقالة موافق عليها لهذا المشرف)
 export async function getSupervisorPerformanceData(
   supervisorCode: string,
   startDate?: Date,
   endDate?: Date
 ) {
-  // First get supervisor's riders
-  const riders = await getSupervisorRiders(supervisorCode);
-  const riderCodes = new Set(riders.map((r) => r.code));
-
-  if (riderCodes.size === 0) {
-    return {
-      success: true,
-      labels: [],
-      orders: [],
-      hours: [],
-    };
-  }
-
-  // Get all performance data
-  const allPerformanceData = await getPerformanceData(supervisorCode, startDate, endDate);
-
-  if (!allPerformanceData.success) {
-    return allPerformanceData;
-  }
-
-  // Filter by rider codes - this is already done in getPerformanceData
-  // but we ensure it's correct
-  return allPerformanceData;
+  return getPerformanceData(supervisorCode, startDate, endDate);
 }
 
 // Get performance data with caching
