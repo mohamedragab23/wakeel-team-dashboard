@@ -508,6 +508,42 @@ export async function clearSheetData(sheetName: string, keepHeaderRow: boolean =
   }
 }
 
+/** نهاية النطاق A1 (مثال: 11 → K، 27 → AA) */
+function a1ColumnEnd(columnCount: number): string {
+  if (columnCount <= 0) return 'A';
+  let n = columnCount;
+  let s = '';
+  while (n > 0) {
+    n -= 1;
+    s = String.fromCharCode((n % 26) + 65) + s;
+    n = Math.floor(n / 26);
+  }
+  return s;
+}
+
+/**
+ * يحدّث الصف الأول ليطابق العناوين المتوقعة إن كان ناقصاً أو مختلفاً (بعد إضافة أعمدة جديدة).
+ */
+export async function ensureHeaderRow(sheetName: string, headers: string[]): Promise<void> {
+  if (!headers.length) return;
+  const data = await getSheetData(sheetName, false);
+  const row0 = data[0] || [];
+  const match =
+    row0.length >= headers.length &&
+    headers.every((h, i) => String(row0[i] ?? '').trim() === h);
+  if (match) return;
+
+  const sheets = await getSheetsClient();
+  const end = a1ColumnEnd(headers.length);
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: getMainSpreadsheetId(),
+    range: `${sheetName}!A1:${end}1`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [headers] },
+  });
+  cache.clear(CACHE_KEYS.sheetData(sheetName));
+}
+
 // Ensure sheet exists, create it if it doesn't
 export async function ensureSheetExists(sheetName: string, headers?: string[]): Promise<boolean> {
   try {
@@ -543,9 +579,10 @@ export async function ensureSheetExists(sheetName: string, headers?: string[]): 
       
       // Add headers if provided
       if (headers && headers.length > 0) {
+        const end = a1ColumnEnd(headers.length);
         await sheets.spreadsheets.values.update({
           spreadsheetId: getMainSpreadsheetId(),
-          range: `${sheetName}!A1:${String.fromCharCode(64 + headers.length)}1`,
+          range: `${sheetName}!A1:${end}1`,
           valueInputOption: 'USER_ENTERED',
           requestBody: {
             values: [headers],

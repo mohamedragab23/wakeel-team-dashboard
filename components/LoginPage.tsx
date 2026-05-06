@@ -3,8 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { v2CssVars } from '@/theme/tokens';
-import Card from '@/components/ui-v2/Card';
-import Button from '@/components/ui-v2/Button';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,11 +18,13 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const response = await fetch(`${origin}/api/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'same-origin',
         body: JSON.stringify({ code, password, role }),
       });
 
@@ -33,7 +33,6 @@ export default function LoginPage() {
       if (data.success && data.token) {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data));
-        // Redirect based on role
         if (data.role === 'admin') {
           router.push('/admin/dashboard');
         } else {
@@ -54,23 +53,26 @@ export default function LoginPage() {
       dir="rtl"
       lang="ar"
       style={v2CssVars()}
-      className="min-h-screen flex items-center justify-center px-3 sm:px-4 py-6 overflow-x-hidden bg-[#05070D] text-[#EAF0FF] bg-[radial-gradient(900px_500px_at_20%_-10%,rgba(168,85,247,0.24),transparent_60%),radial-gradient(800px_500px_at_90%_0%,rgba(0,245,255,0.18),transparent_60%),linear-gradient(180deg,#05070D,#070A14_60%,#05070D)]"
+      className="login-page bg-[#05070D] text-[#EAF0FF] bg-[radial-gradient(900px_500px_at_20%_-10%,rgba(168,85,247,0.24),transparent_60%),radial-gradient(800px_500px_at_90%_0%,rgba(0,245,255,0.18),transparent_60%),linear-gradient(180deg,#05070D,#070A14_60%,#05070D)]"
     >
-      <div className="w-full max-w-md min-w-0">
-        <div className="text-center mb-5 sm:mb-7">
-          <h1 className="text-2xl sm:text-3xl font-extrabold mb-2 break-words">نظام إدارة المشرفين</h1>
-          <p className="text-[rgba(234,240,255,0.70)] text-sm sm:text-base break-words">Wakeel Team</p>
+      <div className="login-panel">
+        <div className="login-title-block">
+          <h1>نظام إدارة المشرفين</h1>
+          <p>Wakeel Team</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <Card title="تسجيل الدخول" subtitle="استخدم نفس بيانات الدخول الحالية.">
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-[rgba(234,240,255,0.75)] mb-2">
-                  نوع المستخدم
-                </label>
-                <div className="flex gap-4">
-                  <label htmlFor="role-supervisor" className="flex items-center gap-2 text-sm text-[rgba(234,240,255,0.80)]">
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="login-card">
+            <div className="login-card-header">
+              <h3>تسجيل الدخول</h3>
+              <p>استخدم نفس بيانات الدخول الحالية.</p>
+            </div>
+
+            <div className="login-card-body">
+              <div className="login-field">
+                <span className="login-field-heading">نوع المستخدم</span>
+                <div className="login-radio-row" role="group" aria-label="نوع المستخدم">
+                  <label htmlFor="role-supervisor">
                     <input
                       id="role-supervisor"
                       name="role"
@@ -78,11 +80,10 @@ export default function LoginPage() {
                       value="supervisor"
                       checked={role === 'supervisor'}
                       onChange={(e) => setRole(e.target.value as 'supervisor' | 'admin')}
-                      className="accent-[color:var(--v2-accent-cyan)]"
                     />
                     <span>مشرف</span>
                   </label>
-                  <label htmlFor="role-admin" className="flex items-center gap-2 text-sm text-[rgba(234,240,255,0.80)]">
+                  <label htmlFor="role-admin">
                     <input
                       id="role-admin"
                       name="role"
@@ -90,62 +91,47 @@ export default function LoginPage() {
                       value="admin"
                       checked={role === 'admin'}
                       onChange={(e) => setRole(e.target.value as 'supervisor' | 'admin')}
-                      className="accent-[color:var(--v2-accent-purple)]"
                     />
                     <span>مدير</span>
                   </label>
                 </div>
               </div>
 
-              <div>
-                <label htmlFor="code" className="block text-sm font-medium text-[rgba(234,240,255,0.75)] mb-2">
-                  الكود
-                </label>
+              <div className="login-field">
+                <label htmlFor="code">الكود</label>
                 <input
                   id="code"
                   name="code"
                   type="text"
+                  autoComplete="username"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  className="w-full h-11 px-4 rounded-[var(--v2-radius-lg)] border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] text-[#EAF0FF] placeholder:text-[rgba(234,240,255,0.45)] outline-none focus:ring-2 focus:ring-[rgba(0,245,255,0.25)]"
                   required
                 />
               </div>
 
-              <div>
-                <label htmlFor="password" className="block text-sm font-medium text-[rgba(234,240,255,0.75)] mb-2">
-                  كلمة المرور
-                </label>
+              <div className="login-field">
+                <label htmlFor="password">كلمة المرور</label>
                 <input
                   id="password"
                   name="password"
                   type="password"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full h-11 px-4 rounded-[var(--v2-radius-lg)] border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] text-[#EAF0FF] placeholder:text-[rgba(234,240,255,0.45)] outline-none focus:ring-2 focus:ring-[rgba(0,245,255,0.25)]"
                   required
                 />
               </div>
 
-              {error && (
-                <div className="border border-[rgba(251,113,133,0.35)] bg-[rgba(251,113,133,0.10)] text-[#FB7185] px-4 py-3 rounded-[var(--v2-radius-lg)] text-sm">
-                  {error}
-                </div>
-              )}
+              {error ? <div className="login-error">{error}</div> : null}
 
-              <Button
-                type="submit"
-                disabled={loading}
-                variant="primary"
-                className="w-full py-3"
-              >
+              <button type="submit" className="login-submit" disabled={loading}>
                 {loading ? 'جاري تسجيل الدخول...' : 'تسجيل الدخول'}
-              </Button>
+              </button>
             </div>
-          </Card>
+          </div>
         </form>
       </div>
     </div>
   );
 }
-

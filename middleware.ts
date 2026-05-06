@@ -35,7 +35,15 @@ export function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
+/**
+ * لا يمرّ الوسيط على:
+ * - /api/* (كل الـ API تتحقق من التوكن داخل المسار نفسه عند الحاجة)
+ * - أصول Next الثابتة
+ * يقلل تعارضات مع طلبات التطوير (POST تسجيل الدخول، إلخ).
+ */
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\..*).*)'],
+  matcher: [
+    '/((?!api/|_next/static|_next/image|_next/webpack-hmr|favicon.ico|icon|.*\\.(?:ico|png|jpg|jpeg|gif|webp|svg)$).*)',
+  ],
 };
 

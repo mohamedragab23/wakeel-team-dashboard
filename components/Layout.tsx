@@ -5,10 +5,11 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { v2CssVars } from '@/theme/tokens';
-
+import { adminPermissionAllowed } from '@/lib/adminPermissions';
 interface User {
   name?: string;
   role?: string;
+  permissions?: string;
 }
 
 interface LayoutProps {
@@ -65,7 +66,7 @@ export default function Layout({ children }: LayoutProps) {
 
   const getMenuItems = () => {
     if (user?.role === 'admin') {
-      return [
+      const items = [
         { href: '/admin/dashboard', label: 'لوحة التحكم', icon: '📊' },
         { href: '/admin/supervisors', label: 'إدارة المشرفين', icon: '👔' },
         { href: '/admin/riders', label: 'إدارة المناديب', icon: '👥' },
@@ -76,15 +77,24 @@ export default function Layout({ children }: LayoutProps) {
         { href: '/admin/salary-config', label: 'إعدادات الرواتب', icon: '⚙️' },
         { href: '/admin/equipment-pricing', label: 'أسعار المعدات', icon: '🛠️' },
         { href: '/admin/equipment-limits', label: 'حدود خصم المعدات', icon: '📦' },
+        { href: '/admin/main-inventory', label: 'المخزون الرئيسي', icon: '🏭' },
+        { href: '/admin/equipment-requests', label: 'طلبات المعدات', icon: '📋' },
         { href: '/admin/salaries', label: 'حساب الرواتب', icon: '💰' },
+        ...(adminPermissionAllowed(user?.permissions, 'deductions_verify')
+          ? [{ href: '/admin/deductions-reconcile', label: 'استقطاعات المدير (مقارنة)', icon: '🔎' }]
+          : []),
         { href: '/admin/debug', label: 'تهيئة النظام والتحقق', icon: '🧹' },
         { href: '/shifts', label: 'الشفتات', icon: '🕒' },
       ];
+      return items;
     } else {
       // Supervisor menu - Reports tab removed as per requirements
       return [
         { href: '/dashboard', label: 'لوحة التحكم', icon: '📊' },
         { href: '/riders', label: 'المناديب', icon: '👥' },
+        { href: '/equipment-delivery', label: 'تسليم معدات', icon: '📤' },
+        { href: '/equipment-return', label: 'استرجاع معدات', icon: '📥' },
+        { href: '/deductions-upload', label: 'الاستقطاعات (Excel)', icon: '📑' },
         { href: '/termination-requests', label: 'الإقالات', icon: '🚫' },
         { href: '/performance', label: 'الأداء', icon: '📈' },
         { href: '/salary', label: 'الراتب', icon: '💰' },

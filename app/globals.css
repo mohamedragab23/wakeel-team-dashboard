@@ -151,6 +151,176 @@ a {
   text-decoration: none;
 }
 
+/* -------------------------------------------------------------------------- */
+/* صفحة تسجيل الدخول — تخطيط يعمل حتى لو تعطّل تحميل Tailwind (RTL + حقول)   */
+/* -------------------------------------------------------------------------- */
+.login-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem 1rem;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+.login-page .login-panel {
+  width: 100%;
+  max-width: 28rem;
+  margin-left: auto;
+  margin-right: auto;
+  min-width: 0;
+}
+
+.login-page .login-title-block {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.login-page .login-title-block h1 {
+  font-size: 1.5rem;
+  font-weight: 800;
+  margin: 0 0 0.5rem;
+  line-height: 1.3;
+}
+
+.login-page .login-title-block p {
+  margin: 0;
+  font-size: 0.875rem;
+  opacity: 0.85;
+}
+
+.login-page .login-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.login-page .login-field > label:first-child,
+.login-page .login-field-heading {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.login-page .login-radio-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.25rem;
+}
+
+.login-page .login-radio-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.login-page .login-radio-row input[type='radio'] {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: #22d3ee;
+  flex-shrink: 0;
+}
+
+.login-page .login-field input[type='text'],
+.login-page .login-field input[type='password'] {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #eaf0ff;
+  outline: none;
+}
+
+.login-page .login-field input:focus {
+  box-shadow: 0 0 0 2px rgba(0, 245, 255, 0.25);
+}
+
+.login-page .login-card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  width: 100%;
+  min-width: 0;
+}
+
+.login-page .login-card-header {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.login-page .login-card-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #eaf0ff;
+}
+
+.login-page .login-card-header p {
+  margin: 0.35rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: rgba(234, 240, 255, 0.75);
+}
+
+.login-page .login-card-body {
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.login-page .login-error {
+  border: 1px solid rgba(251, 113, 133, 0.35);
+  background: rgba(251, 113, 133, 0.1);
+  color: #fb7185;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.login-page .login-submit {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 0.75rem;
+  cursor: pointer;
+  background: linear-gradient(135deg, #22d3ee, #a855f7);
+  color: #05070d;
+}
+
+.login-page .login-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

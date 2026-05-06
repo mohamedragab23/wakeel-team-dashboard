@@ -161,6 +161,7 @@ export async function authenticateAdmin(code: string, password: string): Promise
               code: adminCode,
               name: adminName,
               role: 'admin',
+              permissions: adminPermissions || '',
             },
             JWT_SECRET,
             { expiresIn: '7d' }

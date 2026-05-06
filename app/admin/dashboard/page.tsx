@@ -77,6 +77,66 @@ export default function AdminDashboardPage() {
     gcTime: 10 * 60 * 1000,
   });
 
+  const { data: equipmentDeliveriesPending } = useQuery({
+    queryKey: ['equipment-deliveries', 'pending', 'dashboard'],
+    queryFn: async () => {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/equipment-deliveries?status=pending', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!data.success) return [];
+      return data.data as unknown[];
+    },
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 2 * 60 * 1000,
+    retry: false,
+  });
+
+  const { data: equipmentReturnsPending } = useQuery({
+    queryKey: ['equipment-returns', 'pending', 'dashboard'],
+    queryFn: async () => {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/equipment-returns?status=pending', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!data.success) return [];
+      return data.data as unknown[];
+    },
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 2 * 60 * 1000,
+    retry: false,
+  });
+
+  const { data: deductionsImportLog } = useQuery({
+    queryKey: ['deductions-import-log', 'dashboard'],
+    queryFn: async () => {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/admin/deductions-import-log?limit=10', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!data.success) return [];
+      return data.data as {
+        at: string;
+        supervisorCode: string;
+        supervisorName: string;
+        cycle: string;
+        month: string;
+        year: string;
+        rowCount: number;
+      }[];
+    },
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 90 * 1000,
+  });
+
   useEffect(() => {
     if (supervisorsData && ridersData) {
       const activeRiders = ridersData.filter((r: any) => r.status === 'نشط' || !r.status).length;
@@ -131,10 +191,49 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* Pending Requests Alerts */}
-        {(assignmentRequestsData?.length > 0 || terminationRequestsData?.length > 0) && (
+        {(assignmentRequestsData?.length > 0 ||
+          terminationRequestsData?.length > 0 ||
+          (equipmentDeliveriesPending?.length ?? 0) > 0 ||
+          (equipmentReturnsPending?.length ?? 0) > 0) && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
             <h3 className="text-lg font-semibold text-yellow-800 mb-3">⚠️ طلبات تحتاج إلى مراجعة</h3>
             <div className="space-y-2">
+              {equipmentDeliveriesPending && equipmentDeliveriesPending.length > 0 && (
+                <a
+                  href="/admin/equipment-requests"
+                  className="block p-3 bg-white hover:bg-yellow-100 rounded-lg transition-colors border border-yellow-200"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-semibold text-yellow-800">طلبات تسليم المعدات</div>
+                      <div className="text-sm text-yellow-600">
+                        {equipmentDeliveriesPending.length} طلب قيد الانتظار
+                      </div>
+                    </div>
+                    <div className="bg-yellow-500 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">
+                      {equipmentDeliveriesPending.length}
+                    </div>
+                  </div>
+                </a>
+              )}
+              {equipmentReturnsPending && equipmentReturnsPending.length > 0 && (
+                <a
+                  href="/admin/equipment-requests"
+                  className="block p-3 bg-white hover:bg-yellow-100 rounded-lg transition-colors border border-yellow-200"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-semibold text-yellow-800">طلبات استرجاع المعدات</div>
+                      <div className="text-sm text-yellow-600">
+                        {equipmentReturnsPending.length} طلب قيد الانتظار
+                      </div>
+                    </div>
+                    <div className="bg-yellow-500 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">
+                      {equipmentReturnsPending.length}
+                    </div>
+                  </div>
+                </a>
+              )}
               {assignmentRequestsData && assignmentRequestsData.length > 0 && (
                 <a
                   href="/admin/assignment-requests"
@@ -172,6 +271,33 @@ export default function AdminDashboardPage() {
                 </a>
               )}
             </div>
+          </div>
+        )}
+
+        {deductionsImportLog && deductionsImportLog.length > 0 && (
+          <div className="bg-sky-50 border border-sky-200 rounded-xl p-4">
+            <h3 className="text-lg font-semibold text-sky-900 mb-2">📑 آخر رفوعات ملف الاستقطاعات (Excel)</h3>
+            <p className="text-sm text-sky-800 mb-3">
+              تسجيل تلقائي عند رفع المشرفين؛ البيانات التفصيلية في ورقة «الاستقطاعات».
+            </p>
+            <ul className="space-y-2 text-sm text-sky-900">
+              {deductionsImportLog.map((row, idx) => (
+                <li key={idx} className="flex flex-wrap justify-between gap-2 border-b border-sky-100 pb-2">
+                  <span>
+                    {row.supervisorName} <span className="text-sky-600">({row.supervisorCode})</span>
+                    {row.cycle !== '—' && (
+                      <span className="block text-xs text-sky-700 mt-0.5">
+                        الدورة {row.cycle} — {row.month} {row.year}
+                      </span>
+                    )}
+                  </span>
+                  <span>
+                    {row.rowCount} صف —{' '}
+                    <span className="text-xs text-sky-700">{row.at}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
