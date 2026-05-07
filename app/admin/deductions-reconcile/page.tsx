@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import Layout from '@/components/Layout';
 import Card from '@/components/ui-v2/Card';
 import Button from '@/components/ui-v2/Button';
-import { adminPermissionAllowed } from '@/lib/adminPermissions';
 import {
   ARABIC_MONTH_NAMES,
   DEDUCTION_CYCLE_LABELS,
@@ -43,10 +42,6 @@ export default function AdminDeductionsReconcilePage() {
       const u = JSON.parse(userStr) as { role?: string; permissions?: string };
       if (u.role !== 'admin') {
         router.replace('/dashboard');
-        return;
-      }
-      if (!adminPermissionAllowed(u.permissions, 'deductions_verify')) {
-        router.replace('/admin/dashboard');
         return;
       }
       setAllowed(true);

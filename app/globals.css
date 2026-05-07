@@ -117,6 +117,13 @@ body {
   border-color: rgba(255, 255, 255, 0.14);
 }
 
+/* Fix: native <select> dropdown options inherit white text on white menu. */
+.app-theme select option,
+.app-theme select optgroup {
+  color: #0b1020;
+  background-color: #ffffff;
+}
+
 .app-theme input::placeholder,
 .app-theme textarea::placeholder {
   color: rgba(234, 240, 255, 0.55);

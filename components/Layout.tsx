@@ -5,7 +5,6 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { v2CssVars } from '@/theme/tokens';
-import { adminPermissionAllowed } from '@/lib/adminPermissions';
 interface User {
   name?: string;
   role?: string;
@@ -80,9 +79,7 @@ export default function Layout({ children }: LayoutProps) {
         { href: '/admin/main-inventory', label: 'المخزون الرئيسي', icon: '🏭' },
         { href: '/admin/equipment-requests', label: 'طلبات المعدات', icon: '📋' },
         { href: '/admin/salaries', label: 'حساب الرواتب', icon: '💰' },
-        ...(adminPermissionAllowed(user?.permissions, 'deductions_verify')
-          ? [{ href: '/admin/deductions-reconcile', label: 'استقطاعات المدير (مقارنة)', icon: '🔎' }]
-          : []),
+        { href: '/admin/deductions-reconcile', label: 'استقطاعات المدير (مقارنة)', icon: '🔎' },
         { href: '/admin/debug', label: 'تهيئة النظام والتحقق', icon: '🧹' },
         { href: '/shifts', label: 'الشفتات', icon: '🕒' },
       ];
