@@ -7,8 +7,37 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { getSheetData, appendToSheet, updateSheetRow, ensureSheetExists } from '@/lib/googleSheets';
 import { updateRider, addRider } from '@/lib/adminService';
+import { isAllowedZone, ZONE_OPTIONS } from '@/lib/zones';
 
 export const dynamic = 'force-dynamic';
+
+const STATUS_VALUES = new Set(['pending', 'approved', 'rejected']);
+
+function parseAssignmentRow(row: any[]) {
+  const supervisorCode = row[0]?.toString().trim() || '';
+  const supervisorName = row[1]?.toString().trim() || '';
+  const riderCode = row[2]?.toString().trim() || '';
+  const riderName = row[3]?.toString().trim() || '';
+  const maybe = row[4]?.toString().trim() || '';
+  const hasZone = maybe !== '' && !STATUS_VALUES.has(maybe);
+  const zone = hasZone ? maybe : '';
+  const status = (hasZone ? row[5] : row[4])?.toString().trim() || 'pending';
+  const requestDate = (hasZone ? row[6] : row[5])?.toString().trim() || '';
+  const approvalDate = (hasZone ? row[7] : row[6])?.toString().trim() || '';
+  const approvedBy = (hasZone ? row[8] : row[7])?.toString().trim() || '';
+  return {
+    supervisorCode,
+    supervisorName,
+    riderCode,
+    riderName,
+    zone,
+    status,
+    requestDate,
+    approvalDate,
+    approvedBy,
+    hasZone,
+  };
+}
 
 // Get all assignment requests (admin only) or requests for a supervisor
 export async function GET(request: NextRequest) {
@@ -35,17 +64,8 @@ export async function GET(request: NextRequest) {
       for (let i = 1; i < requestsData.length; i++) {
         const row = requestsData[i];
         if (row.length >= 5 && row[0]) {
-          allRequests.push({
-            id: i, // Row number as ID
-            supervisorCode: row[0]?.toString().trim(),
-            supervisorName: row[1]?.toString().trim(),
-            riderCode: row[2]?.toString().trim(),
-            riderName: row[3]?.toString().trim(),
-            status: row[4]?.toString().trim() || 'pending',
-            requestDate: row[5]?.toString().trim() || '',
-            approvalDate: row[6]?.toString().trim() || '',
-            approvedBy: row[7]?.toString().trim() || '',
-          });
+          const parsed = parseAssignmentRow(row);
+          allRequests.push({ id: i, ...parsed }); // Row number as ID
         }
       }
     } catch (error) {
@@ -93,11 +113,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { riderCode, riderName } = body;
+    const { riderCode, riderName, zone } = body;
 
-    if (!riderCode || !riderName) {
+    if (!riderCode || !riderName || !zone) {
       return NextResponse.json(
-        { success: false, error: 'كود المندوب واسم المندوب مطلوبان' },
+        { success: false, error: 'كود المندوب واسم المندوب والزون مطلوبة' },
+        { status: 400 }
+      );
+    }
+    if (!isAllowedZone(zone)) {
+      return NextResponse.json(
+        { success: false, error: `الزون غير صحيحة. القيم المتاحة: ${ZONE_OPTIONS.join(' / ')}` },
         { status: 400 }
       );
     }
@@ -133,6 +159,7 @@ export async function POST(request: NextRequest) {
         'اسم المشرف',
         'كود المندوب',
         'اسم المندوب',
+        'الزون',
         'الحالة',
         'تاريخ الطلب',
         'تاريخ الموافقة',
@@ -154,11 +181,12 @@ export async function POST(request: NextRequest) {
       
       for (let i = 1; i < requestsData.length; i++) {
         const row = requestsData[i];
+        const parsed = parseAssignmentRow(row);
         if (
           row.length >= 5 &&
-          row[0]?.toString().trim() === supervisorCodeTrimmed &&
-          row[2]?.toString().trim() === riderCodeTrimmed &&
-          row[4]?.toString().trim() === 'pending'
+          parsed.supervisorCode === supervisorCodeTrimmed &&
+          parsed.riderCode === riderCodeTrimmed &&
+          parsed.status === 'pending'
         ) {
           console.log(`[AssignmentRequest] Pending request already exists for rider ${riderCodeTrimmed}`);
           return NextResponse.json(
@@ -179,6 +207,7 @@ export async function POST(request: NextRequest) {
       decoded.name?.toString().trim() || '', // Supervisor Name
       riderCode?.toString().trim() || '', // Rider Code
       riderName?.toString().trim() || '', // Rider Name
+      zone?.toString().trim() || '', // Zone
       'pending', // Status
       requestDate, // Request Date
       '', // Approval Date
@@ -205,6 +234,7 @@ export async function POST(request: NextRequest) {
         supervisorCode: decoded.code,
         riderCode: riderCode?.toString().trim(),
         riderName: riderName?.toString().trim(),
+        zone: zone?.toString().trim(),
         status: 'pending',
         requestDate,
       },
@@ -265,16 +295,18 @@ export async function PUT(request: NextRequest) {
     }
 
     const row = requestsData[rowIndex];
-    if (row.length < 5 || row[4]?.toString().trim() !== 'pending') {
+    const parsedRow = parseAssignmentRow(row);
+    if (row.length < 5 || parsedRow.status !== 'pending') {
       return NextResponse.json(
         { success: false, error: 'الطلب غير صالح أو تمت معالجته بالفعل' },
         { status: 400 }
       );
     }
 
-    const supervisorCode = row[0]?.toString().trim();
-    const riderCode = row[2]?.toString().trim();
-    const riderName = row[3]?.toString().trim();
+    const supervisorCode = parsedRow.supervisorCode;
+    const riderCode = parsedRow.riderCode;
+    const riderName = parsedRow.riderName;
+    const zone = parsedRow.zone;
     const status = action === 'approve' ? 'approved' : 'rejected';
     const approvalDate = new Date().toISOString().split('T')[0];
     const approvedBy = decoded.name || decoded.code;
@@ -284,9 +316,16 @@ export async function PUT(request: NextRequest) {
 
     // Update the request in Google Sheets
     const updatedRow = [...row];
-    updatedRow[4] = status; // Status
-    updatedRow[6] = approvalDate; // Approval Date
-    updatedRow[7] = approvedBy; // Approved By
+    // Support both legacy rows (no zone) and new rows (with zone).
+    if (parsedRow.hasZone) {
+      updatedRow[5] = status; // Status
+      updatedRow[7] = approvalDate; // Approval Date
+      updatedRow[8] = approvedBy; // Approved By
+    } else {
+      updatedRow[4] = status; // Status
+      updatedRow[6] = approvalDate; // Approval Date
+      updatedRow[7] = approvedBy; // Approved By
+    }
 
     await updateSheetRow('طلبات_التعيين', rowIndex + 1, updatedRow);
 
@@ -324,7 +363,7 @@ export async function PUT(request: NextRequest) {
           const result = await addRider({
             code: riderCode,
             name: riderName,
-            region: '', // Will be set by admin later if needed
+            region: zone || '', // Use requested zone if provided
             supervisorCode: supervisorCode,
             phone: '',
             joinDate: new Date().toISOString().split('T')[0],

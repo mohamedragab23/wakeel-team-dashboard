@@ -11,6 +11,7 @@ import { SHEET_EQUIPMENT_RETURN } from '@/lib/equipmentSheetConstants';
 import { assertSupervisorRider } from '@/lib/riderValidation';
 import { applyMainInventoryDelta } from '@/lib/mainInventoryService';
 import { validateEquipmentReturnAgainstDeliveries } from '@/lib/equipmentReturnValidation';
+import { isAllowedZone, ZONE_OPTIONS } from '@/lib/zones';
 
 export const dynamic = 'force-dynamic';
 
@@ -121,6 +122,12 @@ export async function POST(request: NextRequest) {
     if (!riderCode || !riderName || !zone) {
       return NextResponse.json(
         { success: false, error: 'كود المندوب والاسم والزون مطلوبة' },
+        { status: 400 }
+      );
+    }
+    if (!isAllowedZone(zone)) {
+      return NextResponse.json(
+        { success: false, error: `الزون غير صحيحة. القيم المتاحة: ${ZONE_OPTIONS.join(' / ')}` },
         { status: 400 }
       );
     }

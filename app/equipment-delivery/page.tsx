@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Layout from '@/components/Layout';
 import Card from '@/components/ui-v2/Card';
 import Button from '@/components/ui-v2/Button';
+import { ZONE_OPTIONS } from '@/lib/zones';
 
 const MAX_DATA_URL = 48000;
 
@@ -131,12 +132,19 @@ export default function EquipmentDeliveryPage() {
               </div>
               <div>
                 <label className="block text-sm mb-1 text-[rgba(234,240,255,0.75)]">الزون</label>
-                <input
+                <select
                   className="w-full rounded-lg border border-white/10 bg-[#070A14] text-[#EAF0FF] px-3 py-2"
                   value={zone}
                   onChange={(e) => setZone(e.target.value)}
                   required
-                />
+                >
+                  <option value="">اختر الزون</option>
+                  {ZONE_OPTIONS.map((z) => (
+                    <option key={z} value={z}>
+                      {z}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm mb-1 text-[rgba(234,240,255,0.75)]">نوع التسليم</label>

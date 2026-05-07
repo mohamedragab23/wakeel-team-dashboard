@@ -10,6 +10,7 @@ import {
 import { SHEET_EQUIPMENT_DELIVERY } from '@/lib/equipmentSheetConstants';
 import { assertSupervisorRider } from '@/lib/riderValidation';
 import { applyMainInventoryDelta } from '@/lib/mainInventoryService';
+import { isAllowedZone, ZONE_OPTIONS } from '@/lib/zones';
 
 export const dynamic = 'force-dynamic';
 
@@ -137,6 +138,12 @@ export async function POST(request: NextRequest) {
     if (!riderCode || !riderName || !zone || !deliveryType) {
       return NextResponse.json(
         { success: false, error: 'كود المندوب والاسم والزون ونوع التسليم مطلوبة' },
+        { status: 400 }
+      );
+    }
+    if (!isAllowedZone(zone)) {
+      return NextResponse.json(
+        { success: false, error: `الزون غير صحيحة. القيم المتاحة: ${ZONE_OPTIONS.join(' / ')}` },
         { status: 400 }
       );
     }

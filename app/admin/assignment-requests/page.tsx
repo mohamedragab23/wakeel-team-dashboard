@@ -10,6 +10,7 @@ interface AssignmentRequest {
   supervisorName: string;
   riderCode: string;
   riderName: string;
+  zone?: string;
   status: 'pending' | 'approved' | 'rejected';
   requestDate: string;
   approvalDate: string;
@@ -307,6 +308,7 @@ export default function AssignmentRequestsPage() {
                     )}
                     <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">المشرف</th>
                     <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">المندوب</th>
+                    <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الزون</th>
                     <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">تاريخ الطلب</th>
                     <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الحالة</th>
                     <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">إجراءات</th>
@@ -340,6 +342,9 @@ export default function AssignmentRequestsPage() {
                           <p className="font-medium text-gray-800">{request.riderName}</p>
                           <p className="text-xs text-gray-500">{request.riderCode}</p>
                         </div>
+                      </td>
+                      <td className="py-4 px-6 text-sm text-gray-700">
+                        {request.zone ? request.zone : '—'}
                       </td>
                       <td className="py-4 px-6 text-sm text-gray-600">
                         {request.requestDate

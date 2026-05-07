@@ -11,6 +11,7 @@ import Card from '@/components/ui-v2/Card';
 import Button from '@/components/ui-v2/Button';
 import Tabs, { type TabItem } from '@/components/ui-v2/Tabs';
 import { v2CssVars } from '@/theme/tokens';
+import { ZONE_OPTIONS } from '@/lib/zones';
 
 interface DashboardData {
   totalHours: number;
@@ -38,10 +39,13 @@ export default function DashboardPage() {
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
   const [riderCode, setRiderCode] = useState('');
   const [riderName, setRiderName] = useState('');
+  const [zone, setZone] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [assignmentMessage, setAssignmentMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const [tab, setTab] = useState<'overview' | 'assignment'>('overview');
+
+  const zoneOptions = ZONE_OPTIONS;
 
   const tabItems: Array<TabItem<'overview' | 'assignment'>> = [
     { value: 'overview', label: 'لوحة التحكم' },
@@ -110,6 +114,7 @@ export default function DashboardPage() {
         body: JSON.stringify({
           riderCode: riderCode.trim(),
           riderName: riderName.trim(),
+          zone: zone.trim(),
         }),
       });
 
@@ -119,6 +124,7 @@ export default function DashboardPage() {
         setAssignmentMessage({ type: 'success', text: '✅ تم إرسال طلب التعيين بنجاح. سيتم إشعار المدير بالموافقة.' });
         setRiderCode('');
         setRiderName('');
+        setZone('');
         setShowAssignmentForm(false);
         fetchPendingRequestsCount(); // Refresh count
         setTimeout(() => setAssignmentMessage(null), 5000);
@@ -208,7 +214,7 @@ export default function DashboardPage() {
 
               {showAssignmentForm && (
                 <form onSubmit={handleSubmitAssignment} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         كود المندوب *
@@ -235,6 +241,22 @@ export default function DashboardPage() {
                         placeholder="مثال: أحمد محمد"
                       />
                     </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">الزون *</label>
+                      <select
+                        value={zone}
+                        onChange={(e) => setZone(e.target.value)}
+                        required
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      >
+                        <option value="">اختر الزون</option>
+                        {zoneOptions.map((z) => (
+                          <option key={z} value={z}>
+                            {z}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   <div className="flex gap-3">
                     <button
@@ -250,6 +272,7 @@ export default function DashboardPage() {
                         setShowAssignmentForm(false);
                         setRiderCode('');
                         setRiderName('');
+                        setZone('');
                         setAssignmentMessage(null);
                       }}
                       className="px-6 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors font-medium"
@@ -405,7 +428,7 @@ export default function DashboardPage() {
 
             {showAssignmentForm && (
               <form onSubmit={handleSubmitAssignment} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-[rgba(234,240,255,0.75)] mb-2">
                       كود المندوب *
@@ -432,6 +455,22 @@ export default function DashboardPage() {
                       placeholder="مثال: أحمد محمد"
                     />
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-[rgba(234,240,255,0.75)] mb-2">الزون *</label>
+                    <select
+                      value={zone}
+                      onChange={(e) => setZone(e.target.value)}
+                      required
+                      className="w-full h-10 px-4 rounded-[var(--v2-radius-lg)] border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] text-[#EAF0FF] outline-none focus:ring-2 focus:ring-[rgba(0,245,255,0.25)]"
+                    >
+                      <option value="">اختر الزون</option>
+                      {zoneOptions.map((z) => (
+                        <option key={z} value={z}>
+                          {z}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-3">
                   <Button type="submit" disabled={submitting} variant="primary">
@@ -444,6 +483,7 @@ export default function DashboardPage() {
                       setShowAssignmentForm(false);
                       setRiderCode('');
                       setRiderName('');
+                      setZone('');
                       setAssignmentMessage(null);
                     }}
                   >
