@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery } from '@tanstack/react-query';
+import { ZONE_OPTIONS } from '@/lib/zones';
 
 interface SupervisorPerformanceRow {
   code: string;
@@ -45,6 +46,7 @@ export default function SupervisorPerformancePage() {
   const [endDate, setEndDate] = useState('');
   const [requestRange, setRequestRange] = useState<{ start: string; end: string } | null>(null);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [zoneFilter, setZoneFilter] = useState<string>('all');
 
   const { data, isLoading, isFetching, error } = useQuery({
     queryKey: ['admin', 'supervisor-performance', requestRange?.start, requestRange?.end],
@@ -81,7 +83,11 @@ export default function SupervisorPerformancePage() {
   };
 
   const loading = isLoading || isFetching;
-  const supervisors = data?.supervisors ?? [];
+  const supervisorsAll = data?.supervisors ?? [];
+  const supervisors =
+    zoneFilter === 'all'
+      ? supervisorsAll
+      : supervisorsAll.filter((s) => (s.region || '').trim() === zoneFilter);
   const summary = data?.summary;
   const comparison = data?.comparison;
   const bestSupervisorCode = comparison?.best_supervisor?.code || '';
@@ -133,6 +139,34 @@ export default function SupervisorPerformancePage() {
             </button>
           </div>
         </div>
+
+        {data && (
+          <div className="bg-white rounded-xl shadow-sm p-4 sm:p-6 border border-gray-100">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-0 flex-1 sm:flex-initial">
+                <label htmlFor="zoneFilter" className="block text-sm font-medium text-gray-700 mb-1">
+                  فلتر زون المشرف
+                </label>
+                <select
+                  id="zoneFilter"
+                  value={zoneFilter}
+                  onChange={(e) => setZoneFilter(e.target.value)}
+                  className="w-full sm:w-64 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                >
+                  <option value="all">كل الزونات</option>
+                  {ZONE_OPTIONS.map((z) => (
+                    <option key={z} value={z}>
+                      {z}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="text-sm text-gray-600">
+                المعروض: <span className="font-semibold">{supervisors.length}</span> / {supervisorsAll.length}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* شرح المؤشرات */}
         {data && (
