@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { analyzeLegacyShifts } from '@/lib/shiftsLegacyAnalyze';
+import { getAllSupervisors } from '@/lib/adminService';
+import { isAllowedZone } from '@/lib/zones';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,9 +11,23 @@ export async function POST(request: NextRequest) {
     const token = request.headers.get('authorization')?.replace('Bearer ', '').trim();
     if (!token) return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
 
-    const decoded = verifyToken(token) as { role?: 'supervisor' | 'admin'; name?: string } | null;
+    const decoded = verifyToken(token) as {
+      role?: 'supervisor' | 'admin';
+      name?: string;
+      dataZone?: string;
+    } | null;
     if (!decoded || (decoded.role !== 'supervisor' && decoded.role !== 'admin')) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
+    }
+
+    let allowedSupervisorNames: Set<string> | null = null;
+    if (decoded.role === 'admin' && decoded.dataZone && isAllowedZone(decoded.dataZone)) {
+      const sups = await getAllSupervisors(false);
+      const names = sups
+        .filter((s) => (s.region || '').trim() === decoded.dataZone)
+        .map((s) => (s.name || '').trim())
+        .filter(Boolean);
+      allowedSupervisorNames = new Set(names);
     }
 
     const formData = await request.formData();
@@ -26,6 +42,7 @@ export async function POST(request: NextRequest) {
 
     const analyzed = await analyzeLegacyShifts({
       viewer: { role: decoded.role, name: decoded.name || '' },
+      allowedSupervisorNames,
       files: await Promise.all(fileList.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() }))),
       rangeStart,
       rangeEnd,

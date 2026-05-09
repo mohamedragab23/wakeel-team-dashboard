@@ -1,4 +1,5 @@
 import { getSheetData, findDataInSheet } from './googleSheets';
+import { normalizeAdminDataZone } from './adminFeatureAccess';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -11,6 +12,8 @@ export interface AuthResult {
   region?: string;
   email?: string;
   permissions?: string;
+  /** Optional scope: supervisors' region / zone (column E in Admins sheet) */
+  dataZone?: string;
   role?: 'supervisor' | 'admin';
   token?: string;
 }
@@ -153,6 +156,7 @@ export async function authenticateAdmin(code: string, password: string): Promise
       const adminName = row[1] ? row[1].toString().trim() : '';
       const adminPassword = row[2] ? row[2].toString().trim() : '';
       const adminPermissions = row[3] ? row[3].toString().trim() : '';
+      const adminDataZone = normalizeAdminDataZone(row[4]);
 
       if (adminCode === code) {
         if (adminPassword === password) {
@@ -162,6 +166,7 @@ export async function authenticateAdmin(code: string, password: string): Promise
               name: adminName,
               role: 'admin',
               permissions: adminPermissions || '',
+              dataZone: adminDataZone || '',
             },
             JWT_SECRET,
             { expiresIn: '7d' }
@@ -172,6 +177,7 @@ export async function authenticateAdmin(code: string, password: string): Promise
             code: adminCode,
             name: adminName,
             permissions: adminPermissions,
+            dataZone: adminDataZone || '',
             role: 'admin',
             token,
           };

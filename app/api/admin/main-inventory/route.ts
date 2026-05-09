@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { adminHasPermission } from '@/lib/adminPermissions';
 import { readMainInventory, writeMainInventory, type MainInventoryCounts } from '@/lib/mainInventoryService';
 
@@ -15,6 +16,9 @@ export async function GET(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const m0 = assertAdminApiAccess(decoded, 'main_inventory');
+    if (m0) return m0;
 
     const data = await readMainInventory();
     return NextResponse.json({ success: true, data });
@@ -34,6 +38,10 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const m1 = assertAdminApiAccess(decoded, 'main_inventory');
+    if (m1) return m1;
+
     if (!adminHasPermission(decoded, 'inventory')) {
       return NextResponse.json(
         { success: false, error: 'لا تملك صلاحية تعديل المخزون الرئيسي (inventory في عمود صلاحيات الأدمن)' },

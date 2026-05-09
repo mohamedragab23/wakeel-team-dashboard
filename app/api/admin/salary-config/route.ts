@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { updateSupervisor } from '@/lib/adminService';
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,9 @@ export async function PUT(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const sc2 = assertAdminApiAccess(decoded, 'salary_config');
+    if (sc2) return sc2;
 
     const body = await request.json();
     const { supervisorCode, salaryType, salaryAmount, commissionFormula } = body;

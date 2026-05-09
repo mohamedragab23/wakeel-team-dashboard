@@ -3,7 +3,11 @@
  * Empty / missing = full access for inventory & equipment (backward compatible).
  * مقارنة الاستقطاعات (deductions_verify): لا تُمنح تلقائياً — يجب إضافتها صراحة أو all.
  * Examples: "inventory", "equipment", "deductions_verify", "inventory,equipment,deductions_verify", "all"
+ *
+ * When permissions start with "limited:" (see adminFeatureAccess), sub-permissions follow menu feature keys.
  */
+
+import { parseLimitedFeatures } from '@/lib/adminFeatureAccess';
 
 export type AdminPermissionFlag = 'inventory' | 'equipment' | 'deductions_verify';
 
@@ -21,6 +25,25 @@ export function adminPermissionAllowed(
   permissions: string | undefined | null,
   flag: AdminPermissionFlag
 ): boolean {
+  const limited = parseLimitedFeatures(permissions);
+  if (limited !== null) {
+    if (flag === 'inventory') {
+      return limited.includes('main_inventory') || limited.includes('inventory');
+    }
+    if (flag === 'equipment') {
+      return (
+        limited.includes('equipment_requests') ||
+        limited.includes('equipment') ||
+        limited.includes('equipment_limits') ||
+        limited.includes('equipment_pricing')
+      );
+    }
+    if (flag === 'deductions_verify') {
+      return limited.includes('deductions_reconcile') || limited.includes('deductions_verify');
+    }
+    return false;
+  }
+
   const empty = permissions === undefined || permissions === null || String(permissions).trim() === '';
   if (empty) {
     if (flag === 'deductions_verify') return false;

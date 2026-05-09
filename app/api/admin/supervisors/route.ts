@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { getAllSupervisors, addSupervisor, updateSupervisor, deleteSupervisor } from '@/lib/adminService';
+import {
+  assertAdminApiAccess,
+  assertAdminSupervisorsReadAccess,
+} from '@/lib/adminFeatureAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +20,9 @@ export async function GET(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const readDenied = assertAdminSupervisorsReadAccess(decoded);
+    if (readDenied) return readDenied;
 
     // Force fresh data by clearing cache first if requested
     const { searchParams } = new URL(request.url);
@@ -52,6 +59,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
+    const w = assertAdminApiAccess(decoded, 'supervisors');
+    if (w) return w;
+
     const body = await request.json();
     console.log(`[POST /api/admin/supervisors] Adding supervisor:`, body);
     const result = await addSupervisor(body);
@@ -85,6 +95,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
+    const w2 = assertAdminApiAccess(decoded, 'supervisors');
+    if (w2) return w2;
+
     const body = await request.json();
     const { code, ...updates } = body;
 
@@ -116,6 +129,9 @@ export async function DELETE(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const w3 = assertAdminApiAccess(decoded, 'supervisors');
+    if (w3) return w3;
 
     const { searchParams } = new URL(request.url);
     const code = searchParams.get('code');

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getSupervisorDebts } from '@/lib/adminService';
 import { getSupervisorDebtsFiltered } from '@/lib/dataFilter';
 
@@ -16,6 +17,11 @@ export async function GET(request: NextRequest) {
     const decoded = verifyToken(token);
     if (!decoded) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
+    }
+
+    if (decoded.role === 'admin') {
+      const db = assertAdminApiAccess(decoded, 'debts');
+      if (db) return db;
     }
 
     // If admin, return all debts

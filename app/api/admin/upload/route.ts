@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { readExcelFromBuffer } from '@/lib/excelProcessorServer';
 import { processRidersExcel, processPerformanceExcel } from '@/lib/excelProcessor';
 import { bulkAddRiders, getAllRiders } from '@/lib/adminService';
@@ -213,6 +214,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (type === 'riders') {
+      const permR = assertAdminApiAccess(decoded, 'riders');
+      if (permR) return permR;
       // Step 1: Process Excel
       const processed = processRidersExcel(rawData);
 
@@ -278,6 +281,8 @@ export async function POST(request: NextRequest) {
         errors: result.errors?.slice(0, 20) || [], // Show first 20 errors
       });
     } else if (type === 'performance') {
+      const permP = assertAdminApiAccess(decoded, 'performance_upload');
+      if (permP) return permP;
       // Step 1: Process Excel
       // IMPORTANT: Performance upload should rely on admin-selected date (not the sheet date)
       // If a valid YYYY-MM-DD is provided, we force it for all rows and skip date validation.

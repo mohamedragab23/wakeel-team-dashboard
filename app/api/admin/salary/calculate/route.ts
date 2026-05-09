@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { calculateSupervisorSalary } from '@/lib/salaryService';
 
 export const dynamic = 'force-dynamic';
@@ -21,6 +22,9 @@ export async function GET(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح - المدير فقط' }, { status: 401 });
     }
+
+    const sal = assertAdminApiAccess(decoded, 'salaries');
+    if (sal) return sal;
 
     const { searchParams } = new URL(request.url);
     const supervisorCode = searchParams.get('supervisorCode');

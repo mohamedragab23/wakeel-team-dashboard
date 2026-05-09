@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getSheetData } from '@/lib/googleSheets';
 import { SHEET_DEDUCTIONS_UPLOAD_LOG } from '@/lib/equipmentSheetConstants';
 
@@ -16,6 +17,9 @@ export async function GET(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const di = assertAdminApiAccess(decoded, 'deductions_reconcile');
+    if (di) return di;
 
     const { searchParams } = new URL(request.url);
     const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '15', 10)));

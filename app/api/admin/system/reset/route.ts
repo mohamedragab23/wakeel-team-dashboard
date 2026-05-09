@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { clearSheetData } from '@/lib/googleSheets';
 import { invalidateSupervisorCaches, notifySupervisorsOfChange } from '@/lib/realtimeSync';
 import { cache, CACHE_KEYS } from '@/lib/cache';
@@ -41,6 +42,9 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح - المدير فقط' }, { status: 401 });
     }
+
+    const rs = assertAdminApiAccess(decoded, 'debug');
+    if (rs) return rs;
 
     let body: any = {};
     try {

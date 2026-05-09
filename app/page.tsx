@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import LoginPage from '@/components/LoginPage';
+import { getDefaultAdminHome } from '@/lib/adminFeatureAccess';
 
 export default function Home() {
   const router = useRouter();
@@ -15,7 +16,7 @@ export default function Home() {
       try {
         const user = JSON.parse(userStr);
         if (user.role === 'admin') {
-          router.push('/admin/dashboard');
+          router.push(getDefaultAdminHome(user.permissions));
         } else {
           router.push('/dashboard');
         }

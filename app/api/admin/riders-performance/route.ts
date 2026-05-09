@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getAllRiders } from '@/lib/adminService';
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { aggregateRidersInDateRange, type RiderSeed } from '@/lib/riderPerformanceAggregate';
@@ -16,6 +17,9 @@ export async function GET(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const rp = assertAdminApiAccess(decoded, 'performance_upload');
+    if (rp) return rp;
 
     const { searchParams } = new URL(request.url);
     const startDateParam = searchParams.get('startDate');

@@ -1,0 +1,252 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import Layout from '@/components/Layout';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  ADMIN_FEATURE_LABELS_AR,
+  ALL_ADMIN_FEATURE_KEYS,
+  isGrantingAdmin,
+  type AdminFeatureKey,
+} from '@/lib/adminFeatureAccess';
+import { ZONE_OPTIONS } from '@/lib/zones';
+
+export default function AdminPermissionsPage() {
+  const queryClient = useQueryClient();
+  const [selectedCode, setSelectedCode] = useState<string>('');
+  const [mode, setMode] = useState<'full' | 'limited'>('limited');
+  const [picked, setPicked] = useState<Set<AdminFeatureKey>>(new Set());
+  const [dataZone, setDataZone] = useState<string>('');
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [canGrant, setCanGrant] = useState(false);
+
+  useEffect(() => {
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || 'null');
+      setCanGrant(isGrantingAdmin(u));
+    } catch {
+      setCanGrant(false);
+    }
+  }, []);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['admin-permissions-list'],
+    queryFn: async () => {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/admin/admin-permissions', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'فشل التحميل');
+      return j.data as {
+        sheetName: string;
+        admins: Array<{ rowIndex1Based: number; code: string; name: string; permissions: string; dataZone: string }>;
+        featureKeys: AdminFeatureKey[];
+      };
+    },
+    enabled: !!canGrant,
+  });
+
+  const selected = data?.admins?.find((a) => a.code === selectedCode);
+
+  const loadSelectedIntoForm = (code: string) => {
+    const a = data?.admins?.find((x) => x.code === code);
+    setSelectedCode(code);
+    if (!a) return;
+    const p = (a.permissions || '').trim();
+    if (!p || p.toLowerCase() === 'all' || p.includes('*')) {
+      setMode('full');
+      setPicked(new Set());
+    } else if (p.toLowerCase().startsWith('limited:')) {
+      setMode('limited');
+      const rest = p.slice('limited:'.length).trim();
+      const keys = rest
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean) as AdminFeatureKey[];
+      setPicked(new Set(keys.filter((k) => ALL_ADMIN_FEATURE_KEYS.includes(k))));
+    } else {
+      setMode('full');
+      setPicked(new Set());
+    }
+    setDataZone((a.dataZone || '').trim());
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const token = localStorage.getItem('token');
+      let permissions = '';
+      if (mode === 'full') permissions = '';
+      else {
+        const keys = Array.from(picked);
+        if (!keys.length) throw new Error('اختر ميزة واحدة على الأقل أو اختر وصول كامل');
+        permissions = `limited:${keys.join(',')}`;
+      }
+      const res = await fetch('/api/admin/admin-permissions', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          targetCode: selectedCode,
+          permissions,
+          dataZone: dataZone || '',
+        }),
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'فشل الحفظ');
+      return j;
+    },
+    onSuccess: () => {
+      setMsg({
+        type: 'ok',
+        text: 'تم الحفظ. يجب على المستخدم المستهدف تسجيل الخروج ثم الدخول مجدداً.',
+      });
+      queryClient.invalidateQueries({ queryKey: ['admin-permissions-list'] });
+    },
+    onError: (e: any) => {
+      setMsg({ type: 'err', text: e?.message || 'فشل الحفظ' });
+    },
+  });
+
+  if (!canGrant) {
+    return (
+      <Layout>
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 text-red-100 p-4">
+          لا تملك صلاحية هذه الصفحة. متاحة فقط لحساب المدير الرئيسي (صلاحيات فارغة أو all في ورقة الأدمن).
+        </div>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout>
+      <div className="space-y-6 max-w-4xl min-w-0 text-[#EAF0FF]">
+        <div>
+          <h1 className="text-2xl font-bold">إدارة صلاحيات الأدمن</h1>
+          <p className="text-sm text-[rgba(234,240,255,0.72)] mt-1">
+            اختر مستخدم أدمن ثم حدد الميزات المسموح بها. عمود «نطاق الزون» في الشيت يقيّد عرض أداء المشرفين
+            وبيانات ذات صلة لتطابق زون المشرفين فقط (قيمة من القائمة المعتمدة أو فارغ للكل).
+          </p>
+        </div>
+
+        {msg && (
+          <div
+            className={
+              msg.type === 'ok'
+                ? 'rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-emerald-100 text-sm'
+                : 'rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-red-100 text-sm'
+            }
+          >
+            {msg.text}
+          </div>
+        )}
+
+        {error && (
+          <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-red-100 text-sm">
+            {(error as Error).message}
+          </div>
+        )}
+
+        {isLoading ? (
+          <p className="text-[rgba(234,240,255,0.7)]">جاري التحميل…</p>
+        ) : data ? (
+          <div className="space-y-4 rounded-xl border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] p-4 sm:p-6">
+            <p className="text-xs text-[rgba(234,240,255,0.55)]">ورقة الشيت: {data.sheetName}</p>
+
+            <div>
+              <label className="block text-sm mb-1">الأدمن المستهدف</label>
+              <select
+                className="w-full max-w-md rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm"
+                value={selectedCode}
+                onChange={(e) => loadSelectedIntoForm(e.target.value)}
+              >
+                <option value="">— اختر —</option>
+                {data.admins.map((a) => (
+                  <option key={a.code} value={a.code}>
+                    {a.name || a.code} ({a.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selected && (
+              <>
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="perm-mode"
+                      checked={mode === 'full'}
+                      onChange={() => setMode('full')}
+                    />
+                    وصول كامل (مثل المدير الرئيسي)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="perm-mode"
+                      checked={mode === 'limited'}
+                      onChange={() => setMode('limited')}
+                    />
+                    صلاحيات محددة فقط
+                  </label>
+                </div>
+
+                {mode === 'limited' && (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {ALL_ADMIN_FEATURE_KEYS.map((key) => (
+                      <label key={key} className="flex items-start gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={picked.has(key)}
+                          onChange={() => {
+                            setPicked((prev) => {
+                              const n = new Set(prev);
+                              if (n.has(key)) n.delete(key);
+                              else n.add(key);
+                              return n;
+                            });
+                          }}
+                        />
+                        <span>
+                          {ADMIN_FEATURE_LABELS_AR[key]} <span className="text-[rgba(234,240,255,0.45)]">({key})</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm mb-1">نطاق الزون (اختياري — يقيّد بيانات أداء المشرفين وما شابه)</label>
+                  <select
+                    className="w-full max-w-md rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm"
+                    value={dataZone}
+                    onChange={(e) => setDataZone(e.target.value)}
+                  >
+                    <option value="">بدون تقييد (كل الزونات)</option>
+                    {ZONE_OPTIONS.map((z) => (
+                      <option key={z} value={z}>
+                        {z}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={!selectedCode || saveMutation.isPending}
+                  onClick={() => {
+                    setMsg(null);
+                    saveMutation.mutate();
+                  }}
+                  className="px-5 py-2 rounded-lg bg-[color:var(--v2-accent-cyan)] text-black font-semibold disabled:opacity-50"
+                >
+                  {saveMutation.isPending ? 'جاري الحفظ…' : 'حفظ على الشيت'}
+                </button>
+              </>
+            )}
+          </div>
+        ) : null}
+      </div>
+    </Layout>
+  );
+}

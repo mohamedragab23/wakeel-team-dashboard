@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { v2CssVars } from '@/theme/tokens';
+import { getDefaultAdminHome } from '@/lib/adminFeatureAccess';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -34,7 +35,7 @@ export default function LoginPage() {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data));
         if (data.role === 'admin') {
-          router.push('/admin/dashboard');
+          router.push(getDefaultAdminHome(data.permissions));
         } else {
           router.push('/dashboard');
         }

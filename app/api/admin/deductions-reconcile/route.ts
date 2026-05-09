@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { adminHasPermission } from '@/lib/adminPermissions';
 import * as XLSX from 'xlsx';
 import { appendToSheet, ensureHeaderRow, ensureSheetExists, getSheetData } from '@/lib/googleSheets';
@@ -32,6 +33,10 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'المديرون فقط' }, { status: 401 });
     }
+
+    const dr = assertAdminApiAccess(decoded, 'deductions_reconcile');
+    if (dr) return dr;
+
     if (!adminHasPermission(decoded, 'deductions_verify')) {
       return NextResponse.json(
         {

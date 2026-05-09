@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getAllRiders, addRider, updateRider, deleteRider } from '@/lib/adminService';
 
 export const dynamic = 'force-dynamic';
@@ -21,6 +22,9 @@ export async function GET(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const r0 = assertAdminApiAccess(decoded, 'riders');
+    if (r0) return r0;
 
     // Get all riders from Google Sheets (server-side compatible)
     // Check if refresh is requested (bypass cache)
@@ -50,6 +54,9 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const r1 = assertAdminApiAccess(decoded, 'riders');
+    if (r1) return r1;
 
     const body = await request.json();
     const { code, name, region, supervisorCode, phone } = body;
@@ -96,6 +103,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
+    const r2 = assertAdminApiAccess(decoded, 'riders');
+    if (r2) return r2;
+
     const body = await request.json();
     const { code, supervisorCode, name, region, phone, status } = body;
 
@@ -137,6 +147,9 @@ export async function DELETE(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const r3 = assertAdminApiAccess(decoded, 'riders');
+    if (r3) return r3;
 
     const { searchParams } = new URL(request.url);
     const code = searchParams.get('code');

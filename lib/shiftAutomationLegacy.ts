@@ -283,9 +283,17 @@ export function filterEmployeesWakeel3Cities(employees: LegacyEmployeeRow[]): Le
 
 export function filterEmployeesForViewer(
   employees: LegacyEmployeeRow[],
-  decoded: { role?: string; name?: string } | null
+  decoded: { role?: string; name?: string } | null,
+  opts?: { allowedSupervisorNames?: Set<string> | null }
 ): LegacyEmployeeRow[] {
-  if (!decoded || decoded.role === 'admin') return employees;
+  if (!decoded) return employees;
+  if (decoded.role === 'admin') {
+    const allow = opts?.allowedSupervisorNames;
+    if (allow && allow.size > 0) {
+      return employees.filter((e) => allow.has(norm(e.supervisors)));
+    }
+    return employees;
+  }
   const viewer = normLower(decoded.name);
   return employees.filter((e) => normLower(e.supervisors) === viewer);
 }

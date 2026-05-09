@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getSheetData } from '@/lib/googleSheets';
 import { getSupervisorRiders } from '@/lib/dataService';
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
@@ -23,6 +24,9 @@ export async function GET(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const d0 = assertAdminApiAccess(decoded, 'debug');
+    if (d0) return d0;
 
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action') || 'all';

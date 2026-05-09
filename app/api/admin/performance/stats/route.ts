@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getSheetData } from '@/lib/googleSheets';
 
 export const dynamic = 'force-dynamic';
@@ -41,6 +42,9 @@ export async function GET(request: NextRequest) {
         error: 'غير مصرح - يجب أن تكون مسجلاً كمدير للوصول إلى هذه الصفحة.' 
       }, { status: 401 });
     }
+
+    const ps = assertAdminApiAccess(decoded, 'performance_upload');
+    if (ps) return ps;
 
     const dailyData = await getSheetData('البيانات اليومية');
     

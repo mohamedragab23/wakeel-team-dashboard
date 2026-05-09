@@ -17,6 +17,8 @@ type Viewer = { role: 'supervisor' | 'admin'; name: string };
 
 export type AnalyzeLegacyShiftsInput = {
   viewer: Viewer;
+  /** When set (e.g. admin scoped by zone), only employees whose supervisors value is in this set */
+  allowedSupervisorNames?: Set<string> | null;
   files: Array<{ name: string; bytes: ArrayBuffer }>;
   rangeStart: string; // YYYY-MM-DD
   rangeEnd: string; // YYYY-MM-DD
@@ -47,7 +49,9 @@ export async function analyzeLegacyShifts(input: AnalyzeLegacyShiftsInput) {
   // HQ source: shifts sheet tab "all"
   let employees = buildEmployeesFromAllSheet(shiftsAllMatrix);
   employees = filterEmployeesWakeel3Cities(employees);
-  employees = filterEmployeesForViewer(employees, input.viewer);
+  employees = filterEmployeesForViewer(employees, input.viewer, {
+    allowedSupervisorNames: input.allowedSupervisorNames ?? null,
+  });
 
   if (!employees.length) {
     return {

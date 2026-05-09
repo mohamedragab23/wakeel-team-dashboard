@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getAllSupervisors } from '@/lib/adminService';
 import fs from 'fs';
 import path from 'path';
@@ -85,6 +86,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
+    const el = assertAdminApiAccess(decoded, 'equipment_limits');
+    if (el) return el;
+
     const supervisors = await getAllSupervisors(false);
     const stored = readLimits();
 
@@ -114,6 +118,9 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const el2 = assertAdminApiAccess(decoded, 'equipment_limits');
+    if (el2) return el2;
 
     const body = await request.json();
     const limits = body.limits as Record<string, Partial<SupervisorLimits>> | undefined;

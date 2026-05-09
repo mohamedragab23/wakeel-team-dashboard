@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getSheetData } from '@/lib/googleSheets';
 import { invalidateSupervisorCaches, notifySupervisorsOfChange } from '@/lib/realtimeSync';
 import { cache, CACHE_KEYS } from '@/lib/cache';
@@ -102,6 +103,9 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح - المدير فقط' }, { status: 401 });
     }
+
+    const deny = assertAdminApiAccess(decoded, 'performance_upload');
+    if (deny) return deny;
 
     const body = (await request.json().catch(() => ({}))) as any;
     const dateIso = (body?.date ?? '').toString().trim();

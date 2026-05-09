@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { clearSheetData } from '@/lib/googleSheets';
 import { invalidateSupervisorCaches, notifySupervisorsOfChange } from '@/lib/realtimeSync';
 import { cache } from '@/lib/cache';
@@ -18,6 +19,9 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح - المدير فقط' }, { status: 401 });
     }
+
+    const pc = assertAdminApiAccess(decoded, 'performance_upload');
+    if (pc) return pc;
 
     console.log(`[ClearPerformance] Admin ${decoded.code} requested to clear all performance data`);
 

@@ -5,6 +5,8 @@ export interface User {
   region?: string;
   email?: string;
   permissions?: string;
+  /** Admin-only: optional zone scope (JWT / Admins sheet column E) */
+  dataZone?: string;
 }
 
 export interface Rider {

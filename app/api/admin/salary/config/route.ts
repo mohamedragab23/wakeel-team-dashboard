@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getSheetData, updateSheetRange } from '@/lib/googleSheets';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +23,9 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const scp = assertAdminApiAccess(decoded, 'salary_config');
+    if (scp) return scp;
 
     const body = await request.json();
     const { 
@@ -221,6 +225,9 @@ export async function GET(request: NextRequest) {
       if (decoded.role !== 'admin') {
         return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
       }
+
+      const scg = assertAdminApiAccess(decoded, 'salary_config');
+      if (scg) return scg;
 
       const configs: any[] = [];
       for (let i = 1; i < supervisorsData.length; i++) {

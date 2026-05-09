@@ -8,6 +8,8 @@ import { verifyToken } from '@/lib/auth';
 import { getAllSupervisors } from '@/lib/adminService';
 import { getSupervisorRiders } from '@/lib/dataService';
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { isAllowedZone } from '@/lib/zones';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,10 +30,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const decoded = verifyToken(token);
+    const decoded = verifyToken(token) as {
+      role?: string;
+      permissions?: string;
+      dataZone?: string;
+    } | null;
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const denied = assertAdminApiAccess(decoded, 'supervisor_performance');
+    if (denied) return denied;
 
     const { searchParams } = new URL(request.url);
     const startDateStr = searchParams.get('start_date');
@@ -53,7 +62,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'تاريخ البداية يجب أن يكون قبل تاريخ النهاية' }, { status: 400 });
     }
 
-    const supervisors = await getAllSupervisors(false);
+    let supervisors = await getAllSupervisors(false);
+    const scopeZone = String(decoded.dataZone || '').trim();
+    if (scopeZone && isAllowedZone(scopeZone)) {
+      supervisors = supervisors.filter((s) => (s.region || '').trim() === scopeZone);
+    }
+
     const results: Array<{
       code: string;
       name: string;

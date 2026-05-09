@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getSheetData, updateSheetRange, ensureSheetExists } from '@/lib/googleSheets';
 import fs from 'fs';
 import path from 'path';
@@ -115,6 +116,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
+    const ep = assertAdminApiAccess(decoded, 'equipment_pricing');
+    if (ep) return ep;
+
     const fromSheets = await readPricingFromSheets();
     if (fromSheets) {
       return NextResponse.json({ success: true, data: fromSheets });
@@ -145,6 +149,9 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const ep2 = assertAdminApiAccess(decoded, 'equipment_pricing');
+    if (ep2) return ep2;
 
     const pricing: EquipmentPricing = await request.json();
 

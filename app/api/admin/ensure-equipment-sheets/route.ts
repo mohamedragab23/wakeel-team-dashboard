@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { ensureAllEquipmentSheets } from '@/lib/ensureEquipmentSheets';
 
 export const dynamic = 'force-dynamic';
@@ -15,6 +16,9 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const eq = assertAdminApiAccess(decoded, 'equipment_requests');
+    if (eq) return eq;
 
     const result = await ensureAllEquipmentSheets();
     return NextResponse.json({

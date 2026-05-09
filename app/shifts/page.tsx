@@ -1,11 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Layout from '@/components/Layout';
 import Card from '@/components/ui-v2/Card';
 import Button from '@/components/ui-v2/Button';
 import Tabs, { type TabItem } from '@/components/ui-v2/Tabs';
 import { v2CssVars } from '@/theme/tokens';
+import { ZONE_OPTIONS } from '@/lib/zones';
+import { filterShiftsReportsBySupervisorNames, type ShiftsReportsBundle } from '@/lib/shiftsAdminZoneFilter';
 import {
   Bar,
   BarChart,
@@ -43,6 +45,61 @@ export default function ShiftsPage() {
     supervisorSummaryByDate?: Record<string, any[]>;
   }>({});
 
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [zoneFilter, setZoneFilter] = useState<string>('all');
+  const [zoneMap, setZoneMap] = useState<Array<{ name: string; region: string }>>([]);
+
+  useEffect(() => {
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || 'null');
+      setIsAdmin(u?.role === 'admin');
+    } catch {
+      setIsAdmin(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/admin/supervisor-zone-map', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const j = await res.json();
+        if (j.success) setZoneMap(Array.isArray(j.data) ? j.data : []);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [isAdmin]);
+
+  const supervisorNamesInZone = useMemo(() => {
+    if (!isAdmin || zoneFilter === 'all' || !zoneMap.length) return null;
+    const names = zoneMap
+      .filter((x) => (x.region || '').trim() === zoneFilter)
+      .map((x) => (x.name || '').trim())
+      .filter(Boolean);
+    return new Set(names);
+  }, [isAdmin, zoneFilter, zoneMap]);
+
+  const zoneFiltered = useMemo(() => {
+    if (!supervisorNamesInZone) return null;
+    return filterShiftsReportsBySupervisorNames(reports as ShiftsReportsBundle, datesUsed, supervisorNamesInZone);
+  }, [supervisorNamesInZone, reports, datesUsed]);
+
+  const displayMetrics = zoneFiltered?.metrics ?? metrics;
+  const displayMetricsByDate = zoneFiltered?.metricsByDate ?? metricsByDate;
+  const displayReports = zoneFiltered?.reports ?? reports;
+
+  useEffect(() => {
+    if (!zoneFiltered) return;
+    const opts = zoneFiltered.reports.supervisorOptions || [];
+    if (supervisorFilter && !opts.includes(supervisorFilter)) {
+      setSupervisorFilter(opts[0] || '');
+    }
+  }, [zoneFiltered, supervisorFilter]);
+
   const tabs: Array<TabItem<ShiftsTab>> = [
     { value: 'upload', label: 'رفع الملفات' },
     { value: 'overview', label: 'نظرة عامة' },
@@ -53,14 +110,14 @@ export default function ShiftsPage() {
 
   const pivotChartData = useMemo(() => {
     const d = activeScope !== 'all' ? activeScope : datesUsed[0];
-    const rows = (d && reports.pivotByDate?.[d]) || [];
+    const rows = (d && displayReports.pivotByDate?.[d]) || [];
     return rows.map((r) => ({ city: r.city, pct: r.pct, assigned: r.assigned, HQ: r.HQ }));
-  }, [datesUsed, reports.pivotByDate, activeScope]);
+  }, [datesUsed, displayReports.pivotByDate, activeScope]);
 
   const scopedMetrics = useMemo(() => {
-    if (activeScope !== 'all' && metricsByDate?.[activeScope]) return metricsByDate[activeScope];
-    return metrics;
-  }, [activeScope, metricsByDate, metrics]);
+    if (activeScope !== 'all' && displayMetricsByDate?.[activeScope]) return displayMetricsByDate[activeScope];
+    return displayMetrics;
+  }, [activeScope, displayMetricsByDate, displayMetrics]);
 
   const handleAnalyze = async () => {
     if (!selectedFiles.length) {
@@ -97,6 +154,7 @@ export default function ShiftsPage() {
       setMetricsByDate(typeof data.metricsByDate === 'object' && data.metricsByDate ? data.metricsByDate : {});
       setReports(data.reports || {});
       setSupervisorFilter('');
+      setZoneFilter('all');
       setMessage({ type: 'ok', text: 'تم التحليل (مطابق للداشبورد القديم) — Wakeel + 3 مدن فقط + EVALUATED/PUBLISHED.' });
       const firstDay = Array.isArray(data.datesUsed) && data.datesUsed.length ? data.datesUsed[0] : 'all';
       setActiveScope(firstDay);
@@ -122,6 +180,30 @@ export default function ShiftsPage() {
         </div>
 
         <Tabs items={tabs} value={tab} onChange={setTab} className="flex flex-wrap w-full sm:w-auto" />
+
+        {isAdmin ? (
+          <Card className="p-4 space-y-2">
+            <p className="text-sm text-[#EAF0FF] font-medium">فلتر زون المشرفين (عرض فقط)</p>
+            <p className="text-xs text-[rgba(234,240,255,0.6)]">
+              يعتمد على عمود الزون في ورقة المشرفين ويطابق اسم المشرف مع عمود supervisors في بيانات الشفتات.
+            </p>
+            <select
+              value={zoneFilter}
+              onChange={(e) => {
+                setZoneFilter(e.target.value);
+                setSupervisorFilter('');
+              }}
+              className="w-full sm:w-[320px] rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm text-[#EAF0FF]"
+            >
+              <option value="all">كل الزونات</option>
+              {ZONE_OPTIONS.map((z) => (
+                <option key={z} value={z}>
+                  {z}
+                </option>
+              ))}
+            </select>
+          </Card>
+        ) : null}
 
         {message ? (
           <div
@@ -260,8 +342,8 @@ export default function ShiftsPage() {
                     <BarChart
                       data={datesUsed.map((d) => ({
                         date: d,
-                        assigned: metricsByDate?.[d]?.booked ?? 0,
-                        unassigned: metricsByDate?.[d]?.notBooked ?? 0,
+                        assigned: displayMetricsByDate?.[d]?.booked ?? 0,
+                        unassigned: displayMetricsByDate?.[d]?.notBooked ?? 0,
                       }))}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
@@ -294,7 +376,7 @@ export default function ShiftsPage() {
                       className="w-full sm:w-[320px] rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm text-[#EAF0FF]"
                     >
                       <option value="">الكل</option>
-                      {(reports.supervisorOptions || []).map((s) => (
+                      {(displayReports.supervisorOptions || []).map((s) => (
                         <option key={s} value={s}>
                           {s}
                         </option>
@@ -304,7 +386,7 @@ export default function ShiftsPage() {
                 </Card>
 
                 {datesUsed.map((d) => {
-                  const allRows = reports.assignedRowsByDate?.[d] || [];
+                  const allRows = displayReports.assignedRowsByDate?.[d] || [];
                   const rows = supervisorFilter
                     ? allRows.filter((r: any) => String(r?.supervisors || '').trim() === supervisorFilter)
                     : allRows;
@@ -361,7 +443,7 @@ export default function ShiftsPage() {
                       className="w-full sm:w-[320px] rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm text-[#EAF0FF]"
                     >
                       <option value="">الكل</option>
-                      {(reports.supervisorOptions || []).map((s) => (
+                      {(displayReports.supervisorOptions || []).map((s) => (
                         <option key={s} value={s}>
                           {s}
                         </option>
@@ -371,7 +453,7 @@ export default function ShiftsPage() {
                 </Card>
 
                 {datesUsed.map((d) => {
-                  const allRows = reports.unassignedRowsByDate?.[d] || [];
+                  const allRows = displayReports.unassignedRowsByDate?.[d] || [];
                   const rows = supervisorFilter
                     ? allRows.filter((r: any) => String(r?.supervisors || '').trim() === supervisorFilter)
                     : allRows;
@@ -426,7 +508,7 @@ export default function ShiftsPage() {
                 ) : null}
 
                 {/* Admin summary table (per selected day) */}
-                {activeScope !== 'all' && (reports.supervisorSummaryByDate?.[activeScope]?.length || 0) > 0 ? (
+                {activeScope !== 'all' && (displayReports.supervisorSummaryByDate?.[activeScope]?.length || 0) > 0 ? (
                   <Card className="overflow-hidden">
                     <div className="px-4 py-3 border-b border-[rgba(255,255,255,0.08)] text-sm text-[#EAF0FF] font-medium">
                       ملخص حسب المشرف — {activeScope}
@@ -443,7 +525,7 @@ export default function ShiftsPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {(reports.supervisorSummaryByDate?.[activeScope] || []).map((r: any, i: number) => (
+                          {(displayReports.supervisorSummaryByDate?.[activeScope] || []).map((r: any, i: number) => (
                             <tr key={i} className="border-b border-[rgba(255,255,255,0.06)] hover:bg-[rgba(0,245,255,0.05)]">
                               <td className="px-3 py-2 text-[rgba(234,240,255,0.9)] font-medium">{String(r.supervisor)}</td>
                               <td className="px-3 py-2 text-[rgba(234,240,255,0.85)]">{activeScope}</td>
@@ -465,17 +547,17 @@ export default function ShiftsPage() {
                   <Card className="p-4 space-y-3">
                     <p className="text-sm text-[#EAF0FF] font-medium">تفاصيل المشرفين — {activeScope}</p>
                     <Tabs
-                      items={(reports.supervisorOptions || []).map((s) => ({ value: s, label: s }))}
-                      value={supervisorFilter || (reports.supervisorOptions?.[0] || '')}
+                      items={(displayReports.supervisorOptions || []).map((s) => ({ value: s, label: s }))}
+                      value={supervisorFilter || (displayReports.supervisorOptions?.[0] || '')}
                       onChange={(v) => setSupervisorFilter(v)}
                       className="flex flex-wrap w-full sm:w-auto"
                     />
 
                     {(() => {
-                      const sup = supervisorFilter || (reports.supervisorOptions?.[0] || '');
+                      const sup = supervisorFilter || (displayReports.supervisorOptions?.[0] || '');
                       if (!sup) return null;
-                      const assignedAll = reports.assignedRowsByDate?.[activeScope] || [];
-                      const unassignedAll = reports.unassignedRowsByDate?.[activeScope] || [];
+                      const assignedAll = displayReports.assignedRowsByDate?.[activeScope] || [];
+                      const unassignedAll = displayReports.unassignedRowsByDate?.[activeScope] || [];
                       const assigned = assignedAll.filter((r: any) => String(r?.supervisors || '').trim() === sup);
                       const unassigned = unassignedAll.filter((r: any) => String(r?.supervisors || '').trim() === sup);
                       const total = assigned.length + unassigned.length;
