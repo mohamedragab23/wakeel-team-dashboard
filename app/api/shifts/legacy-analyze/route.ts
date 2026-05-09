@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { analyzeLegacyShifts } from '@/lib/shiftsLegacyAnalyze';
 import { getAllSupervisors } from '@/lib/adminService';
-import { isAllowedZone } from '@/lib/zones';
+import { parseAdminAllowedZonesList } from '@/lib/zones';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,10 +21,12 @@ export async function POST(request: NextRequest) {
     }
 
     let allowedSupervisorNames: Set<string> | null = null;
-    if (decoded.role === 'admin' && decoded.dataZone && isAllowedZone(decoded.dataZone)) {
+    const scopeZones = parseAdminAllowedZonesList(decoded.dataZone);
+    if (decoded.role === 'admin' && scopeZones.length > 0) {
+      const allowed = new Set<string>(scopeZones);
       const sups = await getAllSupervisors(false);
       const names = sups
-        .filter((s) => (s.region || '').trim() === decoded.dataZone)
+        .filter((s) => allowed.has((s.region || '').trim()))
         .map((s) => (s.name || '').trim())
         .filter(Boolean);
       allowedSupervisorNames = new Set(names);

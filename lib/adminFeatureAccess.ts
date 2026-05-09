@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { isAllowedZone } from '@/lib/zones';
+import { parseAdminAllowedZonesList } from '@/lib/zones';
 
 export const LIMITED_PREFIX = 'limited:';
 
@@ -114,12 +114,12 @@ export function parseLimitedFeatures(permissions: string | undefined | null): st
     .filter(Boolean);
 }
 
+/** Normalize admin scope: one or many zones → pipe-separated allowed list (invalid tokens dropped). */
 export function normalizeAdminDataZone(v: unknown): string {
-  const s = String(v ?? '').trim();
-  if (!s) return '';
-  if (isAllowedZone(s)) return s;
-  return s;
+  return parseAdminAllowedZonesList(v).join('|');
 }
+
+export { parseAdminAllowedZonesList };
 
 export function adminFeatureAllowed(permissions: string | undefined | null, feature: AdminFeatureKey): boolean {
   const limited = parseLimitedFeatures(permissions);

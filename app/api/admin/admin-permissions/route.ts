@@ -9,7 +9,6 @@ import {
   normalizeAdminDataZone,
   type AdminFeatureKey,
 } from '@/lib/adminFeatureAccess';
-import { isAllowedZone } from '@/lib/zones';
 
 export const dynamic = 'force-dynamic';
 
@@ -111,8 +110,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: e?.message || 'صلاحيات غير صالحة' }, { status: 400 });
     }
 
-    const dzRaw = body?.dataZone != null ? String(body.dataZone).trim() : '';
-    const dataZone = dzRaw && isAllowedZone(dzRaw) ? normalizeAdminDataZone(dzRaw) : '';
+    const dzInput =
+      Array.isArray(body?.dataZones) ? body.dataZones : body?.dataZone != null ? body.dataZone : '';
+    const dataZone = normalizeAdminDataZone(dzInput);
 
     if (!targetCode) {
       return NextResponse.json({ success: false, error: 'كود الأدمن المستهدف مطلوب' }, { status: 400 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -9,14 +9,14 @@ import {
   isGrantingAdmin,
   type AdminFeatureKey,
 } from '@/lib/adminFeatureAccess';
-import { ZONE_OPTIONS } from '@/lib/zones';
+import { ZONE_OPTIONS, parseAdminAllowedZonesList } from '@/lib/zones';
 
 export default function AdminPermissionsPage() {
   const queryClient = useQueryClient();
   const [selectedCode, setSelectedCode] = useState<string>('');
   const [mode, setMode] = useState<'full' | 'limited'>('limited');
   const [picked, setPicked] = useState<Set<AdminFeatureKey>>(new Set());
-  const [dataZone, setDataZone] = useState<string>('');
+  const [pickedZones, setPickedZones] = useState<Set<string>>(new Set());
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [canGrant, setCanGrant] = useState(false);
 
@@ -72,7 +72,7 @@ export default function AdminPermissionsPage() {
       setMode('full');
       setPicked(new Set());
     }
-    setDataZone((a.dataZone || '').trim());
+    setPickedZones(new Set(parseAdminAllowedZonesList(a.dataZone || '')));
   };
 
   const saveMutation = useMutation({
@@ -91,7 +91,7 @@ export default function AdminPermissionsPage() {
         body: JSON.stringify({
           targetCode: selectedCode,
           permissions,
-          dataZone: dataZone || '',
+          dataZones: Array.from(pickedZones),
         }),
       });
       const j = await res.json();
@@ -126,8 +126,8 @@ export default function AdminPermissionsPage() {
         <div>
           <h1 className="text-2xl font-bold">إدارة صلاحيات الأدمن</h1>
           <p className="text-sm text-[rgba(234,240,255,0.72)] mt-1">
-            اختر مستخدم أدمن ثم حدد الميزات المسموح بها. عمود «نطاق الزون» في الشيت يقيّد عرض أداء المشرفين
-            وبيانات ذات صلة لتطابق زون المشرفين فقط (قيمة من القائمة المعتمدة أو فارغ للكل).
+            اختر مستخدم أدمن ثم حدد الميزات المسموح بها.             عمود «نطاق الزون» في الشيت يقيّد عرض أداء المشرفين وبيانات ذات صلة لتطابق زون المشرفين فقط
+            (يمكن اختيار أكثر من زون؛ تُحفظ مفصولة بـ | في الشيت، أو اترك الكل بدون تقييد).
           </p>
         </div>
 
@@ -233,19 +233,31 @@ export default function AdminPermissionsPage() {
                 )}
 
                 <div>
-                  <label className="block text-sm mb-1">نطاق الزون (اختياري — يقيّد بيانات أداء المشرفين وما شابه)</label>
-                  <select
-                    className="w-full max-w-md rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm"
-                    value={dataZone}
-                    onChange={(e) => setDataZone(e.target.value)}
-                  >
-                    <option value="">بدون تقييد (كل الزونات)</option>
+                  <label className="block text-sm mb-1">
+                    نطاق الزون (اختياري — يقيّد بيانات أداء المشرفين وما شابه؛ يمكن اختيار أكثر من زون)
+                  </label>
+                  <p className="text-xs text-[rgba(234,240,255,0.5)] mb-2">
+                    بدون اختيار أي زون = عرض كل الزونات. عند اختيار واحد أو أكثر يُعرض فقط المشرفون في تلك الزونات.
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2 max-w-3xl">
                     {ZONE_OPTIONS.map((z) => (
-                      <option key={z} value={z}>
-                        {z}
-                      </option>
+                      <label key={z} className="flex items-start gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={pickedZones.has(z)}
+                          onChange={() => {
+                            setPickedZones((prev) => {
+                              const n = new Set(prev);
+                              if (n.has(z)) n.delete(z);
+                              else n.add(z);
+                              return n;
+                            });
+                          }}
+                        />
+                        <span>{z}</span>
+                      </label>
                     ))}
-                  </select>
+                  </div>
                 </div>
 
                 <button
