@@ -42,6 +42,9 @@ export default function AdminPermissionsPage() {
         sheetName: string;
         admins: Array<{ rowIndex1Based: number; code: string; name: string; permissions: string; dataZone: string }>;
         featureKeys: AdminFeatureKey[];
+        totalRowsInSheet?: number;
+        parsedCount?: number;
+        columnMap?: { codeCol: number; nameCol: number; passCol: number; permCol: number; zoneCol: number };
       };
     },
     enabled: !!canGrant,
@@ -150,7 +153,21 @@ export default function AdminPermissionsPage() {
           <p className="text-[rgba(234,240,255,0.7)]">جاري التحميل…</p>
         ) : data ? (
           <div className="space-y-4 rounded-xl border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] p-4 sm:p-6">
-            <p className="text-xs text-[rgba(234,240,255,0.55)]">ورقة الشيت: {data.sheetName}</p>
+            <div className="text-xs text-[rgba(234,240,255,0.55)] space-y-1">
+              <p>ورقة الشيت: {data.sheetName}</p>
+              {typeof data.parsedCount === 'number' && typeof data.totalRowsInSheet === 'number' ? (
+                <p>
+                  صفوف بيانات مكتشفة: {data.parsedCount} (إجمالي صفوف مُرجعة من الشيت: {data.totalRowsInSheet})
+                </p>
+              ) : null}
+              {data.admins.length <= 1 ? (
+                <p className="text-amber-200/90 border border-amber-400/30 rounded-lg px-3 py-2 mt-2">
+                  يظهر هنا فقط من لهم <strong>صف في ورقة Admins</strong> مع <strong>كود غير فارغ</strong> في عمود الكود
+                  (بعد صف العناوين إن وُجد). المشرفون في تبويب «المشرفين» لا يُعرضون هنا — أضف مستخدم الأدمن كصف
+                  جديد في Admins (كود، اسم، كلمة مرور، …) ليظهر في القائمة ويستطيع الدخول كمدير.
+                </p>
+              ) : null}
+            </div>
 
             <div>
               <label className="block text-sm mb-1">الأدمن المستهدف</label>

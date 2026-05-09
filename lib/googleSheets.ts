@@ -12,9 +12,15 @@ async function getSheetsClient() {
 }
 
 // Get sheet data with enhanced caching (5 minutes cache for better performance)
-export async function getSheetData(sheetName: string, useCache: boolean = true): Promise<any[][]> {
-  const cacheKey = CACHE_KEYS.sheetData(sheetName);
-  
+/** @param rangeOverride e.g. "Admins!A:ZZ" — wider columns when sheet uses many columns */
+export async function getSheetData(
+  sheetName: string,
+  useCache: boolean = true,
+  rangeOverride?: string
+): Promise<any[][]> {
+  const range = rangeOverride ?? `${sheetName}!A:Z`;
+  const cacheKey = rangeOverride ? `${CACHE_KEYS.sheetData(sheetName)}::${range}` : CACHE_KEYS.sheetData(sheetName);
+
   // Check server-side cache first
   if (useCache) {
     const cached = cache.get<any[][]>(cacheKey);
@@ -25,12 +31,12 @@ export async function getSheetData(sheetName: string, useCache: boolean = true):
 
   try {
     const sheets = await getSheetsClient();
-    
+
     // Use batchGet for better performance if multiple ranges needed
     // Get formatted values to ensure dates written as "YYYY-MM-DD" are read correctly
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: getMainSpreadsheetId(),
-      range: `${sheetName}!A:Z`,
+      range,
       majorDimension: 'ROWS',
       valueRenderOption: 'FORMATTED_VALUE', // Get formatted values (dates as strings in locale format)
       // This ensures dates written as "YYYY-MM-DD" are read as strings, not converted
@@ -330,16 +336,19 @@ export async function updateSheetRow(
     const sheets = await getSheetsClient();
     await sheets.spreadsheets.values.update({
       spreadsheetId: getMainSpreadsheetId(),
-      range: `${sheetName}!A${rowNumber}:Z${rowNumber}`,
+      range: `${sheetName}!A${rowNumber}:ZZ${rowNumber}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [values],
       },
     });
     
-    // Clear cache after successful write
-    cache.clear(CACHE_KEYS.sheetData(sheetName));
-    
+    const sheetKey = CACHE_KEYS.sheetData(sheetName);
+    cache.clear(sheetKey);
+    for (const key of cache.keys()) {
+      if (key.startsWith(`${sheetKey}::`)) cache.clear(key);
+    }
+
     return true;
   } catch (error) {
     console.error(`Error updating row ${rowNumber} in sheet ${sheetName}:`, error);

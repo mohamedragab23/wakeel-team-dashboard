@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { getSheetData, updateSheetRow } from '@/lib/googleSheets';
+import { ADMIN_SHEET_TAB_CANDIDATES, parseAdminsSheetDataMatrix } from '@/lib/adminsSheetParser';
 import {
   ALL_ADMIN_FEATURE_KEYS,
   LIMITED_PREFIX,
@@ -12,11 +13,9 @@ import { isAllowedZone } from '@/lib/zones';
 
 export const dynamic = 'force-dynamic';
 
-const ADMIN_SHEET_CANDIDATES = ['Admins', 'Admin', 'admins', 'admin', 'الأدمن', 'الادمن'];
-
 async function loadAdminsSheet(): Promise<{ sheetName: string; rows: any[][] } | null> {
-  for (const name of ADMIN_SHEET_CANDIDATES) {
-    const data = await getSheetData(name);
+  for (const name of ADMIN_SHEET_TAB_CANDIDATES) {
+    const data = await getSheetData(name, false, `${name}!A:ZZ`);
     if (data.length > 0) return { sheetName: name, rows: data };
   }
   return null;
@@ -40,23 +39,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'تعذر قراءة ورقة الأدمن' }, { status: 500 });
     }
 
-    const admins = [];
-    for (let i = 1; i < loaded.rows.length; i++) {
-      const row = loaded.rows[i];
-      const code = row[0]?.toString().trim();
-      if (!code) continue;
-      admins.push({
-        rowIndex1Based: i + 1,
-        code,
-        name: row[1]?.toString().trim() || '',
-        permissions: row[3]?.toString().trim() ?? '',
-        dataZone: row[4]?.toString().trim() ?? '',
-      });
-    }
+    const { admins: parsed, columns } = parseAdminsSheetDataMatrix(loaded.rows);
+    const admins = parsed.map((a) => ({
+      rowIndex1Based: a.sheetRow1Based,
+      code: a.code,
+      name: a.name,
+      permissions: a.permissions,
+      dataZone: a.dataZone,
+    }));
 
     return NextResponse.json({
       success: true,
-      data: { sheetName: loaded.sheetName, admins, featureKeys: ALL_ADMIN_FEATURE_KEYS },
+      data: {
+        sheetName: loaded.sheetName,
+        admins,
+        featureKeys: ALL_ADMIN_FEATURE_KEYS,
+        columnMap: columns,
+        totalRowsInSheet: loaded.rows.length,
+        parsedCount: admins.length,
+      },
     });
   } catch (error: any) {
     console.error('[admin-permissions GET]', error);
@@ -122,22 +123,18 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'تعذر قراءة ورقة الأدمن' }, { status: 500 });
     }
 
-    let foundRow = -1;
-    for (let i = 1; i < loaded.rows.length; i++) {
-      const code = loaded.rows[i][0]?.toString().trim();
-      if (code === targetCode) {
-        foundRow = i + 1;
-        break;
-      }
-    }
-    if (foundRow < 0) {
+    const { admins: parsed, columns } = parseAdminsSheetDataMatrix(loaded.rows);
+    const target = parsed.find((a) => a.code === targetCode);
+    if (!target) {
       return NextResponse.json({ success: false, error: 'الأدمن غير موجود' }, { status: 404 });
     }
 
+    const foundRow = target.sheetRow1Based;
     const row = [...(loaded.rows[foundRow - 1] || [])];
-    while (row.length < 5) row.push('');
-    row[3] = permissions;
-    row[4] = dataZone;
+    const maxCol = Math.max(columns.permCol, columns.zoneCol, row.length - 1);
+    while (row.length <= maxCol) row.push('');
+    row[columns.permCol] = permissions;
+    row[columns.zoneCol] = dataZone;
 
     const ok = await updateSheetRow(loaded.sheetName, foundRow, row);
     if (!ok) {

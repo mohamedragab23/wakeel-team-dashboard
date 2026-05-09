@@ -1,5 +1,5 @@
-import { getSheetData, findDataInSheet } from './googleSheets';
-import { normalizeAdminDataZone } from './adminFeatureAccess';
+import { getSheetData } from './googleSheets';
+import { parseAdminsSheetDataMatrix, ADMIN_SHEET_TAB_CANDIDATES } from './adminsSheetParser';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -123,12 +123,11 @@ export async function authenticateAdmin(code: string, password: string): Promise
     // Be tolerant to common Admins sheet naming differences.
     // Note: getSheetData returns [] on *any* read error (missing sheet, wrong spreadsheet ID,
     // missing permissions, invalid service account key, etc).
-    const adminSheetCandidates = ['Admins', 'Admin', 'admins', 'admin', 'الأدمن', 'الادمن'];
     let adminsData: any[][] = [];
     let usedSheetName: string | null = null;
 
-    for (const candidate of adminSheetCandidates) {
-      const data = await getSheetData(candidate);
+    for (const candidate of ADMIN_SHEET_TAB_CANDIDATES) {
+      const data = await getSheetData(candidate, false, `${candidate}!A:ZZ`);
       if (data.length > 0) {
         adminsData = data;
         usedSheetName = candidate;
@@ -142,52 +141,42 @@ export async function authenticateAdmin(code: string, password: string): Promise
         success: false,
         error:
           'تعذر قراءة ورقة الأدمن. تأكد أن اسم التبويب أحد القيم التالية: ' +
-          adminSheetCandidates.join(' / ') +
+          ADMIN_SHEET_TAB_CANDIDATES.join(' / ') +
           '، وتأكد أن معرف الملف (GOOGLE_SHEETS_SPREADSHEET_ID أو GOOGLE_SHEETS_007SUP_SPREADSHEET_ID) صحيح وأن حساب الخدمة لديه صلاحية على الملف.',
       };
     }
 
-    for (let i = 1; i < adminsData.length; i++) {
-      const row = adminsData[i];
+    const { admins: parsedAdmins } = parseAdminsSheetDataMatrix(adminsData);
 
-      if (!row[0] || row[0].toString().trim() === '') continue;
-
-      const adminCode = row[0].toString().trim();
-      const adminName = row[1] ? row[1].toString().trim() : '';
-      const adminPassword = row[2] ? row[2].toString().trim() : '';
-      const adminPermissions = row[3] ? row[3].toString().trim() : '';
-      const adminDataZone = normalizeAdminDataZone(row[4]);
-
-      if (adminCode === code) {
-        if (adminPassword === password) {
-          const token = jwt.sign(
-            {
-              code: adminCode,
-              name: adminName,
-              role: 'admin',
-              permissions: adminPermissions || '',
-              dataZone: adminDataZone || '',
-            },
-            JWT_SECRET,
-            { expiresIn: '7d' }
-          );
-
-          return {
-            success: true,
-            code: adminCode,
-            name: adminName,
-            permissions: adminPermissions,
-            dataZone: adminDataZone || '',
-            role: 'admin',
-            token,
-          };
-        } else {
-          return {
-            success: false,
-            error: 'كلمة المرور غير صحيحة',
-          };
-        }
+    for (const a of parsedAdmins) {
+      if (a.code !== code) continue;
+      if (a.password !== password) {
+        return {
+          success: false,
+          error: 'كلمة المرور غير صحيحة',
+        };
       }
+      const token = jwt.sign(
+        {
+          code: a.code,
+          name: a.name,
+          role: 'admin',
+          permissions: a.permissions || '',
+          dataZone: a.dataZone || '',
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      return {
+        success: true,
+        code: a.code,
+        name: a.name,
+        permissions: a.permissions,
+        dataZone: a.dataZone || '',
+        role: 'admin',
+        token,
+      };
     }
 
     return {
