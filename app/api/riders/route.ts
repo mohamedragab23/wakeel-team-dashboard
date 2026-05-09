@@ -5,9 +5,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { getSupervisorRiders, getLatestRiderData } from '@/lib/dataService';
+import { getSupervisorRiders, getAllAssignedRiders, getLatestRiderData } from '@/lib/dataService';
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { aggregateRidersInDateRange } from '@/lib/riderPerformanceAggregate';
+import { parseAdminAllowedZonesList } from '@/lib/zones';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,11 +30,22 @@ export async function GET(request: NextRequest) {
     const endDateParam = searchParams.get('endDate');
     const dateParam = searchParams.get('date'); // Backward compatibility
 
-    // Get riders from Google Sheets (filtered by supervisor if supervisor)
-    const supervisorId = decoded.role === 'supervisor' ? decoded.code : undefined;
-    // Check if refresh is requested (bypass cache)
     const refresh = searchParams.get('refresh') === 'true';
-    const riders = await getSupervisorRiders(supervisorId || '', !refresh);
+    const useCache = !refresh;
+    let riders =
+      decoded.role === 'admin'
+        ? await getAllAssignedRiders(useCache)
+        : await getSupervisorRiders(decoded.code, useCache);
+
+    if (decoded.role === 'admin') {
+      const zones = parseAdminAllowedZonesList((decoded as { dataZone?: string }).dataZone);
+      if (zones.length > 0) {
+        const allow = new Set<string>(zones);
+        riders = riders.filter((r) => allow.has((r.region || '').trim()));
+      }
+    }
+
+    const performanceScope = decoded.role === 'admin' ? null : decoded.code;
 
     // If date range is provided, get data for that range
     if (startDateParam && endDateParam) {
@@ -44,15 +56,10 @@ export async function GET(request: NextRequest) {
       console.log(`[Riders API] ========================================`);
       console.log(`[Riders API] Date range requested: ${startDateParam} to ${endDateParam}`);
       console.log(`[Riders API] Parsed dates: ${startDate.toISOString()} to ${endDate.toISOString()}`);
-      console.log(`[Riders API] Supervisor: ${decoded.code}, Assigned riders: ${riders.length}`);
+      console.log(`[Riders API] Viewer: ${decoded.role} ${decoded.code}, Riders list size: ${riders.length}`);
       console.log(`[Riders API] Rider codes: ${riders.map(r => r.code).join(', ')}`);
 
-      // Get performance data for the selected date range
-      const performanceData = await getSupervisorPerformanceFiltered(
-        decoded.code,
-        startDate,
-        endDate
-      );
+      const performanceData = await getSupervisorPerformanceFiltered(performanceScope, startDate, endDate);
 
       console.log(`[Riders API] Performance data found: ${performanceData.length} records`);
       
@@ -101,12 +108,7 @@ export async function GET(request: NextRequest) {
       const endDate = new Date(selectedDate);
       endDate.setHours(23, 59, 59, 999);
 
-      // Get performance data for the selected date
-      const performanceData = await getSupervisorPerformanceFiltered(
-        decoded.code,
-        startDate,
-        endDate
-      );
+      const performanceData = await getSupervisorPerformanceFiltered(performanceScope, startDate, endDate);
 
       const seeds = riders.map((r) => ({
         code: r.code,

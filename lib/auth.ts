@@ -156,13 +156,19 @@ export async function authenticateAdmin(code: string, password: string): Promise
           error: 'كلمة المرور غير صحيحة',
         };
       }
+      const permissionsNorm = String(a.permissions ?? '')
+        .replace(/^\uFEFF/, '')
+        .trim();
+      const dataZoneNorm = String(a.dataZone ?? '')
+        .replace(/^\uFEFF/, '')
+        .trim();
       const token = jwt.sign(
         {
           code: a.code,
           name: a.name,
           role: 'admin',
-          permissions: a.permissions || '',
-          dataZone: a.dataZone || '',
+          permissions: permissionsNorm,
+          dataZone: dataZoneNorm,
         },
         JWT_SECRET,
         { expiresIn: '7d' }
@@ -172,8 +178,8 @@ export async function authenticateAdmin(code: string, password: string): Promise
         success: true,
         code: a.code,
         name: a.name,
-        permissions: a.permissions,
-        dataZone: a.dataZone || '',
+        permissions: permissionsNorm,
+        dataZone: dataZoneNorm,
         role: 'admin',
         token,
       };

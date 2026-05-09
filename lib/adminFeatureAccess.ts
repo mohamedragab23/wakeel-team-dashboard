@@ -104,7 +104,9 @@ export function getAdminMenuDefs(): AdminMenuDef[] {
 
 /** Comma-separated feature keys after "limited:" */
 export function parseLimitedFeatures(permissions: string | undefined | null): string[] | null {
-  const p = String(permissions ?? '').trim();
+  const p = String(permissions ?? '')
+    .replace(/^\uFEFF/, '')
+    .trim();
   if (!p.toLowerCase().startsWith(LIMITED_PREFIX)) return null;
   const rest = p.slice(LIMITED_PREFIX.length).trim();
   if (!rest) return [];

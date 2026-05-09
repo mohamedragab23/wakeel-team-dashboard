@@ -68,7 +68,7 @@ export default function Layout({ children }: LayoutProps) {
 
   const getMenuItems = () => {
     if (user?.role === 'admin') {
-      const base = filterAdminMenuForPermissions(user?.permissions).map((d) => ({
+      const base = filterAdminMenuForPermissions(String(user?.permissions ?? '')).map((d) => ({
         href: d.href,
         label: d.label,
         icon: d.icon,

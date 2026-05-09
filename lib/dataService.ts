@@ -95,6 +95,40 @@ export async function getSupervisorRiders(supervisorCode: string, useCache: bool
   }
 }
 
+/** All riders assigned to any supervisor (for admin / مدير on صفحة المناديب). */
+export async function getAllAssignedRiders(useCache: boolean = true): Promise<Rider[]> {
+  const cacheKey = 'riders:__all_assigned__';
+  if (useCache) {
+    const cached = cache.get<Rider[]>(cacheKey);
+    if (cached) return cached;
+  }
+  try {
+    const ridersData = await getSheetData('المناديب', useCache);
+    const riders: Rider[] = [];
+    for (let i = 1; i < ridersData.length; i++) {
+      const row = ridersData[i];
+      if (!row[0] || row[0].toString().trim() === '') continue;
+      const riderSupervisorCode = row[3] ? row[3].toString().trim() : '';
+      if (!riderSupervisorCode) continue;
+      riders.push({
+        code: row[0].toString().trim(),
+        name: row[1] ? row[1].toString().trim() : '',
+        region: row[2] ? row[2].toString().trim() : '',
+        supervisorCode: riderSupervisorCode,
+        supervisorName: row[4] ? row[4].toString().trim() : '',
+        phone: row[5] ? row[5].toString().trim() : '',
+        joinDate: row[6] ? row[6].toString().trim() : '',
+        status: row[7] ? row[7].toString().trim() : 'نشط',
+      });
+    }
+    if (useCache) cache.set(cacheKey, riders, 15 * 60 * 1000);
+    return riders;
+  } catch (error) {
+    console.error('Error fetching all assigned riders:', error);
+    return [];
+  }
+}
+
 // Helper function to parse date from various formats (shared with dataFilter)
 function parseDateFromValue(dateValue: any): Date | null {
   if (!dateValue) return null;

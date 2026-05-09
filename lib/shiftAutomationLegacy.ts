@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { ZONE_OPTIONS } from '@/lib/zones';
 
 export type LegacyEmployeeRow = {
   employee_id: string;
@@ -147,13 +148,40 @@ export function calcShiftHours(startHHMM: string, endHHMM: string): number {
   return Math.round((diff / 60) * 100) / 100;
 }
 
+/** RFC4180-style split: commas inside "quotes" do not break columns. */
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && c === ',') {
+      out.push(cur.trim());
+      cur = '';
+      continue;
+    }
+    cur += c;
+  }
+  out.push(cur.trim());
+  return out.map((s) => s.replace(/^"|"$/g, ''));
+}
+
 export function parseCsvToObjects(text: string): { headers: string[]; rows: Record<string, any>[] } {
   const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
   if (!lines.length) return { headers: [], rows: [] };
-  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
+  const headers = splitCsvLine(lines[0]);
   const rows: Record<string, any>[] = [];
   for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+    const cols = splitCsvLine(lines[i]);
     const obj: Record<string, any> = {};
     for (let j = 0; j < headers.length; j++) obj[headers[j]] = cols[j] ?? '';
     rows.push(obj);
@@ -264,20 +292,50 @@ export function preprocessShiftsLikeLegacy(rows: LegacyShiftRow[]): LegacyShiftR
   return out;
 }
 
+/**
+ * Keep Wakeel employees in Alexandria, Mansoura, or Greater Cairo (all other ZONE_OPTIONS + cairo/giza).
+ * Cairo export files use many sub-areas (Heliopolis, Nasr city, Ain shams, …) in the HQ sheet — not the literal "cairo".
+ */
 export function filterEmployeesWakeel3Cities(employees: LegacyEmployeeRow[]): LegacyEmployeeRow[] {
   const normKey = (s: any) =>
     normLower(s)
       .replace(/[\s\-_]+/g, '')
       .replace(/[^\p{L}\p{N}]+/gu, ''); // drop punctuation, keep letters/numbers (handles hidden chars)
 
-  const targetCities = new Set(['alexandria', 'mansoura', 'cairo']);
+  const coastalNorms = new Set(['alexandria', 'mansoura']);
+  const cairoAreaFragments = new Set<string>();
+  for (const z of ZONE_OPTIONS) {
+    if (z === 'Alexandria' || z === 'Mansoura') continue;
+    const full = normKey(z);
+    if (full.length >= 4) cairoAreaFragments.add(full);
+    for (const part of z.split(/[\s,_-]+/)) {
+      const pk = normKey(part);
+      if (pk.length >= 4) cairoAreaFragments.add(pk);
+    }
+  }
+  for (const extra of ['cairo', 'giza']) {
+    cairoAreaFragments.add(extra);
+  }
+
+  const matchesCoastal = (city: string) =>
+    Array.from(coastalNorms).some((c) => city === c || city.includes(c));
+  const matchesCairoArea = (city: string) => {
+    if (!city) return false;
+    return Array.from(cairoAreaFragments).some((frag) => {
+      if (frag.length < 4) return false;
+      if (city.includes(frag)) return true;
+      if (city.length >= 6 && frag.includes(city)) return true;
+      return false;
+    });
+  };
+
   return employees.filter((e) => {
     const contract = normKey(e.contract_name);
     const city = normKey(e.city);
-    // accept "wakeel" even if extra text/hidden chars exist
     const isWakeel = contract === 'wakeel' || contract.includes('wakeel');
-    const isTargetCity = Array.from(targetCities).some((c) => city === c || city.includes(c));
-    return isWakeel && isTargetCity;
+    if (!isWakeel) return false;
+    if (matchesCoastal(city)) return true;
+    return matchesCairoArea(city);
   });
 }
 

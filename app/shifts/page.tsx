@@ -174,7 +174,7 @@ export default function ShiftsPage() {
             <h1 className="text-2xl font-bold text-[#EAF0FF]">الشفتات (Legacy)</h1>
             <p className="text-sm text-[rgba(234,240,255,0.72)] mt-1">
               المنطق مأخوذ 1:1 من <code>shift-automation-master</code>: فلترة <code>EVALUATED/PUBLISHED</code> + dedupe
-              لكل (employee_id, date) + HQ من تبويب <code>all</code> بعد فلترة Wakeel + (Alexandria/Mansoura/Cairo).
+              لكل (employee_id, date) + HQ من تبويب <code>all</code> بعد فلترة Wakeel + (الإسكندرية/المنصورة أو زونات القاهرة الكبرى حسب قائمة الزون في النظام).
             </p>
           </div>
         </div>
