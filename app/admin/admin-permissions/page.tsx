@@ -232,16 +232,56 @@ export default function AdminPermissionsPage() {
                   </div>
                 )}
 
-                <div>
-                  <label className="block text-sm mb-1">
-                    نطاق الزون (اختياري — يقيّد بيانات أداء المشرفين وما شابه؛ يمكن اختيار أكثر من زون)
-                  </label>
-                  <p className="text-xs text-[rgba(234,240,255,0.5)] mb-2">
-                    بدون اختيار أي زون = عرض كل الزونات. عند اختيار واحد أو أكثر يُعرض فقط المشرفون في تلك الزونات.
-                  </p>
-                  <div className="grid gap-2 sm:grid-cols-2 max-w-3xl">
+                <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.2)] p-3 sm:p-4 space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      نطاق الزون (اختياري — أكثر من زون مسموح)
+                    </label>
+                    <p className="text-xs text-[rgba(234,240,255,0.55)] leading-relaxed">
+                      بدون أي اختيار = كل الزونات. مع اختيار واحد أو أكثر يُقيَّد أداء المشرفين والشفتات وما يشابهها.
+                      استخدم <strong className="text-[rgba(234,240,255,0.85)]">Ctrl+نقر</strong> (ويندوز) أو{' '}
+                      <strong className="text-[rgba(234,240,255,0.85)]">Cmd+نقر</strong> (ماك) لتعليم عدة صفوف في القائمة
+                      أدناه، أو زرّي «تحديد الكل / مسح».
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="text-xs px-3 py-1.5 rounded-md border border-[rgba(255,255,255,0.2)] bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.1)]"
+                      onClick={() => setPickedZones(new Set(ZONE_OPTIONS))}
+                    >
+                      تحديد كل الزونات
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs px-3 py-1.5 rounded-md border border-[rgba(255,255,255,0.2)] bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.1)]"
+                      onClick={() => setPickedZones(new Set())}
+                    >
+                      مسح الزونات (بدون تقييد)
+                    </button>
+                  </div>
+
+                  <select
+                    multiple
+                    size={Math.min(8, ZONE_OPTIONS.length)}
+                    className="w-full max-w-xl rounded-lg border border-[rgba(255,255,255,0.15)] bg-[rgba(0,0,0,0.35)] px-2 py-1 text-sm min-h-[11rem]"
+                    value={Array.from(pickedZones)}
+                    onChange={(e) => {
+                      const next = Array.from(e.target.selectedOptions, (o) => o.value);
+                      setPickedZones(new Set(next));
+                    }}
+                  >
                     {ZONE_OPTIONS.map((z) => (
-                      <label key={z} className="flex items-start gap-2 text-sm cursor-pointer">
+                      <option key={z} value={z}>
+                        {z}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="grid gap-2 sm:grid-cols-2 max-w-3xl pt-1">
+                    {ZONE_OPTIONS.map((z) => (
+                      <label key={`cb-${z}`} className="flex items-start gap-2 text-sm cursor-pointer">
                         <input
                           type="checkbox"
                           checked={pickedZones.has(z)}
@@ -258,6 +298,17 @@ export default function AdminPermissionsPage() {
                       </label>
                     ))}
                   </div>
+
+                  {pickedZones.size > 0 ? (
+                    <p className="text-xs text-[rgba(234,240,255,0.65)] border-t border-[rgba(255,255,255,0.08)] pt-2">
+                      <span className="text-[rgba(234,240,255,0.5)]">سيُحفظ في الشيت:</span>{' '}
+                      {Array.from(pickedZones).join(' | ')}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-[rgba(234,240,255,0.45)] border-t border-[rgba(255,255,255,0.08)] pt-2">
+                      لا يوجد تقييد زون — سيُحفظ الحقل فارغاً في الشيت.
+                    </p>
+                  )}
                 </div>
 
                 <button
