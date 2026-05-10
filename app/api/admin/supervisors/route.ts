@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { getAllSupervisors, addSupervisor, updateSupervisor, deleteSupervisor } from '@/lib/adminService';
-import {
-  assertAdminApiAccess,
-  assertAdminSupervisorsReadAccess,
-  filterSupervisorsForZoneScopedAdmin,
-} from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess, assertAdminSupervisorsReadAccess } from '@/lib/adminFeatureAccess';
+import { filterSupervisorsForZoneScopedAdmin } from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 

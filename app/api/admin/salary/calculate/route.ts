@@ -5,7 +5,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminApiAccess, assertLimitedAdminSupervisorZoneAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertLimitedAdminSupervisorZoneAccess } from '@/lib/adminZoneScope';
 import { calculateSupervisorSalary } from '@/lib/salaryService';
 
 export const dynamic = 'force-dynamic';

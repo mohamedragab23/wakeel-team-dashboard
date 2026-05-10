@@ -6,11 +6,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import {
-  assertAdminApiAccess,
-  assertLimitedAdminSupervisorZoneAccess,
-  isLimitedAdminZoneScopeActive,
-} from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess, isLimitedAdminZoneScopeActive } from '@/lib/adminFeatureAccess';
+import { assertLimitedAdminSupervisorZoneAccess } from '@/lib/adminZoneScope';
 import { parseAdminAllowedZonesList, supervisorZonesOverlapAllowed } from '@/lib/zones';
 import { getSheetData, updateSheetRange } from '@/lib/googleSheets';
 

@@ -4,11 +4,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import {
-  assertAdminApiAccess,
-  assertLimitedAdminSupervisorZoneAccess,
-  getSupervisorCodesInZoneScope,
-} from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertLimitedAdminSupervisorZoneAccess, getSupervisorCodesInZoneScope } from '@/lib/adminZoneScope';
 import { appendToSheet, getSheetData } from '@/lib/googleSheets';
 
 export const dynamic = 'force-dynamic';
