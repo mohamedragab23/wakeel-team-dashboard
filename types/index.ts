@@ -7,6 +7,10 @@ export interface User {
   permissions?: string;
   /** Admin-only: optional zone scope (JWT / Admins sheet column E) */
   dataZone?: string;
+  /** Admin JWT: full | regional | zone */
+  adminOrgRole?: 'full' | 'regional' | 'zone';
+  /** Admin JWT: كود صف في شيت المشرفين لنطاق الشجرة */
+  linkedSupervisorCode?: string;
 }
 
 export interface Rider {

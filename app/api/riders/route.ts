@@ -9,6 +9,7 @@ import { getSupervisorRiders, getAllAssignedRiders, getLatestRiderData } from '@
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { aggregateRidersInDateRange } from '@/lib/riderPerformanceAggregate';
 import { parseAdminAllowedZonesList } from '@/lib/zones';
+import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,10 +39,15 @@ export async function GET(request: NextRequest) {
         : await getSupervisorRiders(decoded.code, useCache);
 
     if (decoded.role === 'admin') {
-      const zones = parseAdminAllowedZonesList((decoded as { dataZone?: string }).dataZone);
-      if (zones.length > 0) {
-        const allow = new Set<string>(zones);
-        riders = riders.filter((r) => allow.has((r.region || '').trim()));
+      const allowedSup = await getSupervisorCodesInAdminDataScope(decoded as Parameters<typeof getSupervisorCodesInAdminDataScope>[0]);
+      if (allowedSup) {
+        riders = riders.filter((r) => allowedSup.has(String(r.supervisorCode ?? '').trim()));
+      } else {
+        const zones = parseAdminAllowedZonesList((decoded as { dataZone?: string }).dataZone);
+        if (zones.length > 0) {
+          const allow = new Set<string>(zones);
+          riders = riders.filter((r) => allow.has((r.region || '').trim()));
+        }
       }
     }
 

@@ -7,7 +7,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getAllSupervisors } from '@/lib/adminService';
-import { assertLimitedAdminSupervisorZoneAccess, filterSupervisorsForZoneScopedAdmin } from '@/lib/adminZoneScope';
+import { assertLimitedAdminSupervisorZoneAccess, filterSupervisorsForAdminDataScope } from '@/lib/adminZoneScope';
+import { redactSupervisorRowForViewer } from '@/lib/adminSalaryRedaction';
 import fs from 'fs';
 import path from 'path';
 
@@ -91,15 +92,18 @@ export async function GET(request: NextRequest) {
     if (el) return el;
 
     let supervisors = await getAllSupervisors(false);
-    supervisors = filterSupervisorsForZoneScopedAdmin(decoded, supervisors);
+    supervisors = await filterSupervisorsForAdminDataScope(decoded, supervisors);
     const stored = readLimits();
 
-    const list = supervisors.map((sup) => ({
-      code: sup.code,
-      name: sup.name,
-      region: sup.region,
-      limits: normalizeLimits(stored[sup.code] as any),
-    }));
+    const list = supervisors.map((sup) => {
+      const r = redactSupervisorRowForViewer(decoded, sup);
+      return {
+        code: r.code,
+        name: r.name,
+        region: r.region,
+        limits: normalizeLimits(stored[sup.code] as any),
+      };
+    });
 
     return NextResponse.json({ success: true, data: { supervisors: list } });
   } catch (error: any) {

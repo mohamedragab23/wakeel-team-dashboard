@@ -1,5 +1,6 @@
 import { getSheetData } from './googleSheets';
 import { parseAdminsSheetDataMatrix, ADMIN_SHEET_TAB_CANDIDATES } from './adminsSheetParser';
+import { jwtAdminOrgRoleFromSheet } from './adminFeatureAccess';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -14,6 +15,10 @@ export interface AuthResult {
   permissions?: string;
   /** Optional scope: supervisors' region / zone (column E in Admins sheet) */
   dataZone?: string;
+  /** منصب الأدمن: كامل / مدير منطقة / مدير زون (يُشتق من شيت Admins + الصلاحيات) */
+  adminOrgRole?: 'full' | 'regional' | 'zone';
+  /** ربط بكود صف في شيت المشرفين لنطاق الشجرة */
+  linkedSupervisorCode?: string;
   role?: 'supervisor' | 'admin';
   token?: string;
 }
@@ -162,6 +167,10 @@ export async function authenticateAdmin(code: string, password: string): Promise
       const dataZoneNorm = String(a.dataZone ?? '')
         .replace(/^\uFEFF/, '')
         .trim();
+      const linkedNorm = String(a.linkedSupervisorCode ?? '')
+        .replace(/^\uFEFF/, '')
+        .trim();
+      const adminOrgRole = jwtAdminOrgRoleFromSheet(a.adminPositionRaw, permissionsNorm);
       const token = jwt.sign(
         {
           code: a.code,
@@ -169,6 +178,8 @@ export async function authenticateAdmin(code: string, password: string): Promise
           role: 'admin',
           permissions: permissionsNorm,
           dataZone: dataZoneNorm,
+          adminOrgRole,
+          linkedSupervisorCode: linkedNorm,
         },
         JWT_SECRET,
         { expiresIn: '7d' }
@@ -180,6 +191,8 @@ export async function authenticateAdmin(code: string, password: string): Promise
         name: a.name,
         permissions: permissionsNorm,
         dataZone: dataZoneNorm,
+        adminOrgRole,
+        linkedSupervisorCode: linkedNorm,
         role: 'admin',
         token,
       };

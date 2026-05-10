@@ -45,6 +45,8 @@ export async function GET(request: NextRequest) {
       name: a.name,
       permissions: a.permissions,
       dataZone: a.dataZone,
+      adminPosition: a.adminPositionRaw,
+      linkedSupervisorCode: a.linkedSupervisorCode,
     }));
 
     return NextResponse.json({
@@ -113,6 +115,8 @@ export async function PUT(request: NextRequest) {
     const dzInput =
       Array.isArray(body?.dataZones) ? body.dataZones : body?.dataZone != null ? body.dataZone : '';
     const dataZone = normalizeAdminDataZone(dzInput);
+    const adminPosition = String(body?.adminPosition ?? body?.adminPositionRaw ?? '').trim();
+    const linkedSupervisorCode = String(body?.linkedSupervisorCode ?? '').trim();
 
     if (!targetCode) {
       return NextResponse.json({ success: false, error: 'كود الأدمن المستهدف مطلوب' }, { status: 400 });
@@ -131,10 +135,18 @@ export async function PUT(request: NextRequest) {
 
     const foundRow = target.sheetRow1Based;
     const row = [...(loaded.rows[foundRow - 1] || [])];
-    const maxCol = Math.max(columns.permCol, columns.zoneCol, row.length - 1);
+    const maxCol = Math.max(
+      columns.permCol,
+      columns.zoneCol,
+      columns.positionCol >= 0 ? columns.positionCol : -1,
+      columns.linkedSupervisorCol >= 0 ? columns.linkedSupervisorCol : -1,
+      row.length - 1
+    );
     while (row.length <= maxCol) row.push('');
     row[columns.permCol] = permissions;
     row[columns.zoneCol] = dataZone;
+    if (columns.positionCol >= 0) row[columns.positionCol] = adminPosition;
+    if (columns.linkedSupervisorCol >= 0) row[columns.linkedSupervisorCol] = linkedSupervisorCode;
 
     const ok = await updateSheetRow(loaded.sheetName, foundRow, row);
     if (!ok) {

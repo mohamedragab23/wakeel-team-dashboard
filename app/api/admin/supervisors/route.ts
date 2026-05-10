@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { getAllSupervisors, addSupervisor, updateSupervisor, deleteSupervisor } from '@/lib/adminService';
 import { assertAdminApiAccess, assertAdminSupervisorsReadAccess } from '@/lib/adminFeatureAccess';
-import { filterSupervisorsForZoneScopedAdmin } from '@/lib/adminZoneScope';
+import { filterSupervisorsForAdminDataScope } from '@/lib/adminZoneScope';
+import { redactSupervisorRowForViewer } from '@/lib/adminSalaryRedaction';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,8 @@ export async function GET(request: NextRequest) {
 
     // Always use fresh data (no cache) to ensure we get the latest supervisors
     let supervisors = await getAllSupervisors(false); // Always fetch fresh data
-    supervisors = filterSupervisorsForZoneScopedAdmin(decoded, supervisors);
+    supervisors = await filterSupervisorsForAdminDataScope(decoded, supervisors);
+    supervisors = supervisors.map((s) => redactSupervisorRowForViewer(decoded, s));
     console.log(`[GET /api/admin/supervisors] Returning ${supervisors.length} supervisors`);
     console.log(`[GET /api/admin/supervisors] Supervisor codes:`, supervisors.map(s => s.code));
 

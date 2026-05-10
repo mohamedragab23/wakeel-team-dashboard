@@ -1,5 +1,6 @@
 import { getSheetData, appendToSheet, updateSheetRange, deleteSheetRow } from './googleSheets';
 import { cache, CACHE_KEYS } from './cache';
+import { parseSupervisorOrgRole, type SupervisorOrgRole } from '@/lib/orgHierarchy';
 
 export interface Supervisor {
   code: string;
@@ -12,6 +13,10 @@ export interface Supervisor {
   salaryAmount?: number | string | null;
   commissionFormula?: string | null;
   target?: number; // Monthly target for supervisor
+  /** عمود J في شيت المشرفين: دور تنظيمي (مشرف / مدير زون / مدير منطقة) */
+  orgRole?: SupervisorOrgRole;
+  /** عمود K: كود المدير المباشر في نفس الشيت (مدير زون ← مدير منطقة ← مشرف) */
+  parentCode?: string;
 }
 
 export interface Rider {
@@ -55,6 +60,8 @@ export async function getAllSupervisors(useCache: boolean = true): Promise<Super
       const row = data[i];
       if (!row[0] || row[0].toString().trim() === '') continue;
 
+      const orgRaw = row[9] != null ? row[9].toString().trim() : '';
+      const parentRaw = row[10] != null ? row[10].toString().trim() : '';
       supervisors.push({
         code: row[0].toString().trim(),
         name: row[1] ? row[1].toString().trim() : '',
@@ -65,6 +72,8 @@ export async function getAllSupervisors(useCache: boolean = true): Promise<Super
         salaryAmount: row[6] ? parseFloat(row[6].toString()) : undefined,
         commissionFormula: row[7] ? row[7].toString().trim() : undefined,
         target: row[8] ? parseInt(row[8].toString()) : undefined,
+        orgRole: parseSupervisorOrgRole(orgRaw),
+        parentCode: parentRaw || undefined,
       });
     }
 
@@ -115,6 +124,8 @@ export async function addSupervisor(supervisor: Supervisor): Promise<{ success: 
       supervisor.salaryAmount ? supervisor.salaryAmount.toString() : '',
       (supervisor.commissionFormula || '').toString().trim(),
       supervisor.target ? supervisor.target.toString() : '',
+      supervisor.orgRole && supervisor.orgRole !== 'supervisor' ? supervisor.orgRole : '',
+      (supervisor.parentCode || '').toString().trim(),
     ];
 
     console.log(`[AddSupervisor] Row data:`, row);
@@ -196,8 +207,7 @@ export async function updateSupervisor(
 
     const row = data[rowIndex - 1];
     
-    // Ensure we have exactly 9 columns (A-I) matching the sheet structure
-    // Column mapping: A=code, B=name, C=region, D=email, E=password, F=salaryType, G=salaryAmount, H=commissionFormula, I=target
+    // A–K: +J المنصب التنظيمي، +K كود المدير المباشر في الشيت
     let nextSalaryAmount = (row[6] ?? '').toString().trim();
     if (updates.salaryAmount !== undefined) {
       if (updates.salaryAmount === null || updates.salaryAmount === '') nextSalaryAmount = '';
@@ -211,6 +221,21 @@ export async function updateSupervisor(
         : String(updates.commissionFormula).trim();
     }
 
+    const nextOrg =
+      updates.orgRole !== undefined
+        ? updates.orgRole === 'supervisor'
+          ? ''
+          : String(updates.orgRole).trim()
+        : row[9] != null
+          ? row[9].toString().trim()
+          : '';
+    const nextParent =
+      updates.parentCode !== undefined
+        ? String(updates.parentCode ?? '').trim()
+        : row[10] != null
+          ? row[10].toString().trim()
+          : '';
+
     const updatedRow = [
       (updates.code || row[0] || '').toString().trim(), // A: كود المشرف
       (updates.name || row[1] || '').toString().trim(), // B: الاسم
@@ -221,6 +246,8 @@ export async function updateSupervisor(
       nextSalaryAmount, // G: مبلغ الراتب
       nextFormula, // H: صيغة العمولة
       (updates.target !== undefined ? updates.target : (row[8] || '')).toString().trim(), // I: الهدف
+      nextOrg, // J
+      nextParent, // K
     ];
     
     console.log(`[UpdateSupervisor] Updating supervisor "${code}" at row ${rowIndex}`);
@@ -236,10 +263,9 @@ export async function updateSupervisor(
       salaryType: updatedRow[5],
       target: updatedRow[8],
     });
-    console.log(`[UpdateSupervisor] Full row (9 columns):`, updatedRow);
+    console.log(`[UpdateSupervisor] Full row (11 columns):`, updatedRow);
 
-    // Update exactly columns A through I (9 columns)
-    const success = await updateSheetRange('المشرفين', `A${rowIndex}:I${rowIndex}`, [updatedRow]);
+    const success = await updateSheetRange('المشرفين', `A${rowIndex}:K${rowIndex}`, [updatedRow]);
 
     if (success) {
       // Clear cache and notify supervisors

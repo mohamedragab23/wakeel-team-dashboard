@@ -15,6 +15,10 @@ export type AdminColumnMap = {
   passCol: number;
   permCol: number;
   zoneCol: number;
+  /** عمود «منصب الأدمن» (مدير منطقة / مدير زون)؛ ‎-1 = غير موجود */
+  positionCol: number;
+  /** عمود ربط حساب الأدمن بكود صف في شيت المشرفين؛ ‎-1 = غير موجود */
+  linkedSupervisorCol: number;
 };
 
 export type ParsedAdminRow = {
@@ -25,6 +29,10 @@ export type ParsedAdminRow = {
   password: string;
   permissions: string;
   dataZone: string;
+  /** نص خام من الشيت لعمود المنصب */
+  adminPositionRaw: string;
+  /** كود الصف المقابل في شيت المشرفين (للهرمية ونطاق البيانات) */
+  linkedSupervisorCode: string;
 };
 
 function normCell(v: unknown): string {
@@ -115,8 +123,27 @@ function inferColumnsFromHeader(headerRow: any[] | undefined): AdminColumnMap | 
     zoneCol >= 0 && !used.has(zoneCol)
       ? zoneCol
       : nextFree(used, pr + 1);
+  used.add(z);
 
-  return { codeCol, nameCol: n, passCol: p, permCol: pr, zoneCol: z };
+  const tryPick = (predicates: ((h: string) => boolean)[]) => {
+    const idx = findHeaderColumn(h, predicates);
+    if (idx < 0 || used.has(idx)) return -1;
+    used.add(idx);
+    return idx;
+  };
+
+  const positionCol = tryPick([
+    (x) => x.includes('منصب') && !x.includes('مشرف'),
+    (x) => x === 'position' || x.includes('admin_org') || x.includes('admin_position'),
+  ]);
+
+  const linkedSupervisorCol = tryPick([
+    (x) => x.includes('ربط') && (x.includes('مشرف') || x.includes('شيت')),
+    (x) => x.includes('linked') && x.includes('supervisor'),
+    (x) => x.includes('كود') && x.includes('شيت') && x.includes('مشرف'),
+  ]);
+
+  return { codeCol, nameCol: n, passCol: p, permCol: pr, zoneCol: z, positionCol, linkedSupervisorCol };
 }
 
 /** If column A is empty on most data rows but B is filled, code is likely in B (or sheet has index in A). */
@@ -141,7 +168,15 @@ export function parseAdminsSheetDataMatrix(rows: any[][]): {
   if (!rows?.length) {
     return {
       admins: [],
-      columns: { codeCol: 0, nameCol: 1, passCol: 2, permCol: 3, zoneCol: 4 },
+      columns: {
+        codeCol: 0,
+        nameCol: 1,
+        passCol: 2,
+        permCol: 3,
+        zoneCol: 4,
+        positionCol: -1,
+        linkedSupervisorCol: -1,
+      },
       dataStartIndex: 0,
     };
   }
@@ -150,15 +185,16 @@ export function parseAdminsSheetDataMatrix(rows: any[][]): {
   const dataStart = hasHeader ? 1 : 0;
 
   let columns: AdminColumnMap;
+  const absentPos = { positionCol: -1 as number, linkedSupervisorCol: -1 as number };
   if (hasHeader) {
     const fromHeader = inferColumnsFromHeader(rows[0]);
-    columns = fromHeader ?? { codeCol: 0, nameCol: 1, passCol: 2, permCol: 3, zoneCol: 4 };
+    columns = fromHeader ?? { codeCol: 0, nameCol: 1, passCol: 2, permCol: 3, zoneCol: 4, ...absentPos };
   } else {
     const cc = inferCodeColHeuristic(rows, dataStart);
     columns =
       cc === 1
-        ? { codeCol: 1, nameCol: 2, passCol: 3, permCol: 4, zoneCol: 5 }
-        : { codeCol: 0, nameCol: 1, passCol: 2, permCol: 3, zoneCol: 4 };
+        ? { codeCol: 1, nameCol: 2, passCol: 3, permCol: 4, zoneCol: 5, ...absentPos }
+        : { codeCol: 0, nameCol: 1, passCol: 2, permCol: 3, zoneCol: 4, ...absentPos };
   }
 
   const admins: ParsedAdminRow[] = [];
@@ -174,6 +210,10 @@ export function parseAdminsSheetDataMatrix(rows: any[][]): {
       password: normCell(row[columns.passCol]),
       permissions: normCell(row[columns.permCol]),
       dataZone: normalizeAdminDataZone(row[columns.zoneCol]),
+      adminPositionRaw:
+        columns.positionCol >= 0 ? normCell(row[columns.positionCol]) : '',
+      linkedSupervisorCode:
+        columns.linkedSupervisorCol >= 0 ? normCell(row[columns.linkedSupervisorCol]) : '',
     });
   }
 

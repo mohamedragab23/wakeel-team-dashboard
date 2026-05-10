@@ -9,7 +9,7 @@ import { getAllSupervisors } from '@/lib/adminService';
 import { getSupervisorRiders } from '@/lib/dataService';
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
-import { parseAdminAllowedZonesList, supervisorZonesOverlapAllowed } from '@/lib/zones';
+import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,9 +63,9 @@ export async function GET(request: NextRequest) {
     }
 
     let supervisors = await getAllSupervisors(false);
-    const scopeZones = parseAdminAllowedZonesList(decoded.dataZone);
-    if (scopeZones.length > 0) {
-      supervisors = supervisors.filter((s) => supervisorZonesOverlapAllowed(s.region, scopeZones));
+    const allowed = await getSupervisorCodesInAdminDataScope(decoded);
+    if (allowed) {
+      supervisors = supervisors.filter((s) => allowed.has(String(s.code ?? '').trim()));
     }
 
     const results: Array<{

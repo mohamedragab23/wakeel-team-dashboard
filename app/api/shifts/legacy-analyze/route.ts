@@ -3,6 +3,7 @@ import { verifyToken } from '@/lib/auth';
 import { analyzeLegacyShifts } from '@/lib/shiftsLegacyAnalyze';
 import { getAllSupervisors } from '@/lib/adminService';
 import { parseAdminAllowedZonesList, supervisorZonesOverlapAllowed } from '@/lib/zones';
+import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,14 +22,28 @@ export async function POST(request: NextRequest) {
     }
 
     let allowedSupervisorNames: Set<string> | null = null;
-    const scopeZones = parseAdminAllowedZonesList(decoded.dataZone);
-    if (decoded.role === 'admin' && scopeZones.length > 0) {
-      const sups = await getAllSupervisors(false);
-      const names = sups
-        .filter((s) => supervisorZonesOverlapAllowed(s.region, scopeZones))
-        .map((s) => (s.name || '').trim())
-        .filter(Boolean);
-      allowedSupervisorNames = new Set(names);
+    if (decoded.role === 'admin') {
+      const allowedCodes = await getSupervisorCodesInAdminDataScope(
+        decoded as Parameters<typeof getSupervisorCodesInAdminDataScope>[0]
+      );
+      if (allowedCodes && allowedCodes.size > 0) {
+        const sups = await getAllSupervisors(false);
+        const names = sups
+          .filter((s) => allowedCodes.has(String(s.code ?? '').trim()))
+          .map((s) => (s.name || '').trim())
+          .filter(Boolean);
+        allowedSupervisorNames = new Set(names);
+      } else {
+        const scopeZones = parseAdminAllowedZonesList(decoded.dataZone);
+        if (scopeZones.length > 0) {
+          const sups = await getAllSupervisors(false);
+          const names = sups
+            .filter((s) => supervisorZonesOverlapAllowed(s.region, scopeZones))
+            .map((s) => (s.name || '').trim())
+            .filter(Boolean);
+          allowedSupervisorNames = new Set(names);
+        }
+      }
     }
 
     const formData = await request.formData();

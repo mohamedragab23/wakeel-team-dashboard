@@ -8,6 +8,8 @@ import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { assertLimitedAdminSupervisorZoneAccess } from '@/lib/adminZoneScope';
 import { calculateSupervisorSalary } from '@/lib/salaryService';
+import { getAllSupervisors } from '@/lib/adminService';
+import { shouldRedactRegionalManagerSalary } from '@/lib/adminSalaryRedaction';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +43,15 @@ export async function GET(request: NextRequest) {
 
     const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded, supervisorCode);
     if (zoneDeny) return zoneDeny;
+
+    const sups = await getAllSupervisors(false);
+    const sub = sups.find((s) => String(s.code ?? '').trim() === supervisorCode);
+    if (sub && shouldRedactRegionalManagerSalary(decoded, sub.orgRole)) {
+      return NextResponse.json(
+        { success: false, error: 'لا تملك صلاحية عرض تفاصيل راتب مدير المنطقة' },
+        { status: 403 }
+      );
+    }
 
     // Calculate salary
     const salaryData = await calculateSupervisorSalary(supervisorCode, startDate, endDate);

@@ -195,3 +195,35 @@ export function isLimitedAdminZoneScopeActive(
   if (parseLimitedFeatures(decoded.permissions) === null) return false;
   return parseAdminAllowedZonesList(decoded.dataZone).length > 0;
 }
+
+/** أدمن محدود + (زونات و/أو ربط بصف في شيت المشرفين) — نطاق بيانات يُطبَّق على الـ API. */
+export function isLimitedAdminDataScopeActive(
+  decoded: {
+    role?: string;
+    permissions?: string;
+    dataZone?: string;
+    linkedSupervisorCode?: string;
+  } | null
+): boolean {
+  if (!decoded || decoded.role !== 'admin') return false;
+  if (parseLimitedFeatures(decoded.permissions) === null) return false;
+  if (String(decoded.linkedSupervisorCode ?? '').trim() !== '') return true;
+  return parseAdminAllowedZonesList(decoded.dataZone).length > 0;
+}
+
+/** من عمود «منصب الأدمن» في شيت Admins + نمط الصلاحيات (للـ JWT). */
+export function jwtAdminOrgRoleFromSheet(
+  positionRaw: string | undefined | null,
+  permissions: string | undefined | null
+): 'full' | 'regional' | 'zone' {
+  if (parseLimitedFeatures(permissions) === null) return 'full';
+  const s = String(positionRaw ?? '')
+    .replace(/^\uFEFF/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_');
+  if (!s) return 'zone';
+  if (s.includes('منطقة') || s.includes('regional')) return 'regional';
+  if (s.includes('زون') || s.includes('zone')) return 'zone';
+  return 'zone';
+}
