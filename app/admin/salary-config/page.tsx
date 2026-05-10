@@ -371,7 +371,7 @@ export default function SalaryConfigPage() {
                   يتم حساب العمولة بناءً على نسبة من فاتورة المناديب:
                 </p>
                 <ul className="text-sm text-green-700 list-disc list-inside mr-4 mt-2 space-y-1">
-                  <li>القيمة الأساسية = (إجمالي قبض المناديب) × 11%</li>
+                  <li>القيمة الأساسية = (إجمالي قبض المشرف من تبويب قبض_المشرفين) × النسبة الأساسية</li>
                   <li>عمولة المشرف = (القيمة الأساسية) × (النسبة المئوية للمشرف)</li>
                 </ul>
               </div>
@@ -445,7 +445,7 @@ export default function SalaryConfigPage() {
             <div>
               <p className="font-semibold">3. نظام العمولة (النوع الثاني):</p>
               <p>نسبة من فاتورة المناديب</p>
-              <p className="mr-4">• القيمة الأساسية = (إجمالي قبض المناديب) × النسبة الأساسية (11%)</p>
+              <p className="mr-4">• القيمة الأساسية = (إجمالي قبض المشرف في الفترة من تبويب قبض_المشرفين) × النسبة الأساسية (11%)</p>
               <p className="mr-4">• عمولة المشرف = (القيمة الأساسية) × نسبة المشرف (60%)</p>
             </div>
             <div className="mt-3 pt-3 border-t border-blue-300">

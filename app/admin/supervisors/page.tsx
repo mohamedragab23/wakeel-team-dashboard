@@ -430,7 +430,7 @@ export default function AdminSupervisorsPage() {
                     <div className="md:col-span-2 bg-purple-50 p-4 rounded-lg">
                       <h4 className="font-medium text-purple-800 mb-2">عمولة نوع 2 - نسبة من الإيرادات</h4>
                       <p className="text-sm text-purple-700">
-                        القيمة الأساسية = (إجمالي قبض المناديب) × 11%
+                        القيمة الأساسية = (إجمالي قبض المشرف من تبويب قبض_المشرفين) × 11%
                         <br />
                         عمولة المشرف = (القيمة الأساسية) × 60%
                       </p>

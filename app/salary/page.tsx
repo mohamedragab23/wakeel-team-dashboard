@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import Layout from '@/components/Layout';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 
 interface SalaryCalculation {
   supervisorId: string;
@@ -10,24 +10,29 @@ interface SalaryCalculation {
     startDate: string;
     endDate: string;
   };
-  salaryMethod: 'fixed' | 'commission';
+  salaryMethod: 'fixed' | 'commission_type1' | 'commission_type2' | 'legacy_multiplier';
   baseAmount: number;
   commission?: {
+    type?: string;
     totalOrders: number;
     totalHours: number;
     commissionRate: number;
-    dailyAverageHours?: number;
     workingDays?: number;
     calculatedCommission: number;
+    details?: Record<string, unknown>;
   };
   deductions: {
     advances: number;
     advancesDetails?: { date: string; amount: number }[];
     deductions: number;
     deductionsDetails?: { date: string; reason: string; amount: number }[];
+    performance?: number;
+    performanceDetails?: { date: string; reason: string; amount: number }[];
     equipment: number;
     equipmentDetails?: { name: string; quantity: number; price: number; total: number }[];
     security: number;
+    admin?: number;
+    adminDetails?: { date: string; reason: string; amount: number }[];
     total: number;
   };
   netSalary: number;
@@ -38,6 +43,8 @@ interface SalaryCalculation {
     multiplier: number;
     dailyCommission: number;
   }[];
+  riderPerformance?: { code: string; name: string; totalOrders: number; totalHours: number }[];
+  periodTotals?: { totalOrders: number; totalHours: number };
 }
 
 export default function SalaryPage() {
@@ -55,8 +62,6 @@ export default function SalaryPage() {
   const [tempEndDate, setTempEndDate] = useState(confirmedEndDate);
   const [hasChanges, setHasChanges] = useState(false);
   
-  const queryClient = useQueryClient();
-
   // Check if dates have changed
   useEffect(() => {
     setHasChanges(tempStartDate !== confirmedStartDate || tempEndDate !== confirmedEndDate);
@@ -190,11 +195,29 @@ export default function SalaryPage() {
                       <span className="font-semibold text-gray-800">{formatCurrency(salaryData.baseAmount)}</span>
                     </div>
                   </>
+                ) : salaryData.salaryMethod === 'legacy_multiplier' ? (
+                  <>
+                    <div className="flex justify-between py-2 border-b">
+                      <span className="text-gray-600">نوع الراتب:</span>
+                      <span className="font-semibold text-gray-800">عمولة (نظام قديم)</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b">
+                      <span className="text-gray-600">إجمالي الطلبات / الساعات:</span>
+                      <span className="font-semibold text-gray-800">
+                        {salaryData.periodTotals?.totalOrders ?? 0} طلب —{' '}
+                        {(salaryData.periodTotals?.totalHours ?? 0).toFixed(1)} س
+                      </span>
+                    </div>
+                  </>
                 ) : (
                   <>
                     <div className="flex justify-between py-2 border-b">
                       <span className="text-gray-600">نوع الراتب:</span>
-                      <span className="font-semibold text-gray-800">عمولة</span>
+                      <span className="font-semibold text-gray-800">
+                        {salaryData.salaryMethod === 'commission_type2'
+                          ? 'عمولة (نوع 2 — قبض المشرف)'
+                          : 'عمولة (نوع 1)'}
+                      </span>
                     </div>
                     {salaryData.commission && (
                       <>
@@ -203,37 +226,57 @@ export default function SalaryPage() {
                           <span className="font-semibold text-gray-800">{salaryData.commission.totalOrders}</span>
                         </div>
                         <div className="flex justify-between py-2 border-b">
-                          <span className="text-gray-600">إجمالي الساعات:</span>
+                          <span className="text-gray-600">إجمالي الساعات (مناديبك):</span>
                           <span className="font-semibold text-gray-800">
-                            {((salaryData.commission?.totalHours || 0)).toFixed(1)} ساعة
+                            {(salaryData.commission.totalHours || 0).toFixed(1)} ساعة
                           </span>
                         </div>
-                        {salaryData.commission.dailyAverageHours !== undefined && (
-                          <div className="flex justify-between py-2 border-b bg-blue-50 px-2 rounded">
-                            <span className="text-gray-600">متوسط الساعات اليومي:</span>
-                            <span className="font-semibold text-blue-700">
-                              {(salaryData.commission.dailyAverageHours).toFixed(1)} ساعة
+                        {salaryData.salaryMethod === 'commission_type1' &&
+                          salaryData.commission.workingDays !== undefined && (
+                            <div className="flex justify-between py-2 border-b">
+                              <span className="text-gray-600">أيام بها نشاط:</span>
+                              <span className="font-semibold text-gray-800">
+                                {salaryData.commission.workingDays} يوم
+                              </span>
+                            </div>
+                          )}
+                        {salaryData.salaryMethod === 'commission_type1' && (
+                          <div className="flex justify-between py-2 border-b bg-green-50 px-2 rounded">
+                            <span className="text-gray-600">معدل العمولة (حسب إجمالي الساعات):</span>
+                            <span className="font-semibold text-green-700">
+                              {(salaryData.commission.commissionRate || 0).toFixed(2)} ج.م لكل طلب
                             </span>
                           </div>
                         )}
-                        {salaryData.commission.workingDays !== undefined && (
-                          <div className="flex justify-between py-2 border-b">
-                            <span className="text-gray-600">عدد أيام العمل:</span>
-                            <span className="font-semibold text-gray-800">
-                              {salaryData.commission.workingDays} يوم
-                            </span>
-                          </div>
-                        )}
-                        <div className="flex justify-between py-2 border-b bg-green-50 px-2 rounded">
-                          <span className="text-gray-600">معدل العمولة:</span>
-                          <span className="font-semibold text-green-700">
-                            {((salaryData.commission?.commissionRate || 0)).toFixed(2)} ج.م لكل طلب
-                          </span>
-                        </div>
+                        {salaryData.salaryMethod === 'commission_type2' &&
+                          salaryData.commission.details &&
+                          typeof salaryData.commission.details === 'object' && (
+                            <>
+                              <div className="flex justify-between py-2 border-b">
+                                <span className="text-gray-600">إجمالي قبض المشرف (الفترة):</span>
+                                <span className="font-semibold text-gray-800">
+                                  {formatCurrency(
+                                    Number(
+                                      (salaryData.commission.details as { totalSupervisorReceipts?: number })
+                                        .totalSupervisorReceipts || 0
+                                    )
+                                  )}
+                                </span>
+                              </div>
+                              <div className="flex justify-between py-2 border-b text-sm text-gray-600">
+                                <span>القيمة الأساسية (بعد النسبة الأساسية)</span>
+                                <span>
+                                  {formatCurrency(
+                                    Number((salaryData.commission.details as { baseValue?: number }).baseValue || 0)
+                                  )}
+                                </span>
+                              </div>
+                            </>
+                          )}
                         <div className="flex justify-between py-2 border-b">
                           <span className="text-gray-600">العمولة المحسوبة:</span>
                           <span className="font-semibold text-green-600">
-                            {formatCurrency(salaryData.commission?.calculatedCommission || 0)}
+                            {formatCurrency(salaryData.commission.calculatedCommission || 0)}
                           </span>
                         </div>
                       </>
@@ -274,7 +317,7 @@ export default function SalaryPage() {
                 {/* الخصومات مع التفاصيل */}
                 <div className="py-2 border-b">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">الخصومات:</span>
+                    <span className="text-gray-600">الخصومات (عامة):</span>
                     <span className="font-semibold text-red-600">
                       -{formatCurrency(salaryData.deductions.deductions)}
                     </span>
@@ -283,13 +326,60 @@ export default function SalaryPage() {
                     <div className="mt-2 mr-4 text-sm bg-gray-50 rounded-lg p-3">
                       {salaryData.deductions.deductionsDetails.map((item, idx) => (
                         <div key={idx} className="flex justify-between text-gray-600 py-1">
-                          <span>📅 {item.date} - {item.reason}</span>
+                          <span>
+                            📅 {item.date} - {item.reason}
+                          </span>
                           <span className="text-red-500">-{item.amount} ج.م</span>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
+                {(salaryData.deductions.performance ?? 0) > 0 && (
+                  <div className="py-2 border-b">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">خصم الأداء:</span>
+                      <span className="font-semibold text-red-600">
+                        -{formatCurrency(salaryData.deductions.performance ?? 0)}
+                      </span>
+                    </div>
+                    {salaryData.deductions.performanceDetails &&
+                      salaryData.deductions.performanceDetails.length > 0 && (
+                        <div className="mt-2 mr-4 text-sm bg-amber-50 rounded-lg p-3">
+                          {salaryData.deductions.performanceDetails.map((item, idx) => (
+                            <div key={idx} className="flex justify-between text-gray-600 py-1">
+                              <span>
+                                📅 {item.date} - {item.reason}
+                              </span>
+                              <span className="text-red-500">-{item.amount} ج.م</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                  </div>
+                )}
+                {(salaryData.deductions.admin ?? 0) > 0 && (
+                  <div className="py-2 border-b">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">خصومات الإدارة:</span>
+                      <span className="font-semibold text-red-600">
+                        -{formatCurrency(salaryData.deductions.admin ?? 0)}
+                      </span>
+                    </div>
+                    {salaryData.deductions.adminDetails && salaryData.deductions.adminDetails.length > 0 && (
+                      <div className="mt-2 mr-4 text-sm bg-purple-50 rounded-lg p-3">
+                        {salaryData.deductions.adminDetails.map((item, idx) => (
+                          <div key={idx} className="flex justify-between text-gray-600 py-1">
+                            <span>
+                              📅 {item.date} - {item.reason}
+                            </span>
+                            <span className="text-red-500">-{item.amount} ج.م</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="py-2 border-b">
                   <div className="flex justify-between">
                     <span className="text-gray-600">تكلفة المعدات:</span>
@@ -330,10 +420,14 @@ export default function SalaryPage() {
           </div>
         )}
 
-        {/* Commission Breakdown (if commission-based) */}
-        {salaryData && salaryData.salaryMethod === 'commission' && salaryData.breakdown && salaryData.breakdown.length > 0 && (
+        {/* Daily activity + commission (type 1) */}
+        {salaryData && salaryData.salaryMethod !== 'fixed' && salaryData.breakdown && salaryData.breakdown.length > 0 && (
           <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">تفاصيل العمولة اليومية</h3>
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">
+              {salaryData.salaryMethod === 'commission_type1'
+                ? 'تفاصيل يومية (الطلبات والساعات — عمولة نوع 1)'
+                : 'تفاصيل يومية (الطلبات والساعات)'}
+            </h3>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-50">
@@ -341,8 +435,12 @@ export default function SalaryPage() {
                     <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">التاريخ</th>
                     <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">الطلبات</th>
                     <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">الساعات</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">المعامل</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">العمولة</th>
+                    {salaryData.salaryMethod === 'commission_type1' && (
+                      <>
+                        <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">ج.م/طلب</th>
+                        <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">عمولة يومية</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -350,11 +448,43 @@ export default function SalaryPage() {
                     <tr key={index} className="hover:bg-gray-50">
                       <td className="py-3 px-4 text-sm text-gray-800">{day.date}</td>
                       <td className="py-3 px-4 text-sm text-gray-600">{day.orders}</td>
-                      <td className="py-3 px-4 text-sm text-gray-600">{((day.hours || 0)).toFixed(1)}</td>
-                      <td className="py-3 px-4 text-sm text-gray-600">{((day.multiplier || 0)).toFixed(1)}x</td>
-                      <td className="py-3 px-4 text-sm font-semibold text-green-600">
-                        {formatCurrency(day.dailyCommission)}
-                      </td>
+                      <td className="py-3 px-4 text-sm text-gray-600">{(day.hours || 0).toFixed(1)}</td>
+                      {salaryData.salaryMethod === 'commission_type1' && (
+                        <>
+                          <td className="py-3 px-4 text-sm text-gray-600">{(day.multiplier || 0).toFixed(2)}</td>
+                          <td className="py-3 px-4 text-sm font-semibold text-green-600">
+                            {formatCurrency(day.dailyCommission)}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {salaryData && salaryData.riderPerformance && salaryData.riderPerformance.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">أداء المناديب (الفترة المحددة)</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-700">المندوب</th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-700">الكود</th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-700">الساعات</th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-700">الطلبات</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {salaryData.riderPerformance.map((r) => (
+                    <tr key={r.code} className="hover:bg-gray-50">
+                      <td className="py-3 px-4 text-gray-800">{r.name}</td>
+                      <td className="py-3 px-4 text-gray-600">{r.code}</td>
+                      <td className="py-3 px-4 text-gray-600">{r.totalHours.toFixed(1)}</td>
+                      <td className="py-3 px-4 text-gray-600">{r.totalOrders}</td>
                     </tr>
                   ))}
                 </tbody>

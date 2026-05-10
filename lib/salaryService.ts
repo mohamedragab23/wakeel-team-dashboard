@@ -1,6 +1,12 @@
 import { getSheetData, findDataInSheet } from './googleSheets';
 import { getSupervisorRiders } from './dataService';
 import { getAllSupervisors } from './adminService';
+import { aggregateSupervisorDailyPerformance } from './dataFilter';
+
+const SHEET_SUPERVISOR_RECEIPTS = 'قبض_المشرفين';
+const SHEET_ADMIN_DEDUCTIONS = 'خصومات_الإدارة';
+
+const PERFORMANCE_DEDUCTION_REASON_RE = /خصم\s*الأداء|^\s*أداء|الأداء|اداء/i;
 
 // Helper function to parse date (same as in dataFilter)
 function parseDateForSalary(dateValue: any): Date | null {
@@ -66,55 +72,114 @@ function parseDateForSalary(dateValue: any): Date | null {
   return null;
 }
 
-// Get rider data for a date range
-async function getRiderDataInRange(riderCode: string, startDate: Date, endDate: Date) {
+/** Sum supervisor cash receipts from sheet قبض_المشرفين for commission type 2. */
+async function getSupervisorReceiptsInRange(
+  supervisorCode: string,
+  startDate: Date,
+  endDate: Date
+): Promise<{ total: number; items: { date: string; amount: number; note?: string }[] }> {
+  const items: { date: string; amount: number; note?: string }[] = [];
+  let total = 0;
   try {
-    const dailyData = await getSheetData('البيانات اليومية', false); // Don't use cache for salary calculations
-    let totalOrders = 0;
-    let totalHours = 0;
-    let matchedRows = 0;
-
-    // Normalize dates for comparison
+    const data = await getSheetData(SHEET_SUPERVISOR_RECEIPTS, false);
     const normalizedStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
     const normalizedEnd = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
 
-    for (let i = 1; i < dailyData.length; i++) {
-      if (dailyData[i][1]?.toString().trim() === riderCode) {
-        const rowDateValue = dailyData[i][0];
-        if (!rowDateValue) continue;
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row?.[0] || row[0].toString().trim() !== supervisorCode) continue;
 
-        // Parse date using improved function
-        const rowDate = parseDateForSalary(rowDateValue);
-        if (!rowDate || isNaN(rowDate.getTime())) {
-          if (i <= 3) {
-            console.warn(`[Salary] Row ${i + 1}: Invalid date for rider ${riderCode}:`, rowDateValue);
+      let inRange = false;
+      let dateStr = '';
+      if (row[1]) {
+        const d = parseDateForSalary(row[1]);
+        if (d) {
+          const nd = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+          inRange = nd >= normalizedStart && nd <= normalizedEnd;
+          dateStr = d.toISOString().split('T')[0];
+        } else {
+          const month = parseInt(row[1].toString());
+          if (!isNaN(month) && month >= 1 && month <= 12) {
+            const monthStart = new Date(normalizedStart.getFullYear(), month - 1, 1);
+            const monthEnd = new Date(normalizedStart.getFullYear(), month, 0);
+            inRange = monthStart <= normalizedEnd && monthEnd >= normalizedStart;
+            dateStr = `شهر ${month}`;
           }
-          continue;
         }
-
-        const normalizedRowDate = new Date(rowDate.getFullYear(), rowDate.getMonth(), rowDate.getDate());
-
-        if (normalizedRowDate >= normalizedStart && normalizedRowDate <= normalizedEnd) {
-          totalOrders += Number(dailyData[i][6]) || 0;
-          totalHours += Number(dailyData[i][2]) || 0;
-          matchedRows++;
-        }
+      } else {
+        inRange = true;
+        dateStr = 'غير محدد';
       }
+
+      if (!inRange) continue;
+      const amount = Number(row[2]?.toString() || '0') || 0;
+      if (amount <= 0) continue;
+      total += amount;
+      items.push({
+        date: dateStr,
+        amount,
+        note: row[3]?.toString().trim() || undefined,
+      });
     }
-
-    console.log(`[Salary] Rider ${riderCode}: Matched ${matchedRows} rows, Total Orders: ${totalOrders}, Total Hours: ${totalHours}`);
-
-    return {
-      totalOrders,
-      totalHours,
-    };
-  } catch (error) {
-    console.error('Error fetching rider data:', error);
-    return {
-      totalOrders: 0,
-      totalHours: 0,
-    };
+  } catch (e) {
+    console.warn('[Salary] قبض_المشرفين sheet missing or error:', e);
   }
+  return { total, items };
+}
+
+/** Admin-only deductions visible to supervisor with line detail. */
+async function getAdminDeductionsInRange(
+  supervisorCode: string,
+  startDate: Date,
+  endDate: Date
+): Promise<{ total: number; items: { date: string; reason: string; amount: number }[] }> {
+  const items: { date: string; reason: string; amount: number }[] = [];
+  let total = 0;
+  try {
+    const data = await getSheetData(SHEET_ADMIN_DEDUCTIONS, false);
+    const normalizedStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+    const normalizedEnd = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row?.[0] || row[0].toString().trim() !== supervisorCode) continue;
+
+      let inRange = false;
+      let dateStr = '';
+      if (row[1]) {
+        const d = parseDateForSalary(row[1]);
+        if (d) {
+          const nd = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+          inRange = nd >= normalizedStart && nd <= normalizedEnd;
+          dateStr = d.toISOString().split('T')[0];
+        } else {
+          const month = parseInt(row[1].toString());
+          if (!isNaN(month) && month >= 1 && month <= 12) {
+            const monthStart = new Date(normalizedStart.getFullYear(), month - 1, 1);
+            const monthEnd = new Date(normalizedStart.getFullYear(), month, 0);
+            inRange = monthStart <= normalizedEnd && monthEnd >= normalizedStart;
+            dateStr = `شهر ${month}`;
+          }
+        }
+      } else {
+        inRange = true;
+        dateStr = 'غير محدد';
+      }
+
+      if (!inRange) continue;
+      const amount = Number(row[3]?.toString() || '0') || 0;
+      if (amount <= 0) continue;
+      total += amount;
+      items.push({
+        date: dateStr,
+        reason: row[2]?.toString().trim() || 'خصم إداري',
+        amount,
+      });
+    }
+  } catch (e) {
+    console.warn('[Salary] خصومات_الإدارة sheet missing or error:', e);
+  }
+  return { total, items };
 }
 
 // Deduction detail interface
@@ -586,48 +651,58 @@ export async function calculateSupervisorSalary(
     endDate = new Date(year, month, 0);
   }
   try {
-    // Get supervisor data to check salary type
-    const supervisors = await getAllSupervisors();
+    const [supervisors, riders, configData] = await Promise.all([
+      getAllSupervisors(),
+      getSupervisorRiders(supervisorCode, false),
+      getSheetData('إعدادات_الرواتب', false),
+    ]);
+
     const supervisor = supervisors.find((s) => s.code === supervisorCode);
 
-    const riders = await getSupervisorRiders(supervisorCode);
-    let totalOrders = 0;
-    let totalHours = 0;
+    const agg = await aggregateSupervisorDailyPerformance(supervisorCode, startDate, endDate, {
+      useCache: false,
+      riders,
+    });
 
-    for (const rider of riders) {
-      const riderData = await getRiderDataInRange(rider.code, startDate, endDate);
-      totalOrders += riderData.totalOrders;
-      totalHours += riderData.totalHours;
+    const totalOrders = agg.totalOrders;
+    const totalHours = agg.totalHours;
+
+    const riderByCode = new Map(riders.map((r) => [r.code, r] as const));
+    const riderPerformance: {
+      code: string;
+      name: string;
+      totalOrders: number;
+      totalHours: number;
+    }[] = [];
+    for (const [code, t] of agg.byRider.entries()) {
+      const rider = riderByCode.get(code);
+      riderPerformance.push({
+        code,
+        name: rider?.name ?? code,
+        totalOrders: t.orders,
+        totalHours: t.hours,
+      });
     }
+    riderPerformance.sort((a, b) => a.code.localeCompare(b.code));
 
-    let baseSalary = 0;
-    let commission = 0;
-    let commissionType: 'type1' | 'type2' | undefined = undefined;
-    let commissionDetails: any = undefined;
-
-    // Get supervisor config from Google Sheets
     let salaryConfig: any = null;
     try {
-      const configData = await getSheetData('إعدادات_الرواتب', false);
       for (let i = 1; i < configData.length; i++) {
         if (configData[i][0]?.toString().trim() === supervisorCode) {
           salaryConfig = {
-            method: configData[i][1]?.toString().trim() || 'fixed', // fixed, commission_type1, commission_type2
+            method: configData[i][1]?.toString().trim() || 'fixed',
             fixedAmount: parseFloat(configData[i][2]?.toString() || '0'),
-            // For commission_type1: ranges and rates
             type1Ranges: configData[i][3] ? JSON.parse(configData[i][3].toString()) : null,
-            // For commission_type2: basePercentage (11%), supervisorPercentage (60%)
             type2BasePercentage: parseFloat(configData[i][4]?.toString() || '11'),
             type2SupervisorPercentage: parseFloat(configData[i][5]?.toString() || '60'),
           };
           break;
         }
       }
-    } catch (error) {
-      console.warn('Could not load salary config from Sheets, using supervisor data');
+    } catch {
+      console.warn('Could not parse salary config from Sheets, using supervisor data');
     }
 
-    // If no config found, use supervisor data (backward compatibility)
     if (!salaryConfig) {
       salaryConfig = {
         method: supervisor?.salaryType === 'fixed' ? 'fixed' : 'commission_type1',
@@ -635,222 +710,195 @@ export async function calculateSupervisorSalary(
       };
     }
 
-    // Calculate salary based on method
+    let baseSalary = 0;
+    let commission = 0;
+    let commissionType: 'type1' | 'type2' | undefined;
+    let commissionDetails: any;
+    let salaryMethod: 'fixed' | 'commission_type1' | 'commission_type2' | 'legacy_multiplier' = 'fixed';
+    let type1RatePerOrder = 0;
+    const workingDays = agg.byDate.size;
+
     if (salaryConfig.method === 'fixed') {
-      // Fixed salary
+      salaryMethod = 'fixed';
       baseSalary = salaryConfig.fixedAmount || 0;
       commission = 0;
     } else if (salaryConfig.method === 'commission_type1') {
-      // Commission Type 1: Based on DAILY AVERAGE hours and total orders
+      salaryMethod = 'commission_type1';
       commissionType = 'type1';
-      
-      // Calculate number of working days in the period
-      const { getSupervisorPerformanceFiltered } = await import('./dataFilter');
-      const dailyData = await getSupervisorPerformanceFiltered(supervisorCode, startDate, endDate);
-      
-      // Count unique days with data
-      const uniqueDays = new Set<string>();
-      const dailyHours: number[] = [];
-      const dailyHoursMap = new Map<string, number>();
-      
-      dailyData.forEach((record) => {
-        let dateKey: string;
-        if (record.date instanceof Date) {
-          dateKey = `${record.date.getFullYear()}-${record.date.getMonth()}-${record.date.getDate()}`;
-        } else {
-          const d = new Date(record.date + 'T00:00:00');
-          dateKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-        }
-        uniqueDays.add(dateKey);
-        dailyHoursMap.set(dateKey, (dailyHoursMap.get(dateKey) || 0) + (record.hours || 0));
-      });
-      
-      // Get daily hours for averaging
-      dailyHoursMap.forEach((hours) => dailyHours.push(hours));
-      
-      // Calculate daily average hours
-      const workingDays = uniqueDays.size || 1;
-      const dailyAverageHours = dailyHours.length > 0 
-        ? dailyHours.reduce((a, b) => a + b, 0) / dailyHours.length 
-        : 0;
-      
-      console.log(`[Salary] Commission Type 1: Working days: ${workingDays}, Daily average hours: ${dailyAverageHours.toFixed(2)}`);
-      
-      // Default ranges if not configured
       const ranges = salaryConfig.type1Ranges || [
         { minHours: 0, maxHours: 100, ratePerOrder: 1.0 },
-        { minHours: 101, maxHours: 200, ratePerOrder: 1.20 },
-        { minHours: 201, maxHours: 300, ratePerOrder: 1.30 },
-        { minHours: 301, maxHours: 400, ratePerOrder: 1.40 },
-        { minHours: 401, maxHours: 999999, ratePerOrder: 1.50 },
+        { minHours: 101, maxHours: 200, ratePerOrder: 1.2 },
+        { minHours: 201, maxHours: 300, ratePerOrder: 1.3 },
+        { minHours: 301, maxHours: 400, ratePerOrder: 1.4 },
+        { minHours: 401, maxHours: 999999, ratePerOrder: 1.5 },
       ];
-
-      // Find the appropriate rate based on DAILY AVERAGE hours (not total hours)
       let ratePerOrder = 1.0;
       for (const range of ranges) {
-        if (dailyAverageHours >= range.minHours && dailyAverageHours <= range.maxHours) {
+        if (totalHours >= range.minHours && totalHours <= range.maxHours) {
           ratePerOrder = range.ratePerOrder;
           break;
         }
       }
-
+      type1RatePerOrder = ratePerOrder;
       commission = totalOrders * ratePerOrder;
       commissionDetails = {
         totalHours,
-        dailyAverageHours,
-        workingDays,
         totalOrders,
         ratePerOrder,
         ranges,
-        calculationNote: 'العمولة محسوبة بناءً على متوسط الساعات اليومي',
+        workingDays,
+        calculationNote: 'العمولة = إجمالي الطلبات × معدل الطلب حسب نطاق إجمالي ساعات مناديب المشرف في الفترة',
       };
       baseSalary = 0;
     } else if (salaryConfig.method === 'commission_type2') {
-      // Commission Type 2: Percentage of rider receipts
+      salaryMethod = 'commission_type2';
       commissionType = 'type2';
-      
-      // Get performance data to calculate total receipts
-      // Note: "المحفظة" column (column 8) contains debt, not receipts
-      // For commission_type2, we need "إجمالي قبض المناديب"
-      // TODO: Add a separate "receipts" or "total_collected" column to performance data
-      // For now, we'll use orders * average_order_value as estimate
-      let totalReceipts = 0;
-      
-      const { getSupervisorPerformanceFiltered } = await import('./dataFilter');
-      const dailyData = await getSupervisorPerformanceFiltered(supervisorCode, startDate, endDate);
-      
-      // Calculate total receipts
-      // Option 1: If there's a receipts column (column 9+), use it
-      // Option 2: Use orders * average_order_value (default: 50 EGP per order)
-      // Option 3: Use debt column as proxy (if it represents total sales, not just debt)
-      for (const record of dailyData) {
-        // For now, estimate: receipts = orders * 50 EGP average
-        // This should be replaced with actual receipts data when a receipts column is added
-        const estimatedReceipts = (record.orders || 0) * 50; // Placeholder
-        totalReceipts += estimatedReceipts;
-      }
-
+      const receipts = await getSupervisorReceiptsInRange(supervisorCode, startDate, endDate);
+      const totalReceipts = receipts.total;
       const basePercentage = salaryConfig.type2BasePercentage || 11;
       const supervisorPercentage = salaryConfig.type2SupervisorPercentage || 60;
-      
-      // Calculate: القيمة الأساسية = (إجمالي قبض المناديب) × 11%
       const baseValue = totalReceipts * (basePercentage / 100);
-      // Calculate: عمولة المشرف = (القيمة الأساسية) × (النسبة المئوية للمشرف)
       commission = baseValue * (supervisorPercentage / 100);
-      
       commissionDetails = {
-        totalReceipts,
+        totalSupervisorReceipts: totalReceipts,
+        receiptItems: receipts.items,
         basePercentage,
         supervisorPercentage,
         baseValue,
-        note: 'يتم استخدام تقدير للقبض بناءً على الطلبات. يرجى إضافة عمود "إجمالي القبض" في ملف الأداء للحصول على حساب دقيق.',
+        note: 'القيمة من شيت قبض_المشرفين (إجمالي قبض المشرف في الفترة).',
       };
       baseSalary = 0;
     } else {
-      // Legacy calculation (for backward compatibility)
+      salaryMethod = 'legacy_multiplier';
       let multiplier = 1;
       if (totalHours >= 400) multiplier = 1.5;
       else if (totalHours >= 300) multiplier = 1.4;
       else if (totalHours >= 200) multiplier = 1.3;
       else if (totalHours >= 100) multiplier = 1.2;
-
       baseSalary = totalOrders * multiplier;
-      commission = 0;
+      commissionDetails = { legacyMultiplier: multiplier, totalOrders, totalHours };
     }
 
     const totalSalary = baseSalary + commission;
 
-    // Fetch deductions for the entire date range with details
-    const deductionsDetails = await getSupervisorDeductionsDetails(supervisorCode, startDate, endDate);
-    const advancesDetails = await getSupervisorAdvancesDetails(supervisorCode, startDate, endDate);
-    const securityCost = await getSecurityInquiriesCost(supervisorCode, startDate, endDate);
-    const equipmentDetails = await getEquipmentCostDetails(supervisorCode, startDate, endDate);
-    
-    const deductions = deductionsDetails.total;
+    const [
+      deductionsDetails,
+      advancesDetails,
+      securityCost,
+      equipmentDetails,
+      bonus,
+      adminDeductions,
+    ] = await Promise.all([
+      getSupervisorDeductionsDetails(supervisorCode, startDate, endDate),
+      getSupervisorAdvancesDetails(supervisorCode, startDate, endDate),
+      getSecurityInquiriesCost(supervisorCode, startDate, endDate),
+      getEquipmentCostDetails(supervisorCode, startDate, endDate),
+      getBonus(supervisorCode, month, year),
+      getAdminDeductionsInRange(supervisorCode, startDate, endDate),
+    ]);
+
+    const performanceItems = deductionsDetails.items.filter((it) =>
+      PERFORMANCE_DEDUCTION_REASON_RE.test(it.reason || '')
+    );
+    const generalDeductionItems = deductionsDetails.items.filter(
+      (it) => !PERFORMANCE_DEDUCTION_REASON_RE.test(it.reason || '')
+    );
+    const performanceDeductions = performanceItems.reduce((s, it) => s + it.amount, 0);
+    const deductionsGeneral = generalDeductionItems.reduce((s, it) => s + it.amount, 0);
+    const deductionsSheetTotal = deductionsDetails.total;
+
     const advances = advancesDetails.total;
     const equipmentCost = equipmentDetails.totalCost;
-    const bonus = await getBonus(supervisorCode, month, year); // Bonus still uses month/year
+    const adminDeductionTotal = adminDeductions.total;
 
-    const netSalary = totalSalary + bonus - deductions - advances - securityCost - equipmentCost;
-    
+    const netSalary =
+      totalSalary +
+      bonus -
+      deductionsSheetTotal -
+      advances -
+      securityCost -
+      equipmentCost -
+      adminDeductionTotal;
+
     console.log(`[Salary] Calculation for ${supervisorCode}:`);
     console.log(`  Base/Commission: ${totalSalary}, Bonus: ${bonus}`);
-    console.log(`  Deductions: ${deductions}, Advances: ${advances}, Security: ${securityCost}, Equipment: ${equipmentCost}`);
+    console.log(
+      `  Deductions(sheet): ${deductionsSheetTotal}, Admin: ${adminDeductionTotal}, Advances: ${advances}, Security: ${securityCost}, Equipment: ${equipmentCost}`
+    );
     console.log(`  Net Salary: ${netSalary}`);
 
-    // Get daily breakdown for commission-based salary
-    const breakdown: Array<{ date: string; orders: number; hours: number; multiplier: number; dailyCommission: number }> = [];
-    
-    if (salaryConfig.method !== 'fixed') {
-      // Get daily performance data for breakdown
-      const { getSupervisorPerformanceFiltered } = await import('./dataFilter');
-      const dailyData = await getSupervisorPerformanceFiltered(supervisorCode, startDate, endDate);
-      
-      // Group by date
-      const dataByDate = new Map<string, { orders: number; hours: number }>();
-      dailyData.forEach((record) => {
-        const dateStr = typeof record.date === 'string' ? record.date : new Date(record.date).toISOString().split('T')[0];
-        const existing = dataByDate.get(dateStr) || { orders: 0, hours: 0 };
-        dataByDate.set(dateStr, {
-          orders: existing.orders + (record.orders || 0),
-          hours: existing.hours + (record.hours || 0),
-        });
-      });
+    const breakdown: Array<{
+      date: string;
+      orders: number;
+      hours: number;
+      multiplier: number;
+      dailyCommission: number;
+    }> = [];
 
-      // Create breakdown
-      const currentDate = new Date(startDate);
-      while (currentDate <= endDate) {
-        const dateStr = currentDate.toISOString().split('T')[0];
-        const dayData = dataByDate.get(dateStr) || { orders: 0, hours: 0 };
-        const dailyMultiplier = 1; // Default multiplier
-        const commissionRate = supervisor?.salaryAmount || salaryConfig.commissionRate || 0;
-        const dailyCommission = (dayData.orders * dayData.hours) * commissionRate;
-
-        breakdown.push({
-          date: dateStr,
-          orders: dayData.orders,
-          hours: dayData.hours,
-          multiplier: dailyMultiplier,
-          dailyCommission,
-        });
-
-        currentDate.setDate(currentDate.getDate() + 1);
+    if (salaryMethod !== 'fixed') {
+      const sortedDates = [...agg.byDate.keys()].sort();
+      for (const dateStr of sortedDates) {
+        const dayData = agg.byDate.get(dateStr)!;
+        if (salaryMethod === 'commission_type1') {
+          breakdown.push({
+            date: dateStr,
+            orders: dayData.orders,
+            hours: dayData.hours,
+            multiplier: type1RatePerOrder,
+            dailyCommission: dayData.orders * type1RatePerOrder,
+          });
+        } else {
+          breakdown.push({
+            date: dateStr,
+            orders: dayData.orders,
+            hours: dayData.hours,
+            multiplier: 1,
+            dailyCommission: 0,
+          });
+        }
       }
     }
 
-    // Return in the format expected by the UI
+    const showCommissionBlock = salaryMethod !== 'fixed' && salaryMethod !== 'legacy_multiplier';
+
     return {
       supervisorId: supervisorCode,
       period: {
         startDate: startDate.toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
       },
-      salaryMethod: salaryConfig.method === 'fixed' ? 'fixed' : 'commission',
-      baseAmount: baseSalary + commission, // Total salary amount
-      commission: (commissionType || salaryConfig.method !== 'fixed') ? {
-        type: commissionType || 'type1',
-        totalOrders,
-        totalHours,
-        // Add commissionRate for UI compatibility
-        commissionRate: commissionDetails?.ratePerOrder || 0,
-        dailyAverageHours: commissionDetails?.dailyAverageHours || 0,
-        workingDays: commissionDetails?.workingDays || 0,
-        calculatedCommission: commission,
-        details: commissionDetails,
-      } : undefined,
+      periodTotals: { totalOrders, totalHours },
+      salaryMethod,
+      baseAmount: baseSalary + commission,
+      commission: showCommissionBlock
+        ? {
+            type: commissionType || 'type1',
+            totalOrders,
+            totalHours,
+            commissionRate: commissionDetails?.ratePerOrder ?? 0,
+            workingDays,
+            calculatedCommission: commission,
+            details: commissionDetails,
+          }
+        : undefined,
       deductions: {
         advances,
         advancesDetails: advancesDetails.items,
-        deductions,
-        deductionsDetails: deductionsDetails.items,
+        deductions: deductionsGeneral,
+        deductionsDetails: generalDeductionItems,
+        performance: performanceDeductions,
+        performanceDetails: performanceItems,
         equipment: equipmentCost,
         equipmentDetails: equipmentDetails.items,
         security: securityCost,
-        performance: 0,
-        total: deductions + advances + securityCost + equipmentCost,
+        admin: adminDeductionTotal,
+        adminDetails: adminDeductions.items,
+        total:
+          deductionsSheetTotal + advances + securityCost + equipmentCost + adminDeductionTotal,
       },
       netSalary,
       breakdown,
+      riderPerformance,
     };
   } catch (error) {
     console.error('Error calculating supervisor salary:', error);

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Layout from '@/components/Layout';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 interface Supervisor {
   code: string;
@@ -15,7 +15,8 @@ interface SalaryCalculation {
     startDate: string;
     endDate: string;
   };
-  salaryMethod: 'fixed' | 'commission_type1' | 'commission_type2';
+  periodTotals?: { totalOrders: number; totalHours: number };
+  salaryMethod: 'fixed' | 'commission_type1' | 'commission_type2' | 'legacy_multiplier';
   baseAmount: number;
   commission?: {
     type: 'type1' | 'type2';
@@ -30,6 +31,7 @@ interface SalaryCalculation {
     equipment: number;
     security: number;
     performance: number;
+    admin?: number;
     total: number;
   };
   netSalary: number;
@@ -40,10 +42,17 @@ interface SalaryCalculation {
     multiplier: number;
     dailyCommission: number;
   }>;
+  riderPerformance?: { code: string; name: string; totalOrders: number; totalHours: number }[];
 }
 
 export default function AdminSalariesPage() {
+  const queryClient = useQueryClient();
   const [selectedSupervisor, setSelectedSupervisor] = useState<string>('');
+  const [adminDeductionDate, setAdminDeductionDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [adminDeductionReason, setAdminDeductionReason] = useState('');
+  const [adminDeductionAmount, setAdminDeductionAmount] = useState('');
+  const [adminDeductionSaving, setAdminDeductionSaving] = useState(false);
+  const [adminDeductionMsg, setAdminDeductionMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [startDate, setStartDate] = useState(() => {
     const today = new Date();
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -84,6 +93,52 @@ export default function AdminSalariesPage() {
     },
     enabled: !!selectedSupervisor && !!startDate && !!endDate,
   });
+
+  async function submitAdminDeduction(e: React.FormEvent) {
+    e.preventDefault();
+    setAdminDeductionMsg(null);
+    if (!selectedSupervisor) {
+      setAdminDeductionMsg({ type: 'err', text: 'اختر مشرفاً أولاً' });
+      return;
+    }
+    const amount = parseFloat(adminDeductionAmount);
+    if (!adminDeductionDate || !Number.isFinite(amount) || amount <= 0) {
+      setAdminDeductionMsg({ type: 'err', text: 'أدخل تاريخاً ومبلغاً صحيحاً' });
+      return;
+    }
+    setAdminDeductionSaving(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/admin/salary/admin-deductions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          supervisorCode: selectedSupervisor,
+          date: adminDeductionDate,
+          reason: adminDeductionReason.trim() || 'خصم إداري',
+          amount,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'فشل الحفظ');
+      setAdminDeductionMsg({ type: 'ok', text: 'تم تسجيل الخصم' });
+      setAdminDeductionAmount('');
+      setAdminDeductionReason('');
+      queryClient.invalidateQueries({
+        queryKey: ['admin', 'salary', selectedSupervisor, startDate, endDate],
+      });
+    } catch (err: unknown) {
+      setAdminDeductionMsg({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'خطأ',
+      });
+    } finally {
+      setAdminDeductionSaving(false);
+    }
+  }
 
   return (
     <Layout>
@@ -137,6 +192,60 @@ export default function AdminSalariesPage() {
           </div>
         </div>
 
+        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+          <h2 className="text-lg font-semibold text-gray-800 mb-3">خصم إداري على مشرف</h2>
+          <p className="text-sm text-gray-600 mb-4">
+            يُسجَّل في تبويب «خصومات_الإدارة» ويُخصم من راتب المشرف ويظهر له مع التفاصيل. أنشئ التبويب في ملف
+            Google Sheets إن لم يكن موجوداً (أعمدة: كود المشرف، التاريخ، السبب، المبلغ، المسجل).
+          </p>
+          <form onSubmit={submitAdminDeduction} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">تاريخ الخصم</label>
+              <input
+                type="date"
+                value={adminDeductionDate}
+                onChange={(e) => setAdminDeductionDate(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">السبب</label>
+              <input
+                type="text"
+                value={adminDeductionReason}
+                onChange={(e) => setAdminDeductionReason(e.target.value)}
+                placeholder="مثال: خصم إداري — ..."
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">المبلغ (ج.م)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={adminDeductionAmount}
+                onChange={(e) => setAdminDeductionAmount(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={adminDeductionSaving || !selectedSupervisor}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium disabled:opacity-50"
+            >
+              {adminDeductionSaving ? 'جاري الحفظ...' : 'تسجيل الخصم'}
+            </button>
+          </form>
+          {adminDeductionMsg && (
+            <p
+              className={`mt-2 text-sm ${adminDeductionMsg.type === 'ok' ? 'text-green-700' : 'text-red-600'}`}
+            >
+              {adminDeductionMsg.text}
+            </p>
+          )}
+        </div>
+
         {isLoading && (
           <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-100 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
@@ -167,7 +276,9 @@ export default function AdminSalariesPage() {
                     ? 'راتب ثابت'
                     : salaryData.salaryMethod === 'commission_type1'
                     ? 'عمولة (نوع 1)'
-                    : 'عمولة (نوع 2)'}
+                    : salaryData.salaryMethod === 'commission_type2'
+                    ? 'عمولة (نوع 2)'
+                    : 'عمولة (نظام قديم)'}
                 </p>
               </div>
             </div>
@@ -202,9 +313,14 @@ export default function AdminSalariesPage() {
                   {salaryData.commission.type === 'type2' && salaryData.commission.details && (
                     <>
                       <div>
-                        <p className="text-sm text-gray-600">إجمالي القبض</p>
+                        <p className="text-sm text-gray-600">إجمالي قبض المشرف</p>
                         <p className="text-xl font-semibold text-gray-800">
-                          {salaryData.commission.details.totalReceipts?.toFixed(2) || '0'} ج.م
+                          {(
+                            salaryData.commission.details.totalSupervisorReceipts ??
+                            salaryData.commission.details.totalReceipts ??
+                            0
+                          ).toFixed(2)}{' '}
+                          ج.م
                         </p>
                       </div>
                       <div>
@@ -222,7 +338,7 @@ export default function AdminSalariesPage() {
             {/* Deductions Breakdown */}
             <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
               <h3 className="text-lg font-bold text-gray-800 mb-4">تفاصيل الخصومات</h3>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                 <div>
                   <p className="text-sm text-gray-600">السلف</p>
                   <p className="text-lg font-semibold text-red-600">
@@ -253,6 +369,12 @@ export default function AdminSalariesPage() {
                     {salaryData.deductions.performance.toFixed(2)} ج.م
                   </p>
                 </div>
+                <div>
+                  <p className="text-sm text-gray-600">خصومات الإدارة</p>
+                  <p className="text-lg font-semibold text-red-600">
+                    {(salaryData.deductions.admin ?? 0).toFixed(2)} ج.م
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -267,10 +389,10 @@ export default function AdminSalariesPage() {
                         <th className="text-right py-3 px-4 font-semibold text-gray-700">التاريخ</th>
                         <th className="text-right py-3 px-4 font-semibold text-gray-700">الطلبات</th>
                         <th className="text-right py-3 px-4 font-semibold text-gray-700">الساعات</th>
-                        {salaryData.salaryMethod !== 'fixed' && (
+                        {salaryData.salaryMethod === 'commission_type1' && (
                           <>
-                            <th className="text-right py-3 px-4 font-semibold text-gray-700">المعامل</th>
-                            <th className="text-right py-3 px-4 font-semibold text-gray-700">العمولة اليومية</th>
+                            <th className="text-right py-3 px-4 font-semibold text-gray-700">ج.م/طلب</th>
+                            <th className="text-right py-3 px-4 font-semibold text-gray-700">عمولة يومية</th>
                           </>
                         )}
                       </tr>
@@ -287,7 +409,7 @@ export default function AdminSalariesPage() {
                           </td>
                           <td className="py-3 px-4 text-gray-600">{day.orders}</td>
                           <td className="py-3 px-4 text-gray-600">{day.hours.toFixed(1)}</td>
-                          {salaryData.salaryMethod !== 'fixed' && (
+                          {salaryData.salaryMethod === 'commission_type1' && (
                             <>
                               <td className="py-3 px-4 text-gray-600">{day.multiplier.toFixed(2)}</td>
                               <td className="py-3 px-4 text-blue-600 font-semibold">
@@ -295,6 +417,34 @@ export default function AdminSalariesPage() {
                               </td>
                             </>
                           )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {salaryData.riderPerformance && salaryData.riderPerformance.length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <h3 className="text-lg font-bold text-gray-800 mb-4">أداء المناديب (الفترة)</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-right py-3 px-4 font-semibold text-gray-700">المندوب</th>
+                        <th className="text-right py-3 px-4 font-semibold text-gray-700">الكود</th>
+                        <th className="text-right py-3 px-4 font-semibold text-gray-700">الساعات</th>
+                        <th className="text-right py-3 px-4 font-semibold text-gray-700">الطلبات</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {salaryData.riderPerformance.map((r) => (
+                        <tr key={r.code} className="hover:bg-gray-50">
+                          <td className="py-3 px-4 text-gray-800">{r.name}</td>
+                          <td className="py-3 px-4 text-gray-600">{r.code}</td>
+                          <td className="py-3 px-4 text-gray-600">{r.totalHours.toFixed(1)}</td>
+                          <td className="py-3 px-4 text-gray-600">{r.totalOrders}</td>
                         </tr>
                       ))}
                     </tbody>
