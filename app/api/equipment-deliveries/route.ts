@@ -11,6 +11,7 @@ import { SHEET_EQUIPMENT_DELIVERY } from '@/lib/equipmentSheetConstants';
 import { assertSupervisorRider } from '@/lib/riderValidation';
 import { applyMainInventoryDelta } from '@/lib/mainInventoryService';
 import { isAllowedZone, ZONE_OPTIONS } from '@/lib/zones';
+import { assertLimitedAdminSupervisorZoneAccess, filterRowsBySupervisorInZoneScope } from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -99,6 +100,7 @@ export async function GET(request: NextRequest) {
       const code = decoded.code?.toString().trim();
       list = list.filter((r) => r.supervisorCode === code);
     }
+    list = await filterRowsBySupervisorInZoneScope(decoded, list);
     if (status) {
       list = list.filter((r) => r.status === status);
     }
@@ -247,6 +249,10 @@ export async function PUT(request: NextRequest) {
     if (!row || (row[12]?.toString().trim() || 'pending') !== 'pending') {
       return NextResponse.json({ success: false, error: 'الطلب غير قيد الانتظار' }, { status: 400 });
     }
+
+    const supCode = row[0]?.toString().trim() || '';
+    const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded, supCode);
+    if (zoneDeny) return zoneDeny;
 
     const approvalDate = new Date().toISOString().split('T')[0];
     const approvedBy = decoded.name || decoded.code || '';

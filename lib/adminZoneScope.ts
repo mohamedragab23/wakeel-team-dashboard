@@ -54,3 +54,13 @@ export async function getSupervisorCodesInZoneScope(
       .filter(Boolean)
   );
 }
+
+/** صفوف فيها supervisorCode (إقالة، تعيين، معدات، …) — مدير الزون يرى طلبات مشرفيه فقط. */
+export async function filterRowsBySupervisorInZoneScope<
+  T extends { supervisorCode?: string }
+>(decoded: { role?: string; permissions?: string; dataZone?: string }, rows: T[]): Promise<T[]> {
+  if (decoded.role !== 'admin') return rows;
+  const allowed = await getSupervisorCodesInZoneScope(decoded);
+  if (!allowed) return rows;
+  return rows.filter((r) => allowed.has(String(r.supervisorCode ?? '').trim()));
+}

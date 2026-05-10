@@ -4,6 +4,7 @@ import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getAllRiders } from '@/lib/adminService';
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { aggregateRidersInDateRange, type RiderSeed } from '@/lib/riderPerformanceAggregate';
+import { getSupervisorCodesInZoneScope } from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,8 +41,16 @@ export async function GET(request: NextRequest) {
       getSupervisorPerformanceFiltered(null, startDate, endDate),
     ]);
 
+    const allowed = await getSupervisorCodesInZoneScope(decoded);
+    const ridersScoped = allowed
+      ? allRiders.filter((r) => allowed.has(String(r.supervisorCode ?? '').trim()))
+      : allRiders;
+    const allowedRiderCodes = new Set(
+      ridersScoped.map((r) => String(r.code ?? '').trim()).filter(Boolean)
+    );
+
     const seedMap = new Map<string, RiderSeed>();
-    for (const r of allRiders) {
+    for (const r of ridersScoped) {
       const code = (r.code ?? '').toString().trim();
       if (!code) continue;
       seedMap.set(code, {
@@ -56,6 +65,7 @@ export async function GET(request: NextRequest) {
     for (const rec of performanceData) {
       const code = (rec.riderCode ?? '').toString().trim();
       if (!code || seedMap.has(code)) continue;
+      if (allowed) continue;
       seedMap.set(code, {
         code,
         name: code,
@@ -68,7 +78,10 @@ export async function GET(request: NextRequest) {
     const dateLabel =
       startDateParam === endDateParam ? startDateParam : `${startDateParam} - ${endDateParam}`;
     const seeds = Array.from(seedMap.values());
-    const data = aggregateRidersInDateRange(seeds, performanceData, dateLabel);
+    const perfScoped = allowed
+      ? performanceData.filter((p) => allowedRiderCodes.has(String(p.riderCode ?? '').trim()))
+      : performanceData;
+    const data = aggregateRidersInDateRange(seeds, perfScoped, dateLabel);
 
     return NextResponse.json({ success: true, data });
   } catch (error: any) {

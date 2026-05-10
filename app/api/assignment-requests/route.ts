@@ -8,6 +8,7 @@ import { verifyToken } from '@/lib/auth';
 import { getSheetData, appendToSheet, updateSheetRow, ensureSheetExists } from '@/lib/googleSheets';
 import { updateRider, addRider } from '@/lib/adminService';
 import { isAllowedZone, ZONE_OPTIONS } from '@/lib/zones';
+import { assertLimitedAdminSupervisorZoneAccess, filterRowsBySupervisorInZoneScope } from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,7 +79,7 @@ export async function GET(request: NextRequest) {
       // Supervisors can only see their own requests
       allRequests = allRequests.filter((req) => req.supervisorCode === decoded.code);
     }
-    // Admins can see all requests
+    allRequests = await filterRowsBySupervisorInZoneScope(decoded, allRequests);
 
     // Filter by status if provided
     if (status) {
@@ -307,6 +308,8 @@ export async function PUT(request: NextRequest) {
     const riderCode = parsedRow.riderCode;
     const riderName = parsedRow.riderName;
     const zone = parsedRow.zone;
+    const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded, supervisorCode);
+    if (zoneDeny) return zoneDeny;
     const status = action === 'approve' ? 'approved' : 'rejected';
     const approvalDate = new Date().toISOString().split('T')[0];
     const approvedBy = decoded.name || decoded.code;

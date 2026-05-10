@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { getAllSupervisors } from '@/lib/adminService';
+import { filterSupervisorsForZoneScopedAdmin } from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +16,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const supervisors = await getAllSupervisors(false);
+    let supervisors = await getAllSupervisors(false);
+    supervisors = filterSupervisorsForZoneScopedAdmin(decoded, supervisors);
     const data = supervisors.map((s) => ({
       name: (s.name || '').trim(),
       region: (s.region || '').trim(),

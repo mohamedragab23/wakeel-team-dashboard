@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getAllSupervisors } from '@/lib/adminService';
+import { assertLimitedAdminSupervisorZoneAccess, filterSupervisorsForZoneScopedAdmin } from '@/lib/adminZoneScope';
 import fs from 'fs';
 import path from 'path';
 
@@ -89,7 +90,8 @@ export async function GET(request: NextRequest) {
     const el = assertAdminApiAccess(decoded, 'equipment_limits');
     if (el) return el;
 
-    const supervisors = await getAllSupervisors(false);
+    let supervisors = await getAllSupervisors(false);
+    supervisors = filterSupervisorsForZoneScopedAdmin(decoded, supervisors);
     const stored = readLimits();
 
     const list = supervisors.map((sup) => ({
@@ -133,6 +135,8 @@ export async function POST(request: NextRequest) {
 
     for (const [code, val] of Object.entries(limits)) {
       if (!code || typeof val !== 'object') continue;
+      const zLim = await assertLimitedAdminSupervisorZoneAccess(decoded, code.trim());
+      if (zLim) return zLim;
       const existingNorm = normalizeLimits(existing[code] as any);
       merged[code] = {
         motorcycleBox: Math.max(0, Math.floor(Number(val.motorcycleBox)) || 0),

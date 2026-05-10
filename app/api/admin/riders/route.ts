@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertLimitedAdminSupervisorZoneAccess, getSupervisorCodesInZoneScope } from '@/lib/adminZoneScope';
 import { getAllRiders, addRider, updateRider, deleteRider } from '@/lib/adminService';
 
 export const dynamic = 'force-dynamic';
@@ -30,7 +31,11 @@ export async function GET(request: NextRequest) {
     // Check if refresh is requested (bypass cache)
     const { searchParams } = new URL(request.url);
     const refresh = searchParams.get('refresh') === 'true';
-    const riders = await getAllRiders(refresh);
+    let riders = await getAllRiders(refresh);
+    const allowed = await getSupervisorCodesInZoneScope(decoded);
+    if (allowed) {
+      riders = riders.filter((r) => allowed.has(String(r.supervisorCode ?? '').trim()));
+    }
 
     return NextResponse.json({
       success: true,
@@ -64,6 +69,9 @@ export async function POST(request: NextRequest) {
     if (!code || !name || !supervisorCode) {
       return NextResponse.json({ success: false, error: 'الكود والاسم وكود المشرف مطلوبة' }, { status: 400 });
     }
+
+    const zPost = await assertLimitedAdminSupervisorZoneAccess(decoded, String(supervisorCode).trim());
+    if (zPost) return zPost;
 
     // Check for duplicate rider code
     const existingRiders = await getAllRiders();
@@ -113,6 +121,26 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'كود المندوب مطلوب' }, { status: 400 });
     }
 
+    const existingList = await getAllRiders(false);
+    const existing = existingList.find((r) => String(r.code ?? '').trim() === String(code).trim());
+    if (!existing) {
+      return NextResponse.json({ success: false, error: 'المندوب غير موجود' }, { status: 404 });
+    }
+    const curSup = String(existing.supervisorCode ?? '').trim();
+    const allowed = await getSupervisorCodesInZoneScope(decoded);
+    if (allowed) {
+      if (!curSup || !allowed.has(curSup)) {
+        return NextResponse.json(
+          { success: false, error: 'لا تملك صلاحية على مندوبين خارج الزونات المحددة لك' },
+          { status: 403 }
+        );
+      }
+    }
+    if (supervisorCode !== undefined && supervisorCode !== null && String(supervisorCode).trim() !== '') {
+      const zPut = await assertLimitedAdminSupervisorZoneAccess(decoded, String(supervisorCode).trim());
+      if (zPut) return zPut;
+    }
+
     const result = await updateRider(code, {
       supervisorCode,
       name,
@@ -156,6 +184,22 @@ export async function DELETE(request: NextRequest) {
 
     if (!code) {
       return NextResponse.json({ success: false, error: 'كود المندوب مطلوب' }, { status: 400 });
+    }
+
+    const existingList = await getAllRiders(false);
+    const existing = existingList.find((r) => String(r.code ?? '').trim() === String(code).trim());
+    if (!existing) {
+      return NextResponse.json({ success: false, error: 'المندوب غير موجود' }, { status: 404 });
+    }
+    const curSup = String(existing.supervisorCode ?? '').trim();
+    const allowedDel = await getSupervisorCodesInZoneScope(decoded);
+    if (allowedDel) {
+      if (!curSup || !allowedDel.has(curSup)) {
+        return NextResponse.json(
+          { success: false, error: 'لا تملك صلاحية على مندوبين خارج الزونات المحددة لك' },
+          { status: 403 }
+        );
+      }
     }
 
     const result = await deleteRider(code);

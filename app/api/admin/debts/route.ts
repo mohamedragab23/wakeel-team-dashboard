@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
-import { getSupervisorDebts } from '@/lib/adminService';
+import { getAllRiders } from '@/lib/adminService';
+import { getSupervisorCodesInZoneScope } from '@/lib/adminZoneScope';
 import { getSupervisorDebtsFiltered } from '@/lib/dataFilter';
 
 export const dynamic = 'force-dynamic';
@@ -31,6 +32,13 @@ export async function GET(request: NextRequest) {
 
     try {
       if (decoded.role === 'admin' && supervisorCode) {
+        const z = await getSupervisorCodesInZoneScope(decoded);
+        if (z && !z.has(String(supervisorCode).trim())) {
+          return NextResponse.json(
+            { success: false, error: 'لا تملك صلاحية على مشرفين خارج الزونات المحددة لك' },
+            { status: 403 }
+          );
+        }
         // Use optimized filtering
         const debts = await getSupervisorDebtsFiltered(supervisorCode);
         return NextResponse.json({ success: true, data: debts });
@@ -52,16 +60,28 @@ export async function GET(request: NextRequest) {
         }
 
         // Skip header row and process data
-        const debts = debtsData.length > 1 
-          ? debtsData.slice(1)
-              .filter((row) => row && row[0]) // Filter out empty rows
-              .map((row) => ({
-                riderCode: row[0]?.toString().trim() || '',
-                amount: parseFloat(row[1]?.toString() || '0') || 0,
-                date: row[2]?.toString().trim() || undefined,
-                notes: row[3]?.toString().trim() || undefined,
-              }))
-          : [];
+        let rawRows =
+          debtsData.length > 1 ? debtsData.slice(1).filter((row) => row && row[0]) : [];
+
+        const zAll = await getSupervisorCodesInZoneScope(decoded);
+        if (zAll) {
+          const allRiders = await getAllRiders(false);
+          const riderToSup = new Map(
+            allRiders.map((r) => [String(r.code ?? '').trim(), String(r.supervisorCode ?? '').trim()])
+          );
+          rawRows = rawRows.filter((row) => {
+            const rc = row[0]?.toString().trim() || '';
+            const sup = riderToSup.get(rc) || '';
+            return Boolean(sup && zAll.has(sup));
+          });
+        }
+
+        const debts = rawRows.map((row) => ({
+          riderCode: row[0]?.toString().trim() || '',
+          amount: parseFloat(row[1]?.toString() || '0') || 0,
+          date: row[2]?.toString().trim() || undefined,
+          notes: row[3]?.toString().trim() || undefined,
+        }));
 
         return NextResponse.json({ success: true, data: debts });
       }

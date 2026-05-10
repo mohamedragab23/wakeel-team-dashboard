@@ -10,6 +10,10 @@ import { appendToSheet, getSheetData, updateSheetRow, ensureSheetExists } from '
 import { updateRider } from '@/lib/adminService';
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { computeWorkDaysByRider, type PerformanceRecord } from '@/lib/riderPerformanceAggregate';
+import {
+  assertLimitedAdminSupervisorZoneAccess,
+  filterRowsBySupervisorInZoneScope,
+} from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -187,7 +191,7 @@ export async function GET(request: NextRequest) {
       // Supervisors can only see their own requests
       allRequests = allRequests.filter((req) => req.supervisorCode === decoded.code);
     }
-    // Admins can see all requests
+    allRequests = await filterRowsBySupervisorInZoneScope(decoded, allRequests);
 
     // Filter by status if provided
     if (status) {
@@ -466,6 +470,12 @@ export async function PUT(request: NextRequest) {
 
     const supervisorCode = row[0]?.toString().trim();
     const riderCode = row[2]?.toString().trim();
+    const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded, supervisorCode);
+    if (zoneDeny) return zoneDeny;
+    if (action === 'approve' && newSupervisorCode && String(newSupervisorCode).trim() !== '') {
+      const denyNew = await assertLimitedAdminSupervisorZoneAccess(decoded, String(newSupervisorCode).trim());
+      if (denyNew) return denyNew;
+    }
     const status = action === 'approve' ? 'approved' : 'rejected';
     const approvalDate = new Date().toISOString().split('T')[0];
     const approvedBy = decoded.name || decoded.code;
