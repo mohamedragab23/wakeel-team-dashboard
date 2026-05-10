@@ -6,9 +6,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminApiAccess, isLimitedAdminZoneScopeActive } from '@/lib/adminFeatureAccess';
-import { assertLimitedAdminSupervisorZoneAccess } from '@/lib/adminZoneScope';
-import { parseAdminAllowedZonesList, supervisorZonesOverlapAllowed } from '@/lib/zones';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertLimitedAdminSupervisorZoneAccess, getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
 import { getSheetData, updateSheetRange } from '@/lib/googleSheets';
 
 export const dynamic = 'force-dynamic';
@@ -254,15 +253,12 @@ export async function GET(request: NextRequest) {
       if (scg) return scg;
 
       const configs: any[] = [];
-      const scopeZones =
-        isLimitedAdminZoneScopeActive(decoded) ? parseAdminAllowedZonesList(decoded.dataZone) : null;
+      const allowed = await getSupervisorCodesInAdminDataScope(decoded);
       for (let i = 1; i < supervisorsData.length; i++) {
         const row = supervisorsData[i];
         if (!row[0]) continue;
-        const regionCell = row[2] ? row[2].toString().trim() : '';
-        if (scopeZones && scopeZones.length > 0 && !supervisorZonesOverlapAllowed(regionCell, scopeZones)) {
-          continue;
-        }
+        const supCode = row[0].toString().trim();
+        if (allowed && !allowed.has(supCode)) continue;
 
         const salaryType = row[5]?.toString().trim() || '';
         const salaryAmount = row[6] ? parseFloat(row[6].toString()) : 0;

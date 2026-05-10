@@ -17,6 +17,10 @@ export default function AdminPermissionsPage() {
   const [mode, setMode] = useState<'full' | 'limited'>('limited');
   const [picked, setPicked] = useState<Set<AdminFeatureKey>>(new Set());
   const [pickedZones, setPickedZones] = useState<Set<string>>(new Set());
+  /** منصب الأدمن المحدود في الشيت: مدير منطقة / مدير زون */
+  const [adminPositionSheet, setAdminPositionSheet] = useState<string>('');
+  /** كود الصف في «المشرفين» (العمود A) المرتبط بهذا الأدمن في الشجرة */
+  const [linkedSupervisorCode, setLinkedSupervisorCode] = useState<string>('');
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [canGrant, setCanGrant] = useState(false);
 
@@ -40,12 +44,42 @@ export default function AdminPermissionsPage() {
       if (!j.success) throw new Error(j.error || 'فشل التحميل');
       return j.data as {
         sheetName: string;
-        admins: Array<{ rowIndex1Based: number; code: string; name: string; permissions: string; dataZone: string }>;
+        admins: Array<{
+          rowIndex1Based: number;
+          code: string;
+          name: string;
+          permissions: string;
+          dataZone: string;
+          adminPositionRaw?: string;
+          linkedSupervisorCode?: string;
+        }>;
         featureKeys: AdminFeatureKey[];
         totalRowsInSheet?: number;
         parsedCount?: number;
-        columnMap?: { codeCol: number; nameCol: number; passCol: number; permCol: number; zoneCol: number };
+        columnMap?: {
+          codeCol: number;
+          nameCol: number;
+          passCol: number;
+          permCol: number;
+          zoneCol: number;
+          positionCol?: number;
+          linkedSupervisorCol?: number;
+        };
       };
+    },
+    enabled: !!canGrant,
+  });
+
+  const { data: supervisorChoices = [] } = useQuery({
+    queryKey: ['admin-supervisors-picker'],
+    queryFn: async () => {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/admin/supervisors', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const j = await res.json();
+      if (!j.success) return [];
+      return j.data as Array<{ code: string; name: string; region?: string; orgRole?: string }>;
     },
     enabled: !!canGrant,
   });
@@ -73,6 +107,11 @@ export default function AdminPermissionsPage() {
       setPicked(new Set());
     }
     setPickedZones(new Set(parseAdminAllowedZonesList(a.dataZone || '')));
+    const pos = (a.adminPositionRaw || '').trim();
+    if (pos.includes('منطقة')) setAdminPositionSheet('مدير منطقة');
+    else if (pos.includes('زون')) setAdminPositionSheet('مدير زون');
+    else setAdminPositionSheet('');
+    setLinkedSupervisorCode((a.linkedSupervisorCode || '').trim());
   };
 
   const saveMutation = useMutation({
@@ -92,6 +131,8 @@ export default function AdminPermissionsPage() {
           targetCode: selectedCode,
           permissions,
           dataZones: Array.from(pickedZones),
+          adminPosition: adminPositionSheet.trim(),
+          linkedSupervisorCode: linkedSupervisorCode.trim(),
         }),
       });
       const j = await res.json();
@@ -129,7 +170,9 @@ export default function AdminPermissionsPage() {
             اختر مستخدمًا من ورقة <strong className="text-[rgba(234,240,255,0.9)]">Admins</strong> (دخول كمدير) ثم حدد الميزات.
             الصلاحيات هنا لا تنطبق على حسابات <strong className="text-[rgba(234,240,255,0.9)]">المشرفين</strong> في ورقة المشرفين — لمشرف مختلف القائمة والصلاحيات.
             بعد الحفظ يجب أن يُسجّل المستخدم المستهدف <strong className="text-[rgba(234,240,255,0.9)]">الخروج ثم الدخول</strong> ليُحمَّل التوكن الجديد.
-            عمود «نطاق الزون» يقيّد أداء المشرفين وما شابه (عدة زونات تُحفظ مفصولة بـ | أو فارغ لكل الزونات).
+            عمود «نطاق الزونات» (إن وُجد في Admins) يقيّد البيانات مع زونات المشرفين. مع ربط صف المشرفين والمنصب
+            يُطبَّق تقاطع الشجرة + الزون. أضف في Admins عموداً بعنوان مثل «نطاق الزونات» أو «ربط شيت المشرفين» إن
+            لم يكن ظاهراً في القائمة بعد الحفظ.
           </p>
         </div>
 
@@ -308,10 +351,50 @@ export default function AdminPermissionsPage() {
                     </p>
                   ) : (
                     <p className="text-xs text-[rgba(234,240,255,0.45)] border-t border-[rgba(255,255,255,0.08)] pt-2">
-                      لا يوجد تقييد زون — سيُحفظ الحقل فارغاً في الشيت.
+                      لا يوجد تقييد زون — سيُحفظ الحقل فارغاً في الشيت (إن وُجد عمود نطاق).
                     </p>
                   )}
                 </div>
+
+                {mode === 'limited' && (
+                  <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.2)] p-3 sm:p-4 space-y-3">
+                    <p className="text-sm font-medium">الهرمية وربط صف «المشرفين»</p>
+                    <p className="text-xs text-[rgba(234,240,255,0.55)] leading-relaxed">
+                      اختر <strong className="text-[rgba(234,240,255,0.85)]">نفس الكود (العمود A)</strong> في ورقة
+                      المشرفين للصف الذي يمثل هذا الأدمن (مثلاً WA-014 لمدير المنطقة). في شيت المشرفين يجب ملء عمود{' '}
+                      <strong className="text-[rgba(234,240,255,0.85)]">كود المدير المباشر</strong> للمشرفين ومديري
+                      الزون تحتك. نطاق الزونات أعلاه يُقاطع مع هذه الشجرة.
+                    </p>
+                    <div>
+                      <label className="block text-sm mb-1">منصب الأدمن (يُحفظ في عمود المنصب في Admins)</label>
+                      <select
+                        className="w-full max-w-md rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm"
+                        value={adminPositionSheet}
+                        onChange={(e) => setAdminPositionSheet(e.target.value)}
+                      >
+                        <option value="">— اختر (افتراضي: مدير زون في النظام) —</option>
+                        <option value="مدير زون">مدير زون</option>
+                        <option value="مدير منطقة">مدير منطقة</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm mb-1">ربط بكود في شيت المشرفين (العمود A)</label>
+                      <select
+                        className="w-full max-w-md rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm"
+                        value={linkedSupervisorCode}
+                        onChange={(e) => setLinkedSupervisorCode(e.target.value)}
+                      >
+                        <option value="">— بدون ربط (يعتمد على الزونات فقط إن وُجدت) —</option>
+                        {supervisorChoices.map((s) => (
+                          <option key={s.code} value={s.code}>
+                            {s.code} — {s.name || ''}
+                            {s.region ? ` (${s.region})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
 
                 <button
                   type="button"

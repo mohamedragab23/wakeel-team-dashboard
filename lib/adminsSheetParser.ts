@@ -89,11 +89,7 @@ function inferColumnsFromHeader(headerRow: any[] | undefined): AdminColumnMap | 
   ]);
   const permCol = findHeaderColumn(h, [
     (x) => x.includes('صلاح') || x.includes('perm'),
-    (x) => x.includes('access') || x === 'role',
-  ]);
-  const zoneCol = findHeaderColumn(h, [
-    (x) => x.includes('زون') || x.includes('zone') || x.includes('منطقة') || x.includes('region'),
-    (x) => x.includes('نطاق') || x.includes('scope'),
+    (x) => (x.includes('access') || x === 'role') && !x.includes('منصب'),
   ]);
 
   if (codeCol < 0) return null;
@@ -119,31 +115,36 @@ function inferColumnsFromHeader(headerRow: any[] | undefined): AdminColumnMap | 
       ? permCol
       : nextFree(used, p + 1);
   used.add(pr);
-  const z =
-    zoneCol >= 0 && !used.has(zoneCol)
-      ? zoneCol
-      : nextFree(used, pr + 1);
-  used.add(z);
 
-  const tryPick = (predicates: ((h: string) => boolean)[]) => {
-    const idx = findHeaderColumn(h, predicates);
-    if (idx < 0 || used.has(idx)) return -1;
-    used.add(idx);
-    return idx;
-  };
-
-  const positionCol = tryPick([
+  /** منصب الأدمن (مدير زون / مدير منطقة) — قبل عمود النطاق حتى لا يُستبدل بـ nextFree */
+  let positionCol = findHeaderColumn(h, [
     (x) => x.includes('منصب') && !x.includes('مشرف'),
     (x) => x === 'position' || x.includes('admin_org') || x.includes('admin_position'),
   ]);
+  if (positionCol >= 0 && !used.has(positionCol)) used.add(positionCol);
+  else positionCol = -1;
 
-  const linkedSupervisorCol = tryPick([
+  let linkedSupervisorCol = findHeaderColumn(h, [
     (x) => x.includes('ربط') && (x.includes('مشرف') || x.includes('شيت')),
     (x) => x.includes('linked') && x.includes('supervisor'),
     (x) => x.includes('كود') && x.includes('شيت') && x.includes('مشرف'),
   ]);
+  if (linkedSupervisorCol >= 0 && !used.has(linkedSupervisorCol)) used.add(linkedSupervisorCol);
+  else linkedSupervisorCol = -1;
 
-  return { codeCol, nameCol: n, passCol: p, permCol: pr, zoneCol: z, positionCol, linkedSupervisorCol };
+  /** نطاق زونات البيانات — لا نخلطه مع «منطقة» ضمن كلمة منصب «مدير منطقة» */
+  let zoneCol = findHeaderColumn(h, [
+    (x) => x.includes('نطاق') && (x.includes('زون') || x.includes('zone')),
+    (x) => x.includes('scope') && x.includes('zone'),
+    (x) => x.includes('datazone') || x === 'data_zone',
+    (x) => x.includes('زونات') || x.includes('allowed'),
+  ]);
+  if (zoneCol < 0 || used.has(zoneCol)) {
+    zoneCol = nextFree(used, pr + 1);
+  }
+  used.add(zoneCol);
+
+  return { codeCol, nameCol: n, passCol: p, permCol: pr, zoneCol, positionCol, linkedSupervisorCol };
 }
 
 /** If column A is empty on most data rows but B is filled, code is likely in B (or sheet has index in A). */

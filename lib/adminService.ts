@@ -1,6 +1,12 @@
 import { getSheetData, appendToSheet, updateSheetRange, deleteSheetRow } from './googleSheets';
 import { cache, CACHE_KEYS } from './cache';
-import { parseSupervisorOrgRole, type SupervisorOrgRole } from '@/lib/orgHierarchy';
+import { type SupervisorOrgRole } from '@/lib/orgHierarchy';
+import {
+  resolveSupervisorsSheetLayout,
+  parseSupervisorRowFromSheet,
+  supervisorToRowCells,
+  sheetRangeForSupervisorDataRow,
+} from './supervisorsSheetParser';
 
 export interface Supervisor {
   code: string;
@@ -55,26 +61,13 @@ export async function getAllSupervisors(useCache: boolean = true): Promise<Super
     console.log(`[GetAllSupervisors] Fetching fresh data from sheet (useCache: ${useCache})`);
     const data = await getSheetData('المشرفين', useCache);
     const supervisors: Supervisor[] = [];
+    const { dataStartIndex, columns } = resolveSupervisorsSheetLayout(data);
 
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      if (!row[0] || row[0].toString().trim() === '') continue;
-
-      const orgRaw = row[9] != null ? row[9].toString().trim() : '';
-      const parentRaw = row[10] != null ? row[10].toString().trim() : '';
-      supervisors.push({
-        code: row[0].toString().trim(),
-        name: row[1] ? row[1].toString().trim() : '',
-        region: row[2] ? row[2].toString().trim() : '',
-        email: row[3] ? row[3].toString().trim() : '',
-        password: row[4] ? row[4].toString().trim() : '',
-        salaryType: row[5] ? (row[5].toString().trim() as 'fixed' | 'commission_type1' | 'commission_type2') : undefined,
-        salaryAmount: row[6] ? parseFloat(row[6].toString()) : undefined,
-        commissionFormula: row[7] ? row[7].toString().trim() : undefined,
-        target: row[8] ? parseInt(row[8].toString()) : undefined,
-        orgRole: parseSupervisorOrgRole(orgRaw),
-        parentCode: parentRaw || undefined,
-      });
+    for (let i = dataStartIndex; i < data.length; i++) {
+      const row = data[i] || [];
+      const parsed = parseSupervisorRowFromSheet(row, columns);
+      if (!parsed) continue;
+      supervisors.push(parsed as Supervisor);
     }
 
     console.log(`[GetAllSupervisors] Found ${supervisors.length} supervisors in sheet`);
@@ -113,20 +106,9 @@ export async function addSupervisor(supervisor: Supervisor): Promise<{ success: 
 
     console.log(`[AddSupervisor] Code is unique, proceeding to add to sheet`);
 
-    // Add to sheet
-    const row = [
-      supervisor.code.toString().trim(),
-      supervisor.name.toString().trim(),
-      (supervisor.region || '').toString().trim(),
-      supervisor.email.toString().trim(),
-      supervisor.password.toString().trim(),
-      (supervisor.salaryType || '').toString().trim(),
-      supervisor.salaryAmount ? supervisor.salaryAmount.toString() : '',
-      (supervisor.commissionFormula || '').toString().trim(),
-      supervisor.target ? supervisor.target.toString() : '',
-      supervisor.orgRole && supervisor.orgRole !== 'supervisor' ? supervisor.orgRole : '',
-      (supervisor.parentCode || '').toString().trim(),
-    ];
+    const matrix = await getSheetData('المشرفين', false);
+    const { columns } = resolveSupervisorsSheetLayout(matrix);
+    const row = supervisorToRowCells([], columns, supervisor);
 
     console.log(`[AddSupervisor] Row data:`, row);
 
@@ -192,80 +174,41 @@ export async function updateSupervisor(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const data = await getSheetData('المشرفين');
+    const { dataStartIndex, columns } = resolveSupervisorsSheetLayout(data);
     let rowIndex = -1;
+    let dataIdx = -1;
 
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][0]?.toString().trim() === code) {
-        rowIndex = i + 1; // +1 because sheets are 1-indexed
+    for (let i = dataStartIndex; i < data.length; i++) {
+      const c = data[i]?.[columns.code]?.toString().trim();
+      if (c === code) {
+        dataIdx = i;
+        rowIndex = i + 1;
         break;
       }
     }
 
-    if (rowIndex === -1) {
+    if (rowIndex === -1 || dataIdx < 0) {
       return { success: false, error: 'المشرف غير موجود' };
     }
 
-    const row = data[rowIndex - 1];
-    
-    // A–K: +J المنصب التنظيمي، +K كود المدير المباشر في الشيت
-    let nextSalaryAmount = (row[6] ?? '').toString().trim();
-    if (updates.salaryAmount !== undefined) {
-      if (updates.salaryAmount === null || updates.salaryAmount === '') nextSalaryAmount = '';
-      else nextSalaryAmount = String(updates.salaryAmount).trim();
+    const row = data[dataIdx] || [];
+    const current = parseSupervisorRowFromSheet(row, columns);
+    if (!current) {
+      return { success: false, error: 'المشرف غير موجود' };
     }
 
-    let nextFormula = (row[7] ?? '').toString().trim();
-    if (updates.commissionFormula !== undefined) {
-      nextFormula = updates.commissionFormula === null || updates.commissionFormula === ''
-        ? ''
-        : String(updates.commissionFormula).trim();
-    }
+    const merged: Supervisor = {
+      ...current,
+      ...updates,
+      code: (updates.code || current.code).toString().trim(),
+    } as Supervisor;
 
-    const nextOrg =
-      updates.orgRole !== undefined
-        ? updates.orgRole === 'supervisor'
-          ? ''
-          : String(updates.orgRole).trim()
-        : row[9] != null
-          ? row[9].toString().trim()
-          : '';
-    const nextParent =
-      updates.parentCode !== undefined
-        ? String(updates.parentCode ?? '').trim()
-        : row[10] != null
-          ? row[10].toString().trim()
-          : '';
+    const updatedRow = supervisorToRowCells(row, columns, merged);
+    const range = sheetRangeForSupervisorDataRow(rowIndex, columns);
 
-    const updatedRow = [
-      (updates.code || row[0] || '').toString().trim(), // A: كود المشرف
-      (updates.name || row[1] || '').toString().trim(), // B: الاسم
-      (updates.region !== undefined ? updates.region : (row[2] || '')).toString().trim(), // C: المنطقة
-      (updates.email || row[3] || '').toString().trim(), // D: البريد الإلكتروني
-      (updates.password || row[4] || '').toString().trim(), // E: كلمة المرور
-      (updates.salaryType !== undefined ? updates.salaryType : (row[5] || '')).toString().trim(), // F: نوع الراتب
-      nextSalaryAmount, // G: مبلغ الراتب
-      nextFormula, // H: صيغة العمولة
-      (updates.target !== undefined ? updates.target : (row[8] || '')).toString().trim(), // I: الهدف
-      nextOrg, // J
-      nextParent, // K
-    ];
-    
-    console.log(`[UpdateSupervisor] Updating supervisor "${code}" at row ${rowIndex}`);
-    console.log(`[UpdateSupervisor] Old data:`, {
-      code: row[0],
-      name: row[1],
-      salaryType: row[5],
-      target: row[8],
-    });
-    console.log(`[UpdateSupervisor] New data:`, {
-      code: updatedRow[0],
-      name: updatedRow[1],
-      salaryType: updatedRow[5],
-      target: updatedRow[8],
-    });
-    console.log(`[UpdateSupervisor] Full row (11 columns):`, updatedRow);
+    console.log(`[UpdateSupervisor] Updating supervisor "${code}" at row ${rowIndex} range ${range}`);
 
-    const success = await updateSheetRange('المشرفين', `A${rowIndex}:K${rowIndex}`, [updatedRow]);
+    const success = await updateSheetRange('المشرفين', range, [updatedRow]);
 
     if (success) {
       // Clear cache and notify supervisors
@@ -290,14 +233,14 @@ export async function deleteSupervisor(code: string): Promise<{ success: boolean
   try {
     const { getSheetData, deleteSheetRow } = await import('./googleSheets');
     const data = await getSheetData('المشرفين', false);
-    
-    // Find the supervisor row
+    const { dataStartIndex, columns } = resolveSupervisorsSheetLayout(data);
+
     let rowIndex = -1;
     const codeTrimmed = code?.toString().trim();
-    
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][0]?.toString().trim() === codeTrimmed) {
-        rowIndex = i + 1; // Google Sheets is 1-indexed
+
+    for (let i = dataStartIndex; i < data.length; i++) {
+      if (data[i]?.[columns.code]?.toString().trim() === codeTrimmed) {
+        rowIndex = i + 1;
         break;
       }
     }

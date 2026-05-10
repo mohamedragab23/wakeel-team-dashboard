@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
       name: a.name,
       permissions: a.permissions,
       dataZone: a.dataZone,
-      adminPosition: a.adminPositionRaw,
+      adminPositionRaw: a.adminPositionRaw,
       linkedSupervisorCode: a.linkedSupervisorCode,
     }));
 
