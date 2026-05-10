@@ -302,11 +302,11 @@ export default function AdminSalariesPage() {
                       {salaryData.commission.calculatedCommission.toFixed(2)} ج.م
                     </p>
                   </div>
-                  {salaryData.commission.type === 'type1' && salaryData.commission.details?.ratePerOrder && (
+                  {salaryData.commission.type === 'type1' && salaryData.commission.details?.ratePerOrder != null && (
                     <div>
-                      <p className="text-sm text-gray-600">معدل العمولة</p>
+                      <p className="text-sm text-gray-600">معدل فعّال (مرجّح بعد الجمع اليومي)</p>
                       <p className="text-xl font-semibold text-gray-800">
-                        {salaryData.commission.details.ratePerOrder.toFixed(2)} ج.م/طلب
+                        {Number(salaryData.commission.details.ratePerOrder).toFixed(2)} ج.م/طلب
                       </p>
                     </div>
                   )}

@@ -241,12 +241,27 @@ export default function SalaryPage() {
                             </div>
                           )}
                         {salaryData.salaryMethod === 'commission_type1' && (
-                          <div className="flex justify-between py-2 border-b bg-green-50 px-2 rounded">
-                            <span className="text-gray-600">معدل العمولة (حسب إجمالي الساعات):</span>
-                            <span className="font-semibold text-green-700">
-                              {(salaryData.commission.commissionRate || 0).toFixed(2)} ج.م لكل طلب
-                            </span>
-                          </div>
+                          <>
+                            {salaryData.commission.details &&
+                              typeof (salaryData.commission.details as { averageDailyHours?: number }).averageDailyHours ===
+                                'number' && (
+                                <div className="flex justify-between py-2 border-b">
+                                  <span className="text-gray-600">متوسط الساعات اليومية (مجمّع المناديب):</span>
+                                  <span className="font-semibold text-gray-800">
+                                    {(
+                                      (salaryData.commission.details as { averageDailyHours: number }).averageDailyHours || 0
+                                    ).toFixed(1)}{' '}
+                                    ساعة
+                                  </span>
+                                </div>
+                              )}
+                            <div className="flex justify-between py-2 border-b bg-green-50 px-2 rounded">
+                              <span className="text-gray-600">معدل فعّال (بعد احتساب كل يوم حسب ساعاته):</span>
+                              <span className="font-semibold text-green-700">
+                                {(salaryData.commission.commissionRate || 0).toFixed(2)} ج.م لكل طلب
+                              </span>
+                            </div>
+                          </>
                         )}
                         {salaryData.salaryMethod === 'commission_type2' &&
                           salaryData.commission.details &&

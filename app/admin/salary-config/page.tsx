@@ -278,17 +278,16 @@ export default function SalaryConfigPage() {
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p className="text-sm text-blue-800 font-semibold mb-2">نظام العمولة (النوع الأول)</p>
                 <p className="text-sm text-blue-700">
-                  يتم حساب العمولة بناءً على إجمالي ساعات مناديب المشرف اليومية:
+                  يُحدَّد النطاق من <strong>إجمالي ساعات كل المناديب لكل يوم على حدة</strong> (مجموع ساعاتهم في ذلك
+                  اليوم)، وليس من إجمالي ساعات الشهر كله.
                 </p>
                 <ul className="text-sm text-blue-700 list-disc list-inside mr-4 mt-2 space-y-1">
-                  <li>0 - 100 ساعة: 1 ج.م/طلب</li>
-                  <li>101 - 200 ساعة: 1.20 ج.م/طلب</li>
-                  <li>201 - 300 ساعة: 1.30 ج.م/طلب</li>
-                  <li>301 - 400 ساعة: 1.40 ج.م/طلب</li>
-                  <li>401 ساعة فأكثر: 1.50 ج.م/طلب</li>
+                  <li>مثال: إن كان النطاق 0–500 ساعة يومياً بمعدل 0.75، فيُطبَّق 0.75 على طلبات كل يومٍ ساعاته اليومية
+                    ضمن 0–500.</li>
+                  <li>إجمالي العمولة = مجموع (طلبات اليوم × المعدل المناسب لساعات ذلك اليوم).</li>
                 </ul>
                 <p className="text-sm text-blue-700 mt-2">
-                  <strong>العمولة اليومية = (إجمالي الطلبات) × (قيمة العمولة للطلب)</strong>
+                  <strong>عمولة اليوم = (طلبات ذلك اليوم) × (معدل الطلب حسب نطاق الساعات اليومية)</strong>
                 </p>
               </div>
 
@@ -309,7 +308,9 @@ export default function SalaryConfigPage() {
                   {type1Ranges.map((range, index) => (
                     <div key={`range-${index}`} className="flex gap-3 items-center p-3 bg-gray-50 rounded-lg">
                       <div className="flex-1">
-                        <label htmlFor={`range-min-${index}`} className="text-xs text-gray-600 mb-1 block">من (ساعة)</label>
+                        <label htmlFor={`range-min-${index}`} className="text-xs text-gray-600 mb-1 block">
+                          من (ساعات اليوم)
+                        </label>
                         <input
                           id={`range-min-${index}`}
                           name={`range-min-${index}`}
@@ -321,7 +322,9 @@ export default function SalaryConfigPage() {
                         />
                       </div>
                       <div className="flex-1">
-                        <label htmlFor={`range-max-${index}`} className="text-xs text-gray-600 mb-1 block">إلى (ساعة)</label>
+                        <label htmlFor={`range-max-${index}`} className="text-xs text-gray-600 mb-1 block">
+                          إلى (ساعات اليوم)
+                        </label>
                         <input
                           id={`range-max-${index}`}
                           name={`range-max-${index}`}
@@ -439,8 +442,11 @@ export default function SalaryConfigPage() {
             </div>
             <div>
               <p className="font-semibold">2. نظام العمولة (النوع الأول):</p>
-              <p>بناءً على إجمالي ساعات مناديب المشرف والطلبات</p>
-              <p className="mr-4">• العمولة = (إجمالي الطلبات) × (قيمة العمولة للطلب حسب نطاق الساعات)</p>
+              <p>بناءً على إجمالي ساعات المناديب لكل يوم على حدة، ثم طلبات ذلك اليوم</p>
+              <p className="mr-4">
+                • لكل يوم: عمولة اليوم = (طلبات اليوم) × (المعدل حسب نطاق الساعات اليومية المجمّعة للمناديب)
+              </p>
+              <p className="mr-4">• إجمالي العمولة = مجموع عمولات الأيام</p>
             </div>
             <div>
               <p className="font-semibold">3. نظام العمولة (النوع الثاني):</p>

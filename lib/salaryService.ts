@@ -715,8 +715,24 @@ export async function calculateSupervisorSalary(
     let commissionType: 'type1' | 'type2' | undefined;
     let commissionDetails: any;
     let salaryMethod: 'fixed' | 'commission_type1' | 'commission_type2' | 'legacy_multiplier' = 'fixed';
-    let type1RatePerOrder = 0;
     const workingDays = agg.byDate.size;
+
+    const breakdown: Array<{
+      date: string;
+      orders: number;
+      hours: number;
+      multiplier: number;
+      dailyCommission: number;
+    }> = [];
+
+    function type1RateForDailyHours(dayHours: number, ranges: { minHours: number; maxHours: number; ratePerOrder: number }[]) {
+      for (const range of ranges) {
+        if (dayHours >= range.minHours && dayHours <= range.maxHours) {
+          return range.ratePerOrder;
+        }
+      }
+      return ranges.length > 0 ? ranges[ranges.length - 1].ratePerOrder : 1.0;
+    }
 
     if (salaryConfig.method === 'fixed') {
       salaryMethod = 'fixed';
@@ -726,28 +742,37 @@ export async function calculateSupervisorSalary(
       salaryMethod = 'commission_type1';
       commissionType = 'type1';
       const ranges = salaryConfig.type1Ranges || [
-        { minHours: 0, maxHours: 100, ratePerOrder: 1.0 },
-        { minHours: 101, maxHours: 200, ratePerOrder: 1.2 },
-        { minHours: 201, maxHours: 300, ratePerOrder: 1.3 },
-        { minHours: 301, maxHours: 400, ratePerOrder: 1.4 },
-        { minHours: 401, maxHours: 999999, ratePerOrder: 1.5 },
+        { minHours: 0, maxHours: 500, ratePerOrder: 1.0 },
+        { minHours: 501, maxHours: 999999, ratePerOrder: 1.25 },
       ];
-      let ratePerOrder = 1.0;
-      for (const range of ranges) {
-        if (totalHours >= range.minHours && totalHours <= range.maxHours) {
-          ratePerOrder = range.ratePerOrder;
-          break;
-        }
+      commission = 0;
+      const sortedDates = [...agg.byDate.keys()].sort();
+      for (const dateStr of sortedDates) {
+        const dayData = agg.byDate.get(dateStr)!;
+        const dayHours = dayData.hours;
+        const rate = type1RateForDailyHours(dayHours, ranges);
+        const dayComm = dayData.orders * rate;
+        commission += dayComm;
+        breakdown.push({
+          date: dateStr,
+          orders: dayData.orders,
+          hours: dayHours,
+          multiplier: rate,
+          dailyCommission: dayComm,
+        });
       }
-      type1RatePerOrder = ratePerOrder;
-      commission = totalOrders * ratePerOrder;
+      const blendedRatePerOrder = totalOrders > 0 ? commission / totalOrders : 0;
+      const averageDailyHours = workingDays > 0 ? totalHours / workingDays : 0;
       commissionDetails = {
         totalHours,
         totalOrders,
-        ratePerOrder,
+        ratePerOrder: blendedRatePerOrder,
+        blendedRatePerOrder,
+        averageDailyHours,
         ranges,
         workingDays,
-        calculationNote: 'العمولة = إجمالي الطلبات × معدل الطلب حسب نطاق إجمالي ساعات مناديب المشرف في الفترة',
+        calculationNote:
+          'لكل يوم: إجمالي ساعات مناديبك ذلك اليوم يحدد النطاق، ثم عمولة ذلك اليوم = طلبات ذلك اليوم × المعدل. إجمالي العمولة = مجموع العمولات اليومية.',
       };
       baseSalary = 0;
     } else if (salaryConfig.method === 'commission_type2') {
@@ -827,35 +852,17 @@ export async function calculateSupervisorSalary(
     );
     console.log(`  Net Salary: ${netSalary}`);
 
-    const breakdown: Array<{
-      date: string;
-      orders: number;
-      hours: number;
-      multiplier: number;
-      dailyCommission: number;
-    }> = [];
-
-    if (salaryMethod !== 'fixed') {
+    if (salaryMethod === 'commission_type2' || salaryMethod === 'legacy_multiplier') {
       const sortedDates = [...agg.byDate.keys()].sort();
       for (const dateStr of sortedDates) {
         const dayData = agg.byDate.get(dateStr)!;
-        if (salaryMethod === 'commission_type1') {
-          breakdown.push({
-            date: dateStr,
-            orders: dayData.orders,
-            hours: dayData.hours,
-            multiplier: type1RatePerOrder,
-            dailyCommission: dayData.orders * type1RatePerOrder,
-          });
-        } else {
-          breakdown.push({
-            date: dateStr,
-            orders: dayData.orders,
-            hours: dayData.hours,
-            multiplier: 1,
-            dailyCommission: 0,
-          });
-        }
+        breakdown.push({
+          date: dateStr,
+          orders: dayData.orders,
+          hours: dayData.hours,
+          multiplier: 1,
+          dailyCommission: 0,
+        });
       }
     }
 
