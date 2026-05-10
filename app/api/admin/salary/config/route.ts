@@ -92,12 +92,21 @@ export async function POST(request: NextRequest) {
         await appendToSheet('إعدادات_الرواتب', [configRow], false);
       }
 
-      // Also update the supervisor's salaryType in المشرفين sheet
+      // Also update the supervisor's salaryType in المشرفين sheet (مصدر ثانوي؛ المصدر الرئيسي إعدادات_الرواتب)
       try {
         const { updateSupervisor } = await import('@/lib/adminService');
         const updateResult = await updateSupervisor(supervisorIdTrimmed, {
           salaryType: salaryMethod as 'fixed' | 'commission_type1' | 'commission_type2',
-          salaryAmount: salaryMethod === 'fixed' ? fixedSalary : undefined,
+          salaryAmount: salaryMethod === 'fixed' ? fixedSalary : null,
+          commissionFormula:
+            salaryMethod === 'commission_type1'
+              ? JSON.stringify(type1Ranges || [])
+              : salaryMethod === 'commission_type2'
+                ? JSON.stringify({
+                    type2BasePercentage: type2BasePercentage ?? 11,
+                    type2SupervisorPercentage: type2SupervisorPercentage ?? 60,
+                  })
+                : null,
         });
         
         if (!updateResult.success) {
@@ -151,6 +160,14 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const supervisorId = searchParams.get('supervisorId');
+
+    if (supervisorId) {
+      if (decoded.role !== 'admin') {
+        return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
+      }
+      const singleRead = assertAdminApiAccess(decoded, 'salary_config');
+      if (singleRead) return singleRead;
+    }
 
     // Get supervisors sheet
     const supervisorsData = await getSheetData('المشرفين', false);

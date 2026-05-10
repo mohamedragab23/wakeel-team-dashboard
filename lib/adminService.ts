@@ -8,8 +8,9 @@ export interface Supervisor {
   email: string;
   password: string;
   salaryType?: 'fixed' | 'commission_type1' | 'commission_type2';
-  salaryAmount?: number;
-  commissionFormula?: string;
+  /** عند التحديث: `null` أو `''` يفرّغ عمود المبلغ في الشيت */
+  salaryAmount?: number | string | null;
+  commissionFormula?: string | null;
   target?: number; // Monthly target for supervisor
 }
 
@@ -197,6 +198,19 @@ export async function updateSupervisor(
     
     // Ensure we have exactly 9 columns (A-I) matching the sheet structure
     // Column mapping: A=code, B=name, C=region, D=email, E=password, F=salaryType, G=salaryAmount, H=commissionFormula, I=target
+    let nextSalaryAmount = (row[6] ?? '').toString().trim();
+    if (updates.salaryAmount !== undefined) {
+      if (updates.salaryAmount === null || updates.salaryAmount === '') nextSalaryAmount = '';
+      else nextSalaryAmount = String(updates.salaryAmount).trim();
+    }
+
+    let nextFormula = (row[7] ?? '').toString().trim();
+    if (updates.commissionFormula !== undefined) {
+      nextFormula = updates.commissionFormula === null || updates.commissionFormula === ''
+        ? ''
+        : String(updates.commissionFormula).trim();
+    }
+
     const updatedRow = [
       (updates.code || row[0] || '').toString().trim(), // A: كود المشرف
       (updates.name || row[1] || '').toString().trim(), // B: الاسم
@@ -204,8 +218,8 @@ export async function updateSupervisor(
       (updates.email || row[3] || '').toString().trim(), // D: البريد الإلكتروني
       (updates.password || row[4] || '').toString().trim(), // E: كلمة المرور
       (updates.salaryType !== undefined ? updates.salaryType : (row[5] || '')).toString().trim(), // F: نوع الراتب
-      (updates.salaryAmount !== undefined ? updates.salaryAmount : (row[6] || '')).toString().trim(), // G: مبلغ الراتب
-      (updates.commissionFormula || row[7] || '').toString().trim(), // H: صيغة العمولة
+      nextSalaryAmount, // G: مبلغ الراتب
+      nextFormula, // H: صيغة العمولة
       (updates.target !== undefined ? updates.target : (row[8] || '')).toString().trim(), // I: الهدف
     ];
     

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import Layout from '@/components/Layout';
+import SupervisorTableSection from '@/components/SupervisorTableSection';
 import * as XLSX from 'xlsx';
 import {
   RidersExcelColumnMenu,
@@ -361,15 +362,6 @@ export default function RidersPage() {
             >
               مسح فلاتر الأعمدة
             </button>
-            <button
-              type="button"
-              onClick={downloadExcel}
-              disabled={exporting || columnFilteredRiders.length === 0}
-              className="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              title={columnFilteredRiders.length === 0 ? 'لا توجد بيانات لتنزيلها' : 'تنزيل البيانات كملف Excel'}
-            >
-              {exporting ? 'جاري تجهيز Excel...' : '⬇️ تنزيل Excel'}
-            </button>
           </div>
 
           {startDate && endDate && (
@@ -398,6 +390,14 @@ export default function RidersPage() {
         )}
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <SupervisorTableSection
+            title="جدول المناديب"
+            fileNameBase="riders_performance"
+            toolbarOnLight
+            onExportExcel={downloadExcel}
+            exportDisabled={exporting || columnFilteredRiders.length === 0}
+            className="p-4 sm:p-5"
+          >
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1280px]">
               <thead className="bg-gray-50">
@@ -747,6 +747,7 @@ export default function RidersPage() {
               </tbody>
             </table>
           </div>
+          </SupervisorTableSection>
         </div>
 
         {/* Termination Request Modal */}

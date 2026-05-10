@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { analyzeLegacyShifts } from '@/lib/shiftsLegacyAnalyze';
 import { getAllSupervisors } from '@/lib/adminService';
-import { parseAdminAllowedZonesList } from '@/lib/zones';
+import { parseAdminAllowedZonesList, supervisorZonesOverlapAllowed } from '@/lib/zones';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,10 +23,9 @@ export async function POST(request: NextRequest) {
     let allowedSupervisorNames: Set<string> | null = null;
     const scopeZones = parseAdminAllowedZonesList(decoded.dataZone);
     if (decoded.role === 'admin' && scopeZones.length > 0) {
-      const allowed = new Set<string>(scopeZones);
       const sups = await getAllSupervisors(false);
       const names = sups
-        .filter((s) => allowed.has((s.region || '').trim()))
+        .filter((s) => supervisorZonesOverlapAllowed(s.region, scopeZones))
         .map((s) => (s.name || '').trim())
         .filter(Boolean);
       allowedSupervisorNames = new Set(names);

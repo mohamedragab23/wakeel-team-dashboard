@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery } from '@tanstack/react-query';
-import { ZONE_OPTIONS } from '@/lib/zones';
+import { ZONE_OPTIONS, supervisorRowMatchesZoneFilter } from '@/lib/zones';
 
 interface SupervisorPerformanceRow {
   code: string;
@@ -87,7 +87,7 @@ export default function SupervisorPerformancePage() {
   const supervisors =
     zoneFilter === 'all'
       ? supervisorsAll
-      : supervisorsAll.filter((s) => (s.region || '').trim() === zoneFilter);
+      : supervisorsAll.filter((s) => supervisorRowMatchesZoneFilter(s.region, zoneFilter));
   const summary = data?.summary;
   const comparison = data?.comparison;
   const bestSupervisorCode = comparison?.best_supervisor?.code || '';

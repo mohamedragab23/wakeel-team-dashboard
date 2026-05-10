@@ -58,3 +58,33 @@ export function serializeAdminAllowedZones(zones: Iterable<string>): string {
   return list.join('|');
 }
 
+/**
+ * Admin scope (allowed zones): include supervisor if any stored zone intersects allowed.
+ * Supports pipe-separated official zones in the supervisor sheet cell.
+ */
+export function supervisorZonesOverlapAllowed(
+  supervisorRegionCell: unknown,
+  allowedZones: readonly string[]
+): boolean {
+  const allowed = new Set(allowedZones.map((z) => String(z).trim()).filter(Boolean));
+  if (allowed.size === 0) return true;
+  const supList = parseAdminAllowedZonesList(supervisorRegionCell);
+  if (supList.length > 0) {
+    return supList.some((z) => allowed.has(z));
+  }
+  const raw = String(supervisorRegionCell ?? '').trim();
+  if (!raw) return false;
+  return allowed.has(raw);
+}
+
+/** Single-zone dropdown filter (شفتات / أداء المشرفين): row matches if it includes that zone. */
+export function supervisorRowMatchesZoneFilter(supervisorRegionCell: unknown, zoneFilter: string): boolean {
+  const z = String(zoneFilter || '').trim();
+  if (!z || z === 'all') return true;
+  const list = parseAdminAllowedZonesList(supervisorRegionCell);
+  if (list.length > 0) {
+    return list.some((x) => x === z);
+  }
+  return String(supervisorRegionCell ?? '').trim() === z;
+}
+

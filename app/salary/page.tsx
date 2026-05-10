@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import Layout from '@/components/Layout';
+import SupervisorTableSection from '@/components/SupervisorTableSection';
 import { useQuery } from '@tanstack/react-query';
 
 interface SalaryCalculation {
@@ -438,11 +439,30 @@ export default function SalaryPage() {
         {/* Daily activity + commission (type 1) */}
         {salaryData && salaryData.salaryMethod !== 'fixed' && salaryData.breakdown && salaryData.breakdown.length > 0 && (
           <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">
-              {salaryData.salaryMethod === 'commission_type1'
-                ? 'تفاصيل يومية (الطلبات والساعات — عمولة نوع 1)'
-                : 'تفاصيل يومية (الطلبات والساعات)'}
-            </h3>
+            <SupervisorTableSection
+              title={
+                salaryData.salaryMethod === 'commission_type1'
+                  ? 'تفاصيل يومية (الطلبات والساعات — عمولة نوع 1)'
+                  : 'تفاصيل يومية (الطلبات والساعات)'
+              }
+              fileNameBase="salary-daily-breakdown"
+              sheetName="Daily"
+              toolbarOnLight
+              getExportRows={() =>
+                salaryData.breakdown.map((day) => {
+                  const row: Record<string, string | number> = {
+                    التاريخ: day.date,
+                    الطلبات: day.orders,
+                    الساعات: Number((day.hours || 0).toFixed(1)),
+                  };
+                  if (salaryData.salaryMethod === 'commission_type1') {
+                    row['ج.م/طلب'] = Number((day.multiplier || 0).toFixed(2));
+                    row['عمولة يومية'] = Number(day.dailyCommission.toFixed(2));
+                  }
+                  return row;
+                })
+              }
+            >
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-50">
@@ -477,12 +497,26 @@ export default function SalaryPage() {
                 </tbody>
               </table>
             </div>
+            </SupervisorTableSection>
           </div>
         )}
 
         {salaryData && salaryData.riderPerformance && salaryData.riderPerformance.length > 0 && (
           <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">أداء المناديب (الفترة المحددة)</h3>
+            <SupervisorTableSection
+              title="أداء المناديب (الفترة المحددة)"
+              fileNameBase="salary-rider-performance"
+              sheetName="Riders"
+              toolbarOnLight
+              getExportRows={() =>
+                salaryData.riderPerformance!.map((r) => ({
+                  المندوب: r.name,
+                  الكود: r.code,
+                  الساعات: Number(r.totalHours.toFixed(1)),
+                  الطلبات: r.totalOrders,
+                }))
+              }
+            >
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
@@ -505,6 +539,7 @@ export default function SalaryPage() {
                 </tbody>
               </table>
             </div>
+            </SupervisorTableSection>
           </div>
         )}
       </div>

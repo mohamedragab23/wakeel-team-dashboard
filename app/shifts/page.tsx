@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Layout from '@/components/Layout';
+import SupervisorTableSection from '@/components/SupervisorTableSection';
 import Card from '@/components/ui-v2/Card';
 import Button from '@/components/ui-v2/Button';
 import Tabs, { type TabItem } from '@/components/ui-v2/Tabs';
 import { v2CssVars } from '@/theme/tokens';
-import { ZONE_OPTIONS } from '@/lib/zones';
+import { ZONE_OPTIONS, supervisorRowMatchesZoneFilter } from '@/lib/zones';
 import { filterShiftsReportsBySupervisorNames, type ShiftsReportsBundle } from '@/lib/shiftsAdminZoneFilter';
 import {
   Bar,
@@ -20,6 +21,44 @@ import {
 } from 'recharts';
 
 type ShiftsTab = 'upload' | 'overview' | 'hours' | 'unassigned' | 'supervisors';
+
+function safeFilePart(s: string) {
+  return String(s).replace(/[^\w.-]+/g, '_');
+}
+
+function shiftsRowsToSheetRows(rows: any[], keys: readonly string[]): Record<string, string>[] {
+  return rows.map((r) => {
+    const o: Record<string, string> = {};
+    for (const k of keys) o[k] = String(r?.[k] ?? '');
+    return o;
+  });
+}
+
+const SHIFT_BOOKED_KEYS = [
+  'employee_id',
+  'employee_name',
+  'city',
+  'contract_name',
+  'supervisors',
+  'planned_start_time',
+  'planned_end_time',
+  'shift_hours',
+] as const;
+
+const SHIFT_UNASSIGNED_KEYS = ['employee_id', 'employee_name', 'contract_name', 'city', 'supervisors'] as const;
+
+const SHIFT_SUP_UNASSIGNED_KEYS = ['employee_id', 'employee_name', 'city', 'contract_name'] as const;
+
+/** Booked riders table in «تفاصيل المشرفين» (no supervisors column). */
+const SHIFT_SUP_BOOKED_KEYS = [
+  'employee_id',
+  'employee_name',
+  'city',
+  'contract_name',
+  'planned_start_time',
+  'planned_end_time',
+  'shift_hours',
+] as const;
 
 export default function ShiftsPage() {
   const [tab, setTab] = useState<ShiftsTab>('upload');
@@ -77,7 +116,7 @@ export default function ShiftsPage() {
   const supervisorNamesInZone = useMemo(() => {
     if (!isAdmin || zoneFilter === 'all' || !zoneMap.length) return null;
     const names = zoneMap
-      .filter((x) => (x.region || '').trim() === zoneFilter)
+      .filter((x) => supervisorRowMatchesZoneFilter(x.region, zoneFilter))
       .map((x) => (x.name || '').trim())
       .filter(Boolean);
     return new Set(names);
@@ -396,6 +435,13 @@ export default function ShiftsPage() {
                     <div className="px-4 py-3 border-b border-[rgba(255,255,255,0.08)] text-sm text-[#EAF0FF] font-medium">
                       الحاجزين بتاريخ {d}
                     </div>
+                    <SupervisorTableSection
+                      fileNameBase={`shifts-booked-${safeFilePart(d)}`}
+                      sheetName="booked"
+                      exportDisabled={rows.length === 0}
+                      getExportRows={() => shiftsRowsToSheetRows(rows, SHIFT_BOOKED_KEYS)}
+                      className="px-3 pb-3"
+                    >
                     <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
                       <table className="min-w-full text-sm">
                         <thead className="sticky top-0 bg-[rgba(15,18,28,0.98)]">
@@ -420,6 +466,7 @@ export default function ShiftsPage() {
                         </tbody>
                       </table>
                     </div>
+                    </SupervisorTableSection>
                   </Card>
                   );
                 })}
@@ -463,6 +510,13 @@ export default function ShiftsPage() {
                     <div className="px-4 py-3 border-b border-[rgba(255,255,255,0.08)] text-sm text-[#EAF0FF] font-medium">
                       غير الحاجزين بتاريخ {d} ({rows.length})
                     </div>
+                    <SupervisorTableSection
+                      fileNameBase={`shifts-unassigned-${safeFilePart(d)}`}
+                      sheetName="unassigned"
+                      exportDisabled={rows.length === 0}
+                      getExportRows={() => shiftsRowsToSheetRows(rows, SHIFT_UNASSIGNED_KEYS)}
+                      className="px-3 pb-3"
+                    >
                     <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
                       <table className="min-w-full text-sm">
                         <thead className="sticky top-0 bg-[rgba(15,18,28,0.98)]">
@@ -487,6 +541,7 @@ export default function ShiftsPage() {
                         </tbody>
                       </table>
                     </div>
+                    </SupervisorTableSection>
                   </Card>
                   );
                 })}
@@ -513,6 +568,25 @@ export default function ShiftsPage() {
                     <div className="px-4 py-3 border-b border-[rgba(255,255,255,0.08)] text-sm text-[#EAF0FF] font-medium">
                       ملخص حسب المشرف — {activeScope}
                     </div>
+                    <SupervisorTableSection
+                      fileNameBase={`shifts-supervisor-summary-${safeFilePart(activeScope)}`}
+                      sheetName="summary"
+                      getExportRows={() =>
+                        (displayReports.supervisorSummaryByDate?.[activeScope] || []).map((r: any) => ({
+                          المشرف: String(r.supervisor),
+                          التاريخ: activeScope,
+                          الإجمالي: String(r.total),
+                          الحاجزين: String(r.booked),
+                          'غير الحاجزين': String(r.notBooked),
+                          'نسبة الحاجزين': `${Number(r.pct || 0).toFixed(1)}%`,
+                          'إجمالي ساعات الحاجزين': Number(r.totalBookedHours || 0).toFixed(2),
+                        }))
+                      }
+                      exportDisabled={
+                        !(displayReports.supervisorSummaryByDate?.[activeScope]?.length)
+                      }
+                      className="px-3 pb-3"
+                    >
                     <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
                       <table className="min-w-full text-sm">
                         <thead className="sticky top-0 bg-[rgba(15,18,28,0.98)]">
@@ -539,6 +613,7 @@ export default function ShiftsPage() {
                         </tbody>
                       </table>
                     </div>
+                    </SupervisorTableSection>
                   </Card>
                 ) : null}
 
@@ -588,6 +663,13 @@ export default function ShiftsPage() {
                               <div className="px-3 py-2 text-sm text-[#EAF0FF] border-b border-[rgba(255,255,255,0.08)]">
                                 ✅ الرايدرز الحاجزين ({assigned.length})
                               </div>
+                              <SupervisorTableSection
+                                fileNameBase={`shifts-detail-${safeFilePart(activeScope)}-${safeFilePart(sup)}-booked`}
+                                sheetName="booked"
+                                exportDisabled={assigned.length === 0}
+                                getExportRows={() => shiftsRowsToSheetRows(assigned, SHIFT_SUP_BOOKED_KEYS)}
+                                className="px-2 pb-2"
+                              >
                               <div className="overflow-x-auto max-h-[360px] overflow-y-auto">
                                 <table className="min-w-full text-sm">
                                   <thead className="sticky top-0 bg-[rgba(15,18,28,0.98)]">
@@ -614,12 +696,20 @@ export default function ShiftsPage() {
                                   </tbody>
                                 </table>
                               </div>
+                              </SupervisorTableSection>
                             </div>
 
                             <div className="overflow-hidden rounded-lg border border-[rgba(255,255,255,0.10)]">
                               <div className="px-3 py-2 text-sm text-[#EAF0FF] border-b border-[rgba(255,255,255,0.08)]">
                                 ❌ الرايدرز غير الحاجزين ({unassigned.length})
                               </div>
+                              <SupervisorTableSection
+                                fileNameBase={`shifts-detail-${safeFilePart(activeScope)}-${safeFilePart(sup)}-unassigned`}
+                                sheetName="unassigned"
+                                exportDisabled={unassigned.length === 0}
+                                getExportRows={() => shiftsRowsToSheetRows(unassigned, SHIFT_SUP_UNASSIGNED_KEYS)}
+                                className="px-2 pb-2"
+                              >
                               <div className="overflow-x-auto max-h-[360px] overflow-y-auto">
                                 <table className="min-w-full text-sm">
                                   <thead className="sticky top-0 bg-[rgba(15,18,28,0.98)]">
@@ -644,6 +734,7 @@ export default function ShiftsPage() {
                                   </tbody>
                                 </table>
                               </div>
+                              </SupervisorTableSection>
                             </div>
                           </div>
                         </div>

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Layout from '@/components/Layout';
+import SupervisorTableSection from '@/components/SupervisorTableSection';
 import { useQuery } from '@tanstack/react-query';
 
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
@@ -172,6 +173,34 @@ export default function TerminationRequestsViewerPage() {
           </div>
         ) : (
           <div className="rounded-xl border border-[rgba(255,255,255,0.10)] bg-[rgba(255,255,255,0.06)] backdrop-blur-md overflow-hidden">
+            <SupervisorTableSection
+              title="طلبات الإقالة"
+              fileNameBase="termination-requests"
+              sheetName="Requests"
+              exportDisabled={rows.length === 0}
+              className="p-3 sm:p-4"
+              getExportRows={() =>
+                rows.map((r) => ({
+                  المشرف: `${r.supervisorName || '—'} (${r.supervisorCode || '—'})`,
+                  المندوب: `${r.riderName || '—'} (${r.riderCode || '—'})`,
+                  'مديونية عند الطلب': (Number(r.debt) || 0).toFixed(2),
+                  'أوردرات الفترة': r.periodStats ? r.periodStats.orders : '',
+                  'ساعات الفترة': r.periodStats ? r.periodStats.hours.toFixed(1) : '',
+                  'أيام عمل': r.periodStats ? r.periodStats.workDays : '',
+                  'قبول %': r.periodStats ? `${r.periodStats.avgAcceptance}%` : '',
+                  'مديونية آخر يوم بالفترة':
+                    r.periodStats && r.periodStats.debtAtEndOfPeriod != null
+                      ? Number(r.periodStats.debtAtEndOfPeriod).toFixed(2)
+                      : '',
+                  السبب: r.reason || '',
+                  'تاريخ الطلب': r.requestDate || '',
+                  'موافقة / رفض': r.approvalDate
+                    ? `${r.approvalDate}${r.approvedBy ? ` · ${r.approvedBy}` : ''}`
+                    : '',
+                  الحالة: statusLabel(r.status),
+                }))
+              }
+            >
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1400px]">
                 <thead className="bg-[rgba(255,255,255,0.06)]">
@@ -265,6 +294,7 @@ export default function TerminationRequestsViewerPage() {
                 </tbody>
               </table>
             </div>
+            </SupervisorTableSection>
           </div>
         )}
       </div>

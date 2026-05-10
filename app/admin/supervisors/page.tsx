@@ -3,6 +3,13 @@
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  ZONE_OPTIONS,
+  isAllowedZone,
+  parseAdminAllowedZonesList,
+  serializeAdminAllowedZones,
+  type ZoneOption,
+} from '@/lib/zones';
 
 interface Supervisor {
   code: string;
@@ -19,6 +26,8 @@ interface Supervisor {
 export default function AdminSupervisorsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingSupervisor, setEditingSupervisor] = useState<Supervisor | null>(null);
+  /** زونات معتمدة (قائمة الشفتات)، تُحفظ في عمود المنطقة كقيم مفصولة بـ | */
+  const [selectedZones, setSelectedZones] = useState<ZoneOption[]>([]);
   const [formData, setFormData] = useState<Partial<Supervisor>>({
     code: '',
     name: '',
@@ -93,6 +102,7 @@ export default function AdminSupervisorsPage() {
       const freshData = await refetch();
       console.log('[AdminSupervisorsPage] Refetched supervisors:', freshData.data?.length || 0);
       setShowAddModal(false);
+      setSelectedZones([]);
       setFormData({ code: '', name: '', region: '', email: '', password: '', salaryType: 'commission_type1', target: 0 });
       alert('✅ تم إضافة المشرف بنجاح');
     },
@@ -126,6 +136,7 @@ export default function AdminSupervisorsPage() {
       await queryClient.invalidateQueries({ queryKey: ['admin', 'supervisors'] });
       await refetch(); // Force refetch
       setEditingSupervisor(null);
+      setSelectedZones([]);
       setFormData({ code: '', name: '', region: '', email: '', password: '', salaryType: 'commission_type1', target: 0 });
       alert('✅ تم تحديث المشرف بنجاح');
     },
@@ -167,16 +178,26 @@ export default function AdminSupervisorsPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const serialized = serializeAdminAllowedZones(selectedZones);
+    let regionToSave = serialized;
+    if (!regionToSave && editingSupervisor) {
+      const old = String(editingSupervisor.region || '').trim();
+      if (old && parseAdminAllowedZonesList(old).length === 0) {
+        regionToSave = old;
+      }
+    }
+    const payload = { ...formData, region: regionToSave };
     if (editingSupervisor) {
-      updateMutation.mutate({ code: editingSupervisor.code, updates: formData });
+      updateMutation.mutate({ code: editingSupervisor.code, updates: payload });
     } else {
-      addMutation.mutate(formData as Supervisor);
+      addMutation.mutate(payload as Supervisor);
     }
   };
 
   const handleEdit = (supervisor: Supervisor) => {
     setEditingSupervisor(supervisor);
     setFormData(supervisor);
+    setSelectedZones(parseAdminAllowedZonesList(supervisor.region));
     setShowAddModal(true);
   };
 
@@ -201,6 +222,7 @@ export default function AdminSupervisorsPage() {
           <button
             onClick={() => {
               setEditingSupervisor(null);
+              setSelectedZones([]);
               setFormData({ code: '', name: '', region: '', email: '', password: '', salaryType: 'commission_type1', target: 0 });
               setShowAddModal(true);
             }}
@@ -217,7 +239,7 @@ export default function AdminSupervisorsPage() {
                 <tr>
                   <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الكود</th>
                   <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الاسم</th>
-                  <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">المنطقة</th>
+                  <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الزونات</th>
                   <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">البريد</th>
                   <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">نوع الراتب</th>
                   <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الهدف</th>
@@ -238,7 +260,13 @@ export default function AdminSupervisorsPage() {
                       <td className="py-4 px-6 text-sm text-gray-800 font-medium whitespace-normal break-words min-w-[240px]">
                         {supervisor.name}
                       </td>
-                      <td className="py-4 px-6 text-sm text-gray-600">{supervisor.region}</td>
+                      <td className="py-4 px-6 text-sm text-gray-600">
+                        {(() => {
+                          const z = parseAdminAllowedZonesList(supervisor.region);
+                          if (z.length > 0) return z.join('، ');
+                          return supervisor.region?.trim() || '—';
+                        })()}
+                      </td>
                       <td className="py-4 px-6 text-sm text-gray-600">{supervisor.email}</td>
                       <td className="py-4 px-6 text-sm text-gray-600">
                         <div className="space-y-1">
@@ -330,16 +358,35 @@ export default function AdminSupervisorsPage() {
                       required
                     />
                   </div>
-                  <div>
-                    <label htmlFor="supervisor-region" className="block text-sm font-medium text-gray-700 mb-2">المنطقة</label>
-                    <input
-                      id="supervisor-region"
-                      name="supervisor-region"
-                      type="text"
-                      value={formData.region}
-                      onChange={(e) => setFormData({ ...formData, region: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    />
+                  <div className="md:col-span-2">
+                    <span className="block text-sm font-medium text-gray-700 mb-2" id="supervisor-zones-label">
+                      الزونات (نفس زونات الشفتات)
+                    </span>
+                    <p className="text-xs text-gray-500 mb-2">
+                      اختر زوناً واحداً أو أكثر لنفس المشرف. يُخزَّن في الشيت كقيم معتمدة مفصولة بـ | بدون تغيير منطق الداشبورد للمشرف.
+                    </p>
+                    <select
+                      id="supervisor-zones"
+                      name="supervisor-zones"
+                      multiple
+                      size={Math.min(ZONE_OPTIONS.length, 8)}
+                      value={selectedZones}
+                      onChange={(e) => {
+                        const picked = Array.from(e.target.selectedOptions, (o) => o.value).filter(isAllowedZone);
+                        setSelectedZones(picked);
+                      }}
+                      aria-labelledby="supervisor-zones-label"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 bg-white min-h-[140px]"
+                    >
+                      {ZONE_OPTIONS.map((z) => (
+                        <option key={z} value={z}>
+                          {z}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      مع Windows: Ctrl + نقر لاختيار عدة زونات. مع Mac: ⌘ + نقر. ترك القائمة بلا اختيار يعني لا زونات مسجَّلة.
+                    </p>
                   </div>
                   <div>
                     <label htmlFor="supervisor-email" className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني *</label>
@@ -449,6 +496,7 @@ export default function AdminSupervisorsPage() {
                     onClick={() => {
                       setShowAddModal(false);
                       setEditingSupervisor(null);
+                      setSelectedZones([]);
                       setFormData({ code: '', name: '', region: '', email: '', password: '', salaryType: 'commission_type1', target: 0 });
                     }}
                     className="flex-1 bg-gray-200 text-gray-800 py-3 rounded-lg font-semibold hover:bg-gray-300 transition-colors"

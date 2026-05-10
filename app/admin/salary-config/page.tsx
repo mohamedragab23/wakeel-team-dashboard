@@ -25,19 +25,18 @@ interface SalaryConfig {
   type2SupervisorPercentage?: number; // Default 60%
 }
 
+const DEFAULT_TYPE1_RANGES = [
+  { minHours: 0, maxHours: 500, ratePerOrder: 0.75 },
+  { minHours: 501, maxHours: 999999, ratePerOrder: 1.0 },
+];
+
 export default function SalaryConfigPage() {
   const [selectedSupervisor, setSelectedSupervisor] = useState<string>('');
   const [salaryMethod, setSalaryMethod] = useState<'fixed' | 'commission_type1' | 'commission_type2'>('fixed');
   const [fixedSalary, setFixedSalary] = useState<number>(0);
-  
-  // For commission_type1
-  const [type1Ranges, setType1Ranges] = useState([
-    { minHours: 0, maxHours: 100, ratePerOrder: 1.0 },
-    { minHours: 101, maxHours: 200, ratePerOrder: 1.20 },
-    { minHours: 201, maxHours: 300, ratePerOrder: 1.30 },
-    { minHours: 301, maxHours: 400, ratePerOrder: 1.40 },
-    { minHours: 401, maxHours: 999999, ratePerOrder: 1.50 },
-  ]);
+
+  // For commission_type1 (ساعات يومية مجمّعة لكل يوم)
+  const [type1Ranges, setType1Ranges] = useState(() => DEFAULT_TYPE1_RANGES.map((r) => ({ ...r })));
   
   // For commission_type2
   const [type2BasePercentage, setType2BasePercentage] = useState<number>(11);
@@ -73,22 +72,33 @@ export default function SalaryConfigPage() {
     enabled: !!selectedSupervisor,
   });
 
-  // Load existing config when available
+  // عند تغيير المشرف: إعادة تعيين مؤقتة حتى لا تُعرض نطاقات مشرف آخر
   useEffect(() => {
-    if (existingConfig) {
-      setSalaryMethod(existingConfig.salaryMethod || 'fixed');
-      setFixedSalary(existingConfig.fixedSalary || 0);
-      if (existingConfig.type1Ranges) {
-        setType1Ranges(existingConfig.type1Ranges);
-      }
-      if (existingConfig.type2BasePercentage !== undefined) {
-        setType2BasePercentage(existingConfig.type2BasePercentage);
-      }
-      if (existingConfig.type2SupervisorPercentage !== undefined) {
-        setType2SupervisorPercentage(existingConfig.type2SupervisorPercentage);
-      }
+    if (!selectedSupervisor) return;
+    setSalaryMethod('fixed');
+    setFixedSalary(0);
+    setType1Ranges(DEFAULT_TYPE1_RANGES.map((r) => ({ ...r })));
+    setType2BasePercentage(11);
+    setType2SupervisorPercentage(60);
+  }, [selectedSupervisor]);
+
+  // تطبيق الإعدادات المحمّلة فقط إن تطابقت مع المشرف المختار
+  useEffect(() => {
+    if (!existingConfig || existingConfig.supervisorId !== selectedSupervisor) return;
+    setSalaryMethod(existingConfig.salaryMethod || 'fixed');
+    setFixedSalary(existingConfig.fixedSalary ?? 0);
+    if (existingConfig.type1Ranges?.length) {
+      setType1Ranges(existingConfig.type1Ranges.map((r: { minHours: number; maxHours: number; ratePerOrder: number }) => ({ ...r })));
+    } else if (existingConfig.salaryMethod === 'commission_type1') {
+      setType1Ranges(DEFAULT_TYPE1_RANGES.map((r) => ({ ...r })));
     }
-  }, [existingConfig]);
+    if (existingConfig.type2BasePercentage !== undefined) {
+      setType2BasePercentage(existingConfig.type2BasePercentage);
+    }
+    if (existingConfig.type2SupervisorPercentage !== undefined) {
+      setType2SupervisorPercentage(existingConfig.type2SupervisorPercentage);
+    }
+  }, [existingConfig, selectedSupervisor]);
 
   // Save config mutation
   const saveMutation = useMutation({
@@ -102,11 +112,18 @@ export default function SalaryConfigPage() {
         },
         body: JSON.stringify(config),
       });
-      return res.json();
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || 'فشل حفظ الإعدادات');
+      }
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['salary-config'] });
       alert('✅ تم حفظ الإعدادات بنجاح');
+    },
+    onError: (err: Error) => {
+      alert(err.message || 'حدث خطأ أثناء الحفظ');
     },
   });
 
@@ -161,10 +178,7 @@ export default function SalaryConfigPage() {
   };
 
   const addType1Range = () => {
-    setType1Ranges([
-      ...type1Ranges,
-      { minHours: 0, maxHours: 100, ratePerOrder: 1.0 },
-    ]);
+    setType1Ranges([...type1Ranges, { minHours: 0, maxHours: 500, ratePerOrder: 0.75 }]);
   };
 
   const removeType1Range = (index: number) => {
@@ -178,6 +192,11 @@ export default function SalaryConfigPage() {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-semibold text-[#EAF0FF] mb-2">إعدادات الرواتب</h1>
+          <p className="text-sm text-[rgba(234,240,255,0.75)] max-w-3xl">
+            لكل مشرف إعداد مستقل: اختر المشرف ثم نوع الراتب (ثابت، عمولة نوع 1، عمولة نوع 2) والقيم. يُحفظ في
+            تبويب «إعدادات_الرواتب» ويُستخدم تلقائياً في حساب راتب ذلك المشرف فقط. يتطلب صلاحية أدمن «إعدادات
+            الرواتب».
+          </p>
           <p className="text-[rgba(234,240,255,0.70)]">تكوين طريقة حساب الراتب لكل مشرف</p>
         </div>
 
