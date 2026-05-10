@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess, assertLimitedAdminSupervisorZoneAccess } from '@/lib/adminFeatureAccess';
 import { calculateSupervisorSalary } from '@/lib/salaryService';
 
 export const dynamic = 'force-dynamic';
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     if (sal) return sal;
 
     const { searchParams } = new URL(request.url);
-    const supervisorCode = searchParams.get('supervisorCode');
+    const supervisorCode = searchParams.get('supervisorCode')?.trim();
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
 
@@ -37,6 +37,9 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded, supervisorCode);
+    if (zoneDeny) return zoneDeny;
 
     // Calculate salary
     const salaryData = await calculateSupervisorSalary(supervisorCode, startDate, endDate);

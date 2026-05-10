@@ -4,7 +4,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import {
+  assertAdminApiAccess,
+  assertLimitedAdminSupervisorZoneAccess,
+  getSupervisorCodesInZoneScope,
+} from '@/lib/adminFeatureAccess';
 import { appendToSheet, getSheetData } from '@/lib/googleSheets';
 
 export const dynamic = 'force-dynamic';
@@ -26,12 +30,20 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const supervisorCode = searchParams.get('supervisorCode')?.trim();
+    const allowedCodes = await getSupervisorCodesInZoneScope(decoded);
+    if (supervisorCode && allowedCodes && !allowedCodes.has(supervisorCode)) {
+      return NextResponse.json(
+        { success: false, error: 'لا تملك صلاحية على خصومات مشرفين خارج الزونات المحددة لك' },
+        { status: 403 }
+      );
+    }
     const data = await getSheetData(SHEET_ADMIN_DEDUCTIONS, false);
     const rows: { supervisorCode: string; date: string; reason: string; amount: number; createdBy?: string }[] = [];
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       if (!row?.[0]) continue;
       const code = row[0].toString().trim();
+      if (allowedCodes && !allowedCodes.has(code)) continue;
       if (supervisorCode && code !== supervisorCode) continue;
       rows.push({
         supervisorCode: code,
@@ -63,6 +75,8 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const supervisorCode = (body.supervisorCode ?? '').toString().trim();
+    const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded, supervisorCode);
+    if (zoneDeny) return zoneDeny;
     const reason = (body.reason ?? '').toString().trim() || 'خصم إداري';
     const amount = Number(body.amount);
     const dateStr = (body.date ?? '').toString().trim();

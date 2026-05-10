@@ -6,7 +6,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import {
+  assertAdminApiAccess,
+  assertLimitedAdminSupervisorZoneAccess,
+  isLimitedAdminZoneScopeActive,
+} from '@/lib/adminFeatureAccess';
+import { parseAdminAllowedZonesList, supervisorZonesOverlapAllowed } from '@/lib/zones';
 import { getSheetData, updateSheetRange } from '@/lib/googleSheets';
 
 export const dynamic = 'force-dynamic';
@@ -41,6 +46,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'كود المشرف مطلوب' }, { status: 400 });
     }
 
+    const supervisorIdTrimmed = supervisorId.toString().trim();
+    const zonePost = await assertLimitedAdminSupervisorZoneAccess(decoded, supervisorIdTrimmed);
+    if (zonePost) return zonePost;
+
     if (!salaryMethod || !['fixed', 'commission_type1', 'commission_type2'].includes(salaryMethod)) {
       return NextResponse.json({ success: false, error: 'نوع الراتب غير صحيح' }, { status: 400 });
     }
@@ -65,7 +74,6 @@ export async function POST(request: NextRequest) {
 
       // Find if config exists
       let existingRowIndex = -1;
-      const supervisorIdTrimmed = supervisorId.toString().trim();
       for (let i = 1; i < configData.length; i++) {
         if (configData[i][0]?.toString().trim() === supervisorIdTrimmed) {
           existingRowIndex = i + 1; // Google Sheets is 1-indexed
@@ -167,6 +175,8 @@ export async function GET(request: NextRequest) {
       }
       const singleRead = assertAdminApiAccess(decoded, 'salary_config');
       if (singleRead) return singleRead;
+      const zoneSingle = await assertLimitedAdminSupervisorZoneAccess(decoded, supervisorId.trim());
+      if (zoneSingle) return zoneSingle;
     }
 
     // Get supervisors sheet
@@ -247,9 +257,15 @@ export async function GET(request: NextRequest) {
       if (scg) return scg;
 
       const configs: any[] = [];
+      const scopeZones =
+        isLimitedAdminZoneScopeActive(decoded) ? parseAdminAllowedZonesList(decoded.dataZone) : null;
       for (let i = 1; i < supervisorsData.length; i++) {
         const row = supervisorsData[i];
         if (!row[0]) continue;
+        const regionCell = row[2] ? row[2].toString().trim() : '';
+        if (scopeZones && scopeZones.length > 0 && !supervisorZonesOverlapAllowed(regionCell, scopeZones)) {
+          continue;
+        }
 
         const salaryType = row[5]?.toString().trim() || '';
         const salaryAmount = row[6] ? parseFloat(row[6].toString()) : 0;

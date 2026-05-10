@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { parseAdminAllowedZonesList } from '@/lib/zones';
+import { getAllSupervisors } from '@/lib/adminService';
+import { parseAdminAllowedZonesList, supervisorZonesOverlapAllowed } from '@/lib/zones';
 
 export const LIMITED_PREFIX = 'limited:';
 
@@ -180,7 +181,68 @@ export function assertAdminSupervisorsReadAccess(decoded: { role?: string; permi
     limited.includes('shifts') ||
     limited.includes('riders') ||
     limited.includes('assignment_requests') ||
-    limited.includes('termination_requests');
+    limited.includes('termination_requests') ||
+    limited.includes('salaries') ||
+    limited.includes('salary_config');
   if (ok) return null;
   return NextResponse.json({ success: false, error: 'لا تملك صلاحية عرض المشرفين' }, { status: 403 });
+}
+
+/** أدمن محدود + عمود الزونات في JWT غير فارغ (زونات معتمدة). */
+export function isLimitedAdminZoneScopeActive(
+  decoded: { role?: string; permissions?: string; dataZone?: string } | null
+): boolean {
+  if (!decoded || decoded.role !== 'admin') return false;
+  if (parseLimitedFeatures(decoded.permissions) === null) return false;
+  return parseAdminAllowedZonesList(decoded.dataZone).length > 0;
+}
+
+/** تصفية قائمة المشرفين حسب زونات مدير الزون (لا يُطبَّق على الأدمن الكامل أو من بلا زون في JWT). */
+export function filterSupervisorsForZoneScopedAdmin<T extends { region?: string }>(
+  decoded: { role?: string; permissions?: string; dataZone?: string },
+  list: T[]
+): T[] {
+  if (!isLimitedAdminZoneScopeActive(decoded)) return list;
+  const scopeZones = parseAdminAllowedZonesList(decoded.dataZone);
+  return list.filter((s) => supervisorZonesOverlapAllowed(s.region, scopeZones));
+}
+
+/** منع الوصول لمشرف خارج زونات مدير الزون (403). يُرجع null إذا مسموح. */
+export async function assertLimitedAdminSupervisorZoneAccess(
+  decoded: { role?: string; permissions?: string; dataZone?: string },
+  supervisorCode: string
+): Promise<NextResponse | null> {
+  if (!isLimitedAdminZoneScopeActive(decoded)) return null;
+  const code = String(supervisorCode ?? '').trim();
+  if (!code) {
+    return NextResponse.json({ success: false, error: 'كود المشرف مطلوب' }, { status: 400 });
+  }
+  const sups = await getAllSupervisors(false);
+  const s = sups.find((x) => String(x.code ?? '').trim() === code);
+  if (!s) {
+    return NextResponse.json({ success: false, error: 'المشرف غير موجود' }, { status: 404 });
+  }
+  const scopeZones = parseAdminAllowedZonesList(decoded.dataZone);
+  if (!supervisorZonesOverlapAllowed(s.region, scopeZones)) {
+    return NextResponse.json(
+      { success: false, error: 'لا تملك صلاحية على مشرفين خارج الزونات المحددة لك' },
+      { status: 403 }
+    );
+  }
+  return null;
+}
+
+/** لقوائم الخصومات وغيرها: أكواد المشرفين المسموح بها، أو null = بدون تقييد زون. */
+export async function getSupervisorCodesInZoneScope(
+  decoded: { role?: string; permissions?: string; dataZone?: string }
+): Promise<Set<string> | null> {
+  if (!isLimitedAdminZoneScopeActive(decoded)) return null;
+  const scopeZones = parseAdminAllowedZonesList(decoded.dataZone);
+  const sups = await getAllSupervisors(false);
+  return new Set(
+    sups
+      .filter((s) => supervisorZonesOverlapAllowed(s.region, scopeZones))
+      .map((s) => String(s.code ?? '').trim())
+      .filter(Boolean)
+  );
 }

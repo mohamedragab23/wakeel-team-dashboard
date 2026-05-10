@@ -4,6 +4,7 @@ import { getAllSupervisors, addSupervisor, updateSupervisor, deleteSupervisor } 
 import {
   assertAdminApiAccess,
   assertAdminSupervisorsReadAccess,
+  filterSupervisorsForZoneScopedAdmin,
 } from '@/lib/adminFeatureAccess';
 
 export const dynamic = 'force-dynamic';
@@ -35,7 +36,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Always use fresh data (no cache) to ensure we get the latest supervisors
-    const supervisors = await getAllSupervisors(false); // Always fetch fresh data
+    let supervisors = await getAllSupervisors(false); // Always fetch fresh data
+    supervisors = filterSupervisorsForZoneScopedAdmin(decoded, supervisors);
     console.log(`[GET /api/admin/supervisors] Returning ${supervisors.length} supervisors`);
     console.log(`[GET /api/admin/supervisors] Supervisor codes:`, supervisors.map(s => s.code));
 

@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess, assertLimitedAdminSupervisorZoneAccess } from '@/lib/adminFeatureAccess';
 import { updateSupervisor } from '@/lib/adminService';
 
 export const dynamic = 'force-dynamic';
@@ -31,6 +31,9 @@ export async function PUT(request: NextRequest) {
     if (!supervisorCode) {
       return NextResponse.json({ success: false, error: 'كود المشرف مطلوب' }, { status: 400 });
     }
+
+    const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded, String(supervisorCode));
+    if (zoneDeny) return zoneDeny;
 
     const result = await updateSupervisor(supervisorCode, {
       salaryType,
