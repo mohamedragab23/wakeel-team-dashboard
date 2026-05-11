@@ -1,7 +1,7 @@
 import { getSheetData, findDataInSheet } from './googleSheets';
 import { getSupervisorRiders } from './dataService';
 import { getAllSupervisors } from './adminService';
-import { aggregateSupervisorDailyPerformance } from './dataFilter';
+import { aggregateSupervisorDailyPerformance, normalizeRiderCodeForPerformance } from './dataFilter';
 
 const SHEET_SUPERVISOR_RECEIPTS = 'قبض_المشرفين';
 const SHEET_ADMIN_DEDUCTIONS = 'خصومات_الإدارة';
@@ -667,7 +667,13 @@ export async function calculateSupervisorSalary(
     const totalOrders = agg.totalOrders;
     const totalHours = agg.totalHours;
 
-    const riderByCode = new Map(riders.map((r) => [r.code, r] as const));
+    const riderByCode = new Map<string, (typeof riders)[number]>();
+    for (const r of riders) {
+      const c = (r.code ?? '').toString().trim();
+      if (!c) continue;
+      riderByCode.set(c, r);
+      riderByCode.set(normalizeRiderCodeForPerformance(c), r);
+    }
     const riderPerformance: {
       code: string;
       name: string;

@@ -8,6 +8,22 @@ export function normalizeRiderCodeForPerformance(code: any): string {
   return s.replace(/^0+/, '') || '0';
 }
 
+/** غياب في شيت البيانات اليومية — لا تُحسب الساعات كعمل فعلي */
+export function isDailyRowMarkedAbsent(absenceRaw: unknown): boolean {
+  const a = String(absenceRaw ?? '')
+    .trim()
+    .toLowerCase();
+  return a === 'نعم' || a === '1' || a === 'yes' || a === 'true' || a === 'y';
+}
+
+/**
+ * مفتاح فريد لكل (يوم + مندوب) بعد تطبيع الكود — لدمج صفوف مكررة في الشيت.
+ * آخر صف في ترتيب القراءة يفوز (يُعتمد كأحدث رفع).
+ */
+export function dailyPerformanceRowKey(dateStr: string, riderCode: string): string {
+  return `${dateStr}|${normalizeRiderCodeForPerformance(riderCode)}`;
+}
+
 /**
  * Parse date cells from البيانات اليومية (shared: filter + salary aggregation).
  */
@@ -137,12 +153,12 @@ export async function aggregateSupervisorDailyPerformance(
   byRider: Map<string, { orders: number; hours: number }>;
   byDate: Map<string, { orders: number; hours: number }>;
 }> {
+  const supTrim = (supervisorCode ?? '').toString().trim();
   const useCache = options?.useCache ?? false;
   const riders =
-    options?.riders ??
-    (await getSupervisorRiders(supervisorCode, useCache));
+    options?.riders ?? (await getSupervisorRiders(supTrim, useCache));
   const { codes: terminatedCodes, inclusiveEndByRider } =
-    await getApprovedTerminationAttributionForSupervisor(supervisorCode);
+    await getApprovedTerminationAttributionForSupervisor(supTrim);
   const riderCodesExact = new Set(riders.map((r) => (r.code ?? '').toString().trim()).filter(Boolean));
   const riderCodesNormalized = new Set(riders.map((r) => normalizeRiderCodeForPerformance(r.code)));
   for (const code of terminatedCodes) {
@@ -164,6 +180,9 @@ export async function aggregateSupervisorDailyPerformance(
   const normalizedStartDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
   const normalizedEndDate = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
 
+  /** صف واحد لكل (تاريخ، مندوب): آخر ظهور في الشيت يفوز على التكرار */
+  const deduped = new Map<string, SupervisorDailyAggRecord>();
+
   for (let i = 1; i < allData.length; i++) {
     const row = allData[i];
     if (!row[0] || !row[1]) continue;
@@ -184,34 +203,43 @@ export async function aggregateSupervisorDailyPerformance(
       inclusiveEndByRider.get(riderCode) ?? inclusiveEndByRider.get(riderCodeNorm);
     if (cutoff && normalizedRowDate.getTime() > cutoff.getTime()) continue;
 
-    const hours = parseFloat(row[2]?.toString() || '0') || 0;
+    const absenceRaw = row[5]?.toString().trim() || 'لا';
+    const absent = isDailyRowMarkedAbsent(absenceRaw);
+    const hoursRaw = parseFloat(row[2]?.toString() || '0') || 0;
+    const hours = absent ? 0 : hoursRaw;
     const orders = parseInt(row[6]?.toString() || '0') || 0;
     const dateStr = normalizedRowDate.toISOString().split('T')[0];
 
-    records.push({
+    const rec: SupervisorDailyAggRecord = {
       date: dateStr,
       riderCode,
       hours,
       orders,
       break: parseFloat(row[3]?.toString() || '0') || 0,
       delay: parseFloat(row[4]?.toString() || '0') || 0,
-      absence: row[5]?.toString().trim() || 'لا',
+      absence: absenceRaw,
       acceptance: row[7]?.toString().trim() || '0%',
       debt: parseFloat(row[8]?.toString() || '0') || 0,
-    });
+    };
 
-    totalOrders += orders;
-    totalHours += hours;
+    deduped.set(dailyPerformanceRowKey(dateStr, riderCode), rec);
+  }
 
-    const aggR = byRider.get(riderCode) || { orders: 0, hours: 0 };
-    aggR.orders += orders;
-    aggR.hours += hours;
-    byRider.set(riderCode, aggR);
+  for (const rec of deduped.values()) {
+    records.push(rec);
+    totalOrders += rec.orders;
+    totalHours += rec.hours;
 
-    const aggD = byDate.get(dateStr) || { orders: 0, hours: 0 };
-    aggD.orders += orders;
-    aggD.hours += hours;
-    byDate.set(dateStr, aggD);
+    const rk = normalizeRiderCodeForPerformance(rec.riderCode);
+    const aggR = byRider.get(rk) || { orders: 0, hours: 0 };
+    aggR.orders += rec.orders;
+    aggR.hours += rec.hours;
+    byRider.set(rk, aggR);
+
+    const aggD = byDate.get(rec.date) || { orders: 0, hours: 0 };
+    aggD.orders += rec.orders;
+    aggD.hours += rec.hours;
+    byDate.set(rec.date, aggD);
   }
 
   return { records, totalOrders, totalHours, byRider, byDate };
@@ -353,9 +381,10 @@ export async function getSupervisorPerformanceFiltered(
     let inclusiveEndByRider: Map<string, Date> = new Map();
 
     if (!allRidersMode) {
-      const riders = await getSupervisorRiders(supervisorCode);
+      const supCode = (supervisorCode ?? '').toString().trim();
+      const riders = await getSupervisorRiders(supCode);
       const { codes: terminatedCodes, inclusiveEndByRider: termEnds } =
-        await getApprovedTerminationAttributionForSupervisor(supervisorCode!);
+        await getApprovedTerminationAttributionForSupervisor(supCode);
       inclusiveEndByRider = termEnds;
       riderCodesExact = new Set(riders.map((r) => (r.code ?? '').toString().trim()).filter(Boolean));
       riderCodesNormalized = new Set(riders.map((r) => normalizeRiderCodeForPerformance(r.code)));
@@ -370,7 +399,8 @@ export async function getSupervisorPerformanceFiltered(
     }
 
     const allData = await getSheetData('البيانات اليومية');
-    const filtered: any[] = [];
+    /** دمج تكرار (نفس اليوم + نفس المندوب): آخر صف في الشيت يفوز */
+    const mergedByDayRider = new Map<string, any>();
 
     // Normalize start and end dates for comparison
     const normalizedStartDate = startDate 
@@ -425,18 +455,26 @@ export async function getSupervisorPerformanceFiltered(
         }
       }
 
-      filtered.push({
-        date: normalizedRowDate.toISOString().split('T')[0], // Store as ISO string
+      const dateStr = normalizedRowDate.toISOString().split('T')[0];
+      const absenceRaw = row[5]?.toString().trim() || 'لا';
+      const absent = isDailyRowMarkedAbsent(absenceRaw);
+      const hoursRaw = parseFloat(row[2]?.toString() || '0') || 0;
+      const hours = absent ? 0 : hoursRaw;
+
+      mergedByDayRider.set(dailyPerformanceRowKey(dateStr, riderCode), {
+        date: dateStr,
         riderCode,
-        hours: parseFloat(row[2]?.toString() || '0') || 0,
+        hours,
         break: parseFloat(row[3]?.toString() || '0') || 0,
         delay: parseFloat(row[4]?.toString() || '0') || 0,
-        absence: row[5]?.toString().trim() || 'لا',
+        absence: absenceRaw,
         orders: parseInt(row[6]?.toString() || '0') || 0,
         acceptance: row[7]?.toString().trim() || '0%',
         debt: parseFloat(row[8]?.toString() || '0') || 0,
       });
     }
+
+    const filtered = Array.from(mergedByDayRider.values());
 
     // Enhanced debug logging (always log for troubleshooting)
     console.log(`[Performance Filter] Supervisor: ${allRidersMode ? 'ALL' : supervisorCode}`);
@@ -444,7 +482,7 @@ export async function getSupervisorPerformanceFiltered(
     console.log(
       `[Performance Filter] Total rows in sheet: ${allData.length - 1}, Mode: ${allRidersMode ? 'all riders' : `assigned (${riderCodesExact?.size ?? 0} codes)`}`
     );
-    console.log(`[Performance Filter] Found: ${filtered.length} records`);
+    console.log(`[Performance Filter] Found: ${filtered.length} records (deduped by day+rider)`);
     
     if (filtered.length === 0 && allData.length > 1) {
       console.warn(`[Performance Filter] ⚠️ No data found for date range!`);

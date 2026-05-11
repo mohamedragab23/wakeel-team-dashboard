@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { getAllSupervisors } from '@/lib/adminService';
 import { getSupervisorRiders } from '@/lib/dataService';
-import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
+import { aggregateSupervisorDailyPerformance } from '@/lib/dataFilter';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
 
@@ -89,20 +89,23 @@ export async function GET(request: NextRequest) {
     let grandAcceptanceCount = 0;
 
     for (const sup of supervisors) {
-      const riders = await getSupervisorRiders(sup.code, false);
-      const performance = await getSupervisorPerformanceFiltered(sup.code, startDate, endDate);
+      const code = String(sup.code ?? '').trim();
+      const riders = await getSupervisorRiders(code, false);
+      const agg = await aggregateSupervisorDailyPerformance(code, startDate, endDate, {
+        riders,
+        useCache: false,
+      });
 
-      let totalOrders = 0;
-      let totalHours = 0;
+      let totalOrders = agg.totalOrders;
+      let totalHours = agg.totalHours;
       let acceptanceSum = 0;
       let acceptanceCount = 0;
 
-      for (const record of performance) {
-        totalOrders += record.orders || 0;
-        totalHours += record.hours || 0;
-        const acc = typeof record.acceptance === 'string'
-          ? parseFloat(String(record.acceptance).replace('%', '')) || 0
+      for (const record of agg.records) {
+        const raw = typeof record.acceptance === 'string'
+          ? parseFloat(String(record.acceptance).replace(/[%٪]/g, '').trim()) || 0
           : Number(record.acceptance) || 0;
+        const acc = raw > 0 && raw <= 1 ? raw * 100 : raw;
         acceptanceSum += acc;
         acceptanceCount += 1;
       }
@@ -128,7 +131,7 @@ export async function GET(request: NextRequest) {
         total_orders: totalOrders,
         total_hours: Math.round(totalHours * 100) / 100,
         avg_acceptance: avgAcceptance,
-        records_count: performance.length,
+        records_count: agg.records.length,
         orders_per_rider: ordersPerRider,
         target_hours_daily: Math.round(targetDaily * 100) / 100,
         target_hours_total: Math.round(targetTotal * 100) / 100,
