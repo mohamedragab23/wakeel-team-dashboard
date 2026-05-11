@@ -22,6 +22,8 @@ interface DashboardData {
   lastUploadDate: string;
   targetHours: number;
   targetAchievement: number;
+  periodDays?: number;
+  targetHoursPeriod?: number;
   topRiders: Array<{
     name: string;
     orders: number;
@@ -292,7 +294,7 @@ export default function DashboardPage() {
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl p-4 text-white shadow-lg">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-blue-100 text-sm">بيانات آخر يوم تم رفعه</p>
+                      <p className="text-blue-100 text-sm">آخر يوم وُجدت له بيانات لمناديبك هذا الشهر</p>
                       <p className="text-2xl font-bold">
                         {new Date(dashboardData.lastUploadDate).toLocaleDateString('ar-EG', {
                           weekday: 'long',
@@ -310,12 +312,23 @@ export default function DashboardPage() {
               {/* Target Achievement Card */}
               {dashboardData.targetHours > 0 && (
                 <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                  <h3 className="text-lg font-bold text-gray-800 mb-4">تحقيق الهدف اليومي</h3>
+                  <h3 className="text-lg font-bold text-gray-800 mb-1">تحقيق الهدف</h3>
+                  <p className="text-xs text-gray-500 mb-3">
+                    الساعات والطلبات من أول الشهر حتى اليوم (نفس منطق التجميع في النظام). النسبة = الساعات ÷ (الهدف
+                    اليومي × عدد أيام الشهر حتى اليوم).
+                  </p>
                   <div className="flex items-center gap-6">
                     <div className="flex-1">
                       <div className="flex justify-between text-sm mb-2">
                         <span className="text-gray-600">الساعات الفعلية: {dashboardData.totalHours.toFixed(1)}</span>
-                        <span className="text-gray-600">الهدف: {dashboardData.targetHours} ساعة</span>
+                        <span className="text-gray-600">
+                          الهدف اليومي: {dashboardData.targetHours} ساعة
+                          {dashboardData.targetHoursPeriod != null && dashboardData.periodDays != null ? (
+                            <span className="mr-2 block sm:inline text-gray-500">
+                              — المطلوب للفترة: {dashboardData.targetHoursPeriod.toLocaleString()} ({dashboardData.periodDays} يوماً)
+                            </span>
+                          ) : null}
+                        </span>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
                         <div 
@@ -503,7 +516,7 @@ export default function DashboardPage() {
                 <div className="p-4 sm:p-5 bg-gradient-to-l from-[rgba(0,245,255,0.18)] via-[rgba(168,85,247,0.16)] to-transparent">
                   <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-[rgba(234,240,255,0.70)] text-sm">بيانات آخر يوم تم رفعه</p>
+                    <p className="text-[rgba(234,240,255,0.70)] text-sm">آخر يوم وُجدت له بيانات لمناديبك هذا الشهر</p>
                     <p className="text-lg sm:text-2xl font-extrabold text-[#EAF0FF] mt-1">
                       {new Date(dashboardData.lastUploadDate).toLocaleDateString('ar-EG', {
                         weekday: 'long',
@@ -521,7 +534,10 @@ export default function DashboardPage() {
 
             {/* Target Achievement Card */}
             {dashboardData.targetHours > 0 && (
-              <Card title="تحقيق الهدف اليومي">
+              <Card
+                title="تحقيق الهدف"
+                subtitle="من أول الشهر حتى اليوم — النسبة = الساعات ÷ (الهدف اليومي × عدد الأيام)"
+              >
                 <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
                   <div className="flex-1">
                     <div className="flex flex-wrap justify-between text-sm mb-2 gap-2">
@@ -529,9 +545,14 @@ export default function DashboardPage() {
                         الساعات الفعلية:{' '}
                         <span className="text-[#EAF0FF] font-semibold">{dashboardData.totalHours.toFixed(1)}</span>
                       </span>
-                      <span className="text-[rgba(234,240,255,0.70)]">
-                        الهدف:{' '}
+                      <span className="text-[rgba(234,240,255,0.70)] text-left sm:text-right">
+                        الهدف اليومي:{' '}
                         <span className="text-[#EAF0FF] font-semibold">{dashboardData.targetHours}</span> ساعة
+                        {dashboardData.targetHoursPeriod != null && dashboardData.periodDays != null ? (
+                          <span className="block text-xs text-[rgba(234,240,255,0.55)] mt-1">
+                            المطلوب للفترة: {dashboardData.targetHoursPeriod.toLocaleString()} ساعة ({dashboardData.periodDays} يوماً)
+                          </span>
+                        ) : null}
                       </span>
                     </div>
                     <div className="w-full bg-[rgba(255,255,255,0.10)] rounded-full h-4 overflow-hidden border border-[rgba(255,255,255,0.10)]">

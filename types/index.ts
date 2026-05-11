@@ -40,7 +40,13 @@ export interface DashboardData {
   totalHours: number;
   totalOrders: number;
   totalAbsences: number;
+  totalBreaks?: number;
   avgAcceptance: number;
+  lastUploadDate?: string;
+  targetHours?: number;
+  targetAchievement?: number;
+  periodDays?: number;
+  targetHoursPeriod?: number;
   topRiders: Array<{
     name: string;
     orders: number;

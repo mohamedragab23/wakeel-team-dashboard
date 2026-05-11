@@ -34,6 +34,10 @@ export interface DashboardData {
   lastUploadDate: string;
   targetHours: number;
   targetAchievement: number;
+  /** من أول الشهر حتى اليوم (شامل) — لحساب الهدف التراكمي */
+  periodDays: number;
+  /** الهدف اليومي من الشيت × periodDays */
+  targetHoursPeriod: number;
   topRiders: Array<{
     name: string;
     orders: number;
@@ -303,146 +307,121 @@ export async function getLatestRiderData(riderCode: string): Promise<(RiderData 
   }
 }
 
+function diffDaysInclusiveMonthSlice(start: Date, end: Date): number {
+  const s = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const e = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  const ms = e.getTime() - s.getTime();
+  if (!Number.isFinite(ms) || ms < 0) return 1;
+  return Math.floor(ms / (24 * 60 * 60 * 1000)) + 1;
+}
+
 // Get dashboard data with caching and optimization
 export async function getDashboardData(supervisorCode: string): Promise<DashboardData> {
-  const cacheKey = CACHE_KEYS.dashboardData(supervisorCode);
-  
-  // Check cache first (30 seconds cache for real-time updates)
+  const supTrim = (supervisorCode ?? '').toString().trim();
+  const cacheKey = CACHE_KEYS.dashboardData(supTrim);
+
+  // Check cache first (15 seconds — أرقام أقرب لشيت البيانات اليومية)
   const cached = cache.get<DashboardData>(cacheKey);
   if (cached) {
     return cached;
   }
 
   try {
-    // Fetch all data in parallel
-    const [riders, dailyData, supervisorsData] = await Promise.all([
-      getSupervisorRiders(supervisorCode),
-      getSheetData('البيانات اليومية'),
+    const [
+      { aggregateSupervisorDailyPerformance, normalizeRiderCodeForPerformance, isDailyRowMarkedAbsent },
+      riders,
+      supervisorsData,
+    ] = await Promise.all([
+      import('./dataFilter'),
+      getSupervisorRiders(supTrim, false),
       getSheetData('المشرفين'),
     ]);
 
-    // Find supervisor's target hours (نفس تخطيط أعمدة شيت المشرفين المستخدم في getAllSupervisors)
     let targetHours = 0;
     const { dataStartIndex, columns } = resolveSupervisorsSheetLayout(supervisorsData);
     for (let i = dataStartIndex; i < supervisorsData.length; i++) {
       const parsed = parseSupervisorRowFromSheet(supervisorsData[i] || [], columns);
-      if (parsed?.code === supervisorCode) {
+      if (
+        parsed &&
+        (parsed.code === supTrim ||
+          normSupervisorCodeForMatch(parsed.code) === normSupervisorCodeForMatch(supTrim))
+      ) {
         targetHours = parsed.target ?? 0;
         break;
       }
     }
 
-    const riderCodes = new Set(riders.map((r) => r.code));
-    
-    // Find the LAST UPLOADED DATE first
-    let lastUploadDate: Date | null = null;
-    for (let i = 1; i < dailyData.length; i++) {
-      const row = dailyData[i];
-      if (row.length >= 2 && row[1] && riderCodes.has(row[1].toString().trim())) {
-        const rowDate = parseDateFromValue(row[0]);
-        if (rowDate && (!lastUploadDate || rowDate > lastUploadDate)) {
-          lastUploadDate = rowDate;
-        }
-      }
-    }
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const endToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const periodDays = diffDaysInclusiveMonthSlice(startOfMonth, now);
 
-    // If no data found, return empty
-    if (!lastUploadDate) {
-      return {
-        totalHours: 0,
-        totalOrders: 0,
-        totalAbsences: 0,
-        totalBreaks: 0,
-        avgAcceptance: 0,
-        lastUploadDate: '',
-        targetHours,
-        targetAchievement: 0,
-        topRiders: [],
-      };
-    }
+    const agg = await aggregateSupervisorDailyPerformance(supTrim, startOfMonth, endToday, {
+      riders,
+      useCache: false,
+    });
 
-    // Now get data ONLY for the last uploaded date
-    let totalHours = 0;
-    let totalOrders = 0;
+    const totalHours = agg.totalHours;
+    const totalOrders = agg.totalOrders;
+
     let totalAbsences = 0;
     let totalBreaks = 0;
     let totalAcceptance = 0;
     let acceptanceCount = 0;
 
+    for (const rec of agg.records) {
+      totalBreaks += rec.break || 0;
+      if (isDailyRowMarkedAbsent(rec.absence)) totalAbsences++;
+
+      const raw =
+        typeof rec.acceptance === 'string'
+          ? parseFloat(String(rec.acceptance).replace(/[%٪]/g, '').trim()) || 0
+          : Number(rec.acceptance) || 0;
+      const acc = raw > 0 && raw <= 1 ? raw * 100 : raw;
+      if (acc > 0) {
+        totalAcceptance += acc;
+        acceptanceCount++;
+      }
+    }
+
+    const accByRider = new Map<string, { sum: number; n: number }>();
+    for (const rec of agg.records) {
+      const k = normalizeRiderCodeForPerformance(rec.riderCode);
+      const raw =
+        typeof rec.acceptance === 'string'
+          ? parseFloat(String(rec.acceptance).replace(/[%٪]/g, '').trim()) || 0
+          : Number(rec.acceptance) || 0;
+      const acc = raw > 0 && raw <= 1 ? raw * 100 : raw;
+      const cur = accByRider.get(k) || { sum: 0, n: 0 };
+      if (acc > 0) {
+        cur.sum += acc;
+        cur.n++;
+      }
+      accByRider.set(k, cur);
+    }
+
     const topRiders: Array<{ name: string; orders: number; hours: number; acceptance: number }> = [];
-    const riderDataMap = new Map<string, { hours: number; orders: number; breaks: number; absence: string; acceptance: number }>();
-
-    for (let i = 1; i < dailyData.length; i++) {
-      const row = dailyData[i];
-      if (row.length >= 2 && row[1]) {
-        const riderCode = row[1].toString().trim();
-        if (riderCodes.has(riderCode)) {
-          const rowDate = parseDateFromValue(row[0]);
-          // Only include data from the last uploaded date
-          if (rowDate && lastUploadDate && 
-              rowDate.getFullYear() === lastUploadDate.getFullYear() &&
-              rowDate.getMonth() === lastUploadDate.getMonth() &&
-              rowDate.getDate() === lastUploadDate.getDate()) {
-            
-            const hours = parseFloat(row[2]?.toString() || '0') || 0;
-            const breaks = parseFloat(row[3]?.toString() || '0') || 0;
-            const absenceRaw = row[5] ? row[5].toString().trim() : 'لا';
-            // Check for absence - handle various formats
-            const absence = (absenceRaw === 'نعم' || absenceRaw === '1' || absenceRaw === 'yes' || absenceRaw.toLowerCase() === 'yes') ? 'نعم' : 'لا';
-            const orders = parseInt(row[6]?.toString() || '0') || 0;
-            const acceptanceStr = row[7]?.toString() || '0';
-            // Parse acceptance rate - if it's already a percentage (0-100), keep it; if it's a decimal (0-1), multiply by 100
-            let acceptance = parseFloat(acceptanceStr.replace('%', '').replace('٪', '')) || 0;
-            // If acceptance is between 0 and 1, it's likely a decimal (0.01 = 1%), so multiply by 100
-            if (acceptance > 0 && acceptance <= 1) {
-              acceptance = acceptance * 100;
-            }
-            
-            console.log(`[Dashboard] Rider ${riderCode}: absence="${absenceRaw}" -> "${absence}", acceptance="${acceptanceStr}" -> ${acceptance}%`);
-            
-            riderDataMap.set(riderCode, { hours, orders, breaks, absence, acceptance });
-          }
-        }
-      }
+    for (const [codeNorm, t] of agg.byRider.entries()) {
+      const rider = riders.find((x) => normalizeRiderCodeForPerformance(x.code) === codeNorm);
+      const accAgg = accByRider.get(codeNorm);
+      const avgAcc = accAgg && accAgg.n > 0 ? accAgg.sum / accAgg.n : 0;
+      topRiders.push({
+        name: rider?.name ?? codeNorm,
+        orders: t.orders,
+        hours: t.hours,
+        acceptance: Math.round(avgAcc * 100) / 100,
+      });
     }
-
-    // Process riders for the last uploaded date
-    for (const rider of riders) {
-      const riderData = riderDataMap.get(rider.code);
-
-      if (riderData) {
-        totalHours += riderData.hours;
-        totalOrders += riderData.orders;
-        totalBreaks += riderData.breaks;
-
-        // Check for absence - handle various formats
-        const isAbsent = riderData.absence === 'نعم' || 
-                        riderData.absence === '1' || 
-                        riderData.absence === 'yes' || 
-                        riderData.absence.toLowerCase() === 'yes';
-        if (isAbsent) {
-          totalAbsences++;
-          console.log(`[Dashboard] Found absence for rider ${rider.name} (${rider.code}): "${riderData.absence}"`);
-        }
-
-        if (riderData.acceptance > 0) {
-          totalAcceptance += riderData.acceptance;
-          acceptanceCount++;
-        }
-
-        topRiders.push({
-          name: rider.name,
-          orders: riderData.orders,
-          hours: riderData.hours,
-          acceptance: riderData.acceptance,
-        });
-      }
-    }
-
     topRiders.sort((a, b) => b.orders - a.orders);
 
-    // Calculate target achievement percentage
-    const targetAchievement = targetHours > 0 ? (totalHours / targetHours) * 100 : 0;
+    const targetTotalPeriod = targetHours > 0 && periodDays > 0 ? targetHours * periodDays : 0;
+    const targetAchievement =
+      targetTotalPeriod > 0 ? parseFloat(((totalHours / targetTotalPeriod) * 100).toFixed(1)) : 0;
+
+    let lastUploadDate = '';
+    if (agg.records.length > 0) {
+      lastUploadDate = agg.records.reduce((max, r) => (r.date > max ? r.date : max), agg.records[0].date);
+    }
 
     const result: DashboardData = {
       totalHours,
@@ -450,14 +429,15 @@ export async function getDashboardData(supervisorCode: string): Promise<Dashboar
       totalAbsences,
       totalBreaks,
       avgAcceptance: acceptanceCount > 0 ? parseFloat((totalAcceptance / acceptanceCount).toFixed(2)) : 0,
-      lastUploadDate: lastUploadDate.toISOString().split('T')[0],
+      lastUploadDate,
       targetHours,
-      targetAchievement: parseFloat(targetAchievement.toFixed(1)),
+      targetAchievement,
+      periodDays,
+      targetHoursPeriod: Math.round(targetTotalPeriod * 100) / 100,
       topRiders: topRiders.slice(0, 5),
     };
 
-    // Cache for 30 seconds
-    cache.set(cacheKey, result, 30000);
+    cache.set(cacheKey, result, 15000);
 
     return result;
   } catch (error) {
@@ -471,6 +451,8 @@ export async function getDashboardData(supervisorCode: string): Promise<Dashboar
       lastUploadDate: '',
       targetHours: 0,
       targetAchievement: 0,
+      periodDays: 0,
+      targetHoursPeriod: 0,
       topRiders: [],
     };
   }
