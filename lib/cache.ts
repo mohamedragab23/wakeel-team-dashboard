@@ -75,7 +75,7 @@ export const CACHE_KEYS = {
   sheetData: (sheetName: string) => `sheet:${sheetName}`,
   shiftsSheetData: (sheetName: string) => `shifts:sheet:${sheetName}`,
   supervisorRiders: (code: string) => `riders:${code}`,
-  dashboardData: (code: string) => `dashboard:${code}`,
+  dashboardData: (code: string, rangeKey = 'last') => `dashboard:${code}:${rangeKey}`,
   ridersData: (code: string) => `ridersData:${code}`,
   performanceData: (code: string, start?: string, end?: string) =>
     `performance:${code}:${start || ''}:${end || ''}`,

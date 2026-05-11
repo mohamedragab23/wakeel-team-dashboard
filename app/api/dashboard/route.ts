@@ -22,8 +22,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    // Get dashboard data from Google Sheets (filtered by supervisor)
-    const dashboardData = await getDashboardData(decoded.code);
+    const { searchParams } = new URL(request.url);
+    const startStr = searchParams.get('start_date');
+    const endStr = searchParams.get('end_date');
+    let opts: { startDate: Date; endDate: Date } | undefined;
+    if (startStr && endStr) {
+      const startDate = new Date(startStr + 'T00:00:00');
+      const endDate = new Date(endStr + 'T00:00:00');
+      if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+        opts = { startDate, endDate };
+      }
+    }
+
+    const dashboardData = await getDashboardData(decoded.code, opts);
 
     return NextResponse.json({
       success: true,

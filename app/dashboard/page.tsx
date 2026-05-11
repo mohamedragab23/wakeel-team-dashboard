@@ -13,6 +13,8 @@ import Tabs, { type TabItem } from '@/components/ui-v2/Tabs';
 import { v2CssVars } from '@/theme/tokens';
 import { ZONE_OPTIONS } from '@/lib/zones';
 
+type DashboardPeriodMode = 'last_upload_day' | 'custom_range';
+
 interface DashboardData {
   totalHours: number;
   totalOrders: number;
@@ -24,6 +26,9 @@ interface DashboardData {
   targetAchievement: number;
   periodDays?: number;
   targetHoursPeriod?: number;
+  periodMode?: DashboardPeriodMode;
+  rangeStart?: string;
+  rangeEnd?: string;
   topRiders: Array<{
     name: string;
     orders: number;
@@ -46,6 +51,9 @@ export default function DashboardPage() {
   const [assignmentMessage, setAssignmentMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const [tab, setTab] = useState<'overview' | 'assignment'>('overview');
+  /** فلتر اختياري لعرض الفترة (YYYY-MM-DD) — فارغ = آخر يوم محدث في الشيت */
+  const [dashStart, setDashStart] = useState('');
+  const [dashEnd, setDashEnd] = useState('');
 
   const zoneOptions = ZONE_OPTIONS;
 
@@ -55,8 +63,8 @@ export default function DashboardPage() {
   ];
 
   useEffect(() => {
-    fetchDashboardData();
-    fetchPendingRequestsCount();
+    void fetchDashboardData('last');
+    void fetchPendingRequestsCount();
   }, []);
 
   const fetchPendingRequestsCount = async () => {
@@ -77,13 +85,20 @@ export default function DashboardPage() {
     }
   };
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (mode: 'last' | 'range', start?: string, end?: string) => {
     try {
+      setLoading(true);
+      setError('');
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/dashboard', {
+      let url = '/api/dashboard';
+      if (mode === 'range' && start && end) {
+        url = `/api/dashboard?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}`;
+      }
+      const response = await fetch(url, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
+        cache: 'no-store',
       });
 
       const data = await response.json();
@@ -98,6 +113,24 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const applyDashboardRange = () => {
+    if (!dashStart || !dashEnd) {
+      alert('يرجى اختيار تاريخ البداية والنهاية');
+      return;
+    }
+    if (new Date(dashStart) > new Date(dashEnd)) {
+      alert('تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية');
+      return;
+    }
+    void fetchDashboardData('range', dashStart, dashEnd);
+  };
+
+  const resetDashboardToLastDay = () => {
+    setDashStart('');
+    setDashEnd('');
+    void fetchDashboardData('last');
   };
 
   const handleSubmitAssignment = async (e: React.FormEvent) => {
@@ -287,6 +320,48 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          <div className="bg-white rounded-xl shadow-sm p-4 sm:p-6 border border-gray-100">
+            <h3 className="text-base font-bold text-gray-800 mb-2">الفترة المعروضة</h3>
+            <p className="text-xs text-gray-500 mb-3">
+              الافتراضي: <strong>آخر يوم</strong> وُجدت له بيانات يومية لمناديبك في الشيت. أو حدّد من — إلى (مثل تقرير
+              المدير).
+            </p>
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">من</label>
+                <input
+                  type="date"
+                  value={dashStart}
+                  onChange={(e) => setDashStart(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-gray-900"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">إلى</label>
+                <input
+                  type="date"
+                  value={dashEnd}
+                  onChange={(e) => setDashEnd(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-gray-900"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => applyDashboardRange()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+              >
+                تطبيق الفترة
+              </button>
+              <button
+                type="button"
+                onClick={() => resetDashboardToLastDay()}
+                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-medium"
+              >
+                آخر يوم محدّث
+              </button>
+            </div>
+          </div>
+
           {dashboardData && (
             <>
               {/* Last Upload Date Banner */}
@@ -294,14 +369,32 @@ export default function DashboardPage() {
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl p-4 text-white shadow-lg">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-blue-100 text-sm">آخر يوم وُجدت له بيانات لمناديبك هذا الشهر</p>
+                      <p className="text-blue-100 text-sm">
+                        {dashboardData.periodMode === 'custom_range' && dashboardData.rangeStart && dashboardData.rangeEnd
+                          ? `عرض الفترة: من ${dashboardData.rangeStart} إلى ${dashboardData.rangeEnd}`
+                          : 'آخر يوم تم رفع بيانات يومية لمناديبك في الشيت'}
+                      </p>
                       <p className="text-2xl font-bold">
-                        {new Date(dashboardData.lastUploadDate).toLocaleDateString('ar-EG', {
-                          weekday: 'long',
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric'
-                        })}
+                        {dashboardData.periodMode === 'custom_range' &&
+                        dashboardData.rangeStart &&
+                        dashboardData.rangeEnd
+                          ? `${new Date(dashboardData.rangeStart + 'T12:00:00').toLocaleDateString('ar-EG', {
+                              weekday: 'long',
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric',
+                            })} ← ${new Date(dashboardData.rangeEnd + 'T12:00:00').toLocaleDateString('ar-EG', {
+                              weekday: 'long',
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric',
+                            })}`
+                          : new Date(dashboardData.lastUploadDate).toLocaleDateString('ar-EG', {
+                              weekday: 'long',
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric',
+                            })}
                       </p>
                     </div>
                     <div className="text-5xl opacity-80">📅</div>
@@ -312,10 +405,11 @@ export default function DashboardPage() {
               {/* Target Achievement Card */}
               {dashboardData.targetHours > 0 && (
                 <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                  <h3 className="text-lg font-bold text-gray-800 mb-1">تحقيق الهدف</h3>
+                  <h3 className="text-lg font-bold text-gray-800 mb-1">تحقيق الهدف اليومي</h3>
                   <p className="text-xs text-gray-500 mb-3">
-                    الساعات والطلبات من أول الشهر حتى اليوم (نفس منطق التجميع في النظام). النسبة = الساعات ÷ (الهدف
-                    اليومي × عدد أيام الشهر حتى اليوم).
+                    {dashboardData.periodMode === 'custom_range'
+                      ? 'الساعات والطلبات لمجموع أيام الفترة. النسبة = الساعات ÷ (الهدف اليومي × عدد أيام الفترة).'
+                      : 'بيانات يوم واحد: آخر يوم تحديث. النسبة = إجمالي ساعات مناديبك ذلك اليوم ÷ الهدف اليومي من الشيت.'}
                   </p>
                   <div className="flex items-center gap-6">
                     <div className="flex-1">
@@ -354,7 +448,12 @@ export default function DashboardPage() {
 
               <DashboardStats data={dashboardData} />
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <PerformanceChart />
+                <PerformanceChart
+                  startDate={
+                    dashboardData.periodMode === 'custom_range' ? dashboardData.rangeStart : undefined
+                  }
+                  endDate={dashboardData.periodMode === 'custom_range' ? dashboardData.rangeEnd : undefined}
+                />
                 <TopRidersTable topRiders={dashboardData.topRiders} />
               </div>
             </>
@@ -510,20 +609,70 @@ export default function DashboardPage() {
 
         {tab === 'overview' && dashboardData && (
           <>
+            <Card
+              title="الفترة المعروضة"
+              subtitle="الافتراضي: آخر يوم ببيانات في الشيت. أو اختر من — إلى مثل تقرير أداء المشرفين لدى المدير."
+            >
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="block text-xs text-[rgba(234,240,255,0.65)] mb-1">من</label>
+                  <input
+                    type="date"
+                    value={dashStart}
+                    onChange={(e) => setDashStart(e.target.value)}
+                    className="h-10 px-3 rounded-[var(--v2-radius-lg)] border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] text-[#EAF0FF]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[rgba(234,240,255,0.65)] mb-1">إلى</label>
+                  <input
+                    type="date"
+                    value={dashEnd}
+                    onChange={(e) => setDashEnd(e.target.value)}
+                    className="h-10 px-3 rounded-[var(--v2-radius-lg)] border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] text-[#EAF0FF]"
+                  />
+                </div>
+                <Button type="button" variant="primary" onClick={() => applyDashboardRange()}>
+                  تطبيق الفترة
+                </Button>
+                <Button type="button" variant="secondary" onClick={() => resetDashboardToLastDay()}>
+                  آخر يوم محدّث
+                </Button>
+              </div>
+            </Card>
+
             {/* Last Upload Date Banner */}
             {dashboardData.lastUploadDate && (
               <div className="rounded-[var(--v2-radius-xl)] border border-[rgba(255,255,255,0.10)] bg-[rgba(255,255,255,0.06)] shadow-[var(--v2-shadow-soft)] overflow-hidden backdrop-blur-md">
                 <div className="p-4 sm:p-5 bg-gradient-to-l from-[rgba(0,245,255,0.18)] via-[rgba(168,85,247,0.16)] to-transparent">
                   <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-[rgba(234,240,255,0.70)] text-sm">آخر يوم وُجدت له بيانات لمناديبك هذا الشهر</p>
+                    <p className="text-[rgba(234,240,255,0.70)] text-sm">
+                      {dashboardData.periodMode === 'custom_range' && dashboardData.rangeStart && dashboardData.rangeEnd
+                        ? `عرض الفترة: من ${dashboardData.rangeStart} إلى ${dashboardData.rangeEnd}`
+                        : 'آخر يوم تم رفع بيانات يومية لمناديبك في الشيت'}
+                    </p>
                     <p className="text-lg sm:text-2xl font-extrabold text-[#EAF0FF] mt-1">
-                      {new Date(dashboardData.lastUploadDate).toLocaleDateString('ar-EG', {
-                        weekday: 'long',
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      })}
+                      {dashboardData.periodMode === 'custom_range' &&
+                      dashboardData.rangeStart &&
+                      dashboardData.rangeEnd
+                        ? `${new Date(dashboardData.rangeStart + 'T12:00:00').toLocaleDateString('ar-EG', {
+                            weekday: 'long',
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                          })} ← ${new Date(dashboardData.rangeEnd + 'T12:00:00').toLocaleDateString('ar-EG', {
+                            weekday: 'long',
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                          })}`
+                        : new Date(dashboardData.lastUploadDate).toLocaleDateString('ar-EG', {
+                            weekday: 'long',
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                          })}
                     </p>
                   </div>
                   <div className="text-5xl opacity-80">📅</div>
@@ -535,8 +684,12 @@ export default function DashboardPage() {
             {/* Target Achievement Card */}
             {dashboardData.targetHours > 0 && (
               <Card
-                title="تحقيق الهدف"
-                subtitle="من أول الشهر حتى اليوم — النسبة = الساعات ÷ (الهدف اليومي × عدد الأيام)"
+                title="تحقيق الهدف اليومي"
+                subtitle={
+                  dashboardData.periodMode === 'custom_range'
+                    ? 'الساعات والطلبات لمجموع أيام الفترة. النسبة = الساعات ÷ (الهدف اليومي × عدد أيام الفترة).'
+                    : 'يوم واحد (آخر تحديث): النسبة = ساعات مناديبك ذلك اليوم ÷ الهدف اليومي من الشيت.'
+                }
               >
                 <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
                   <div className="flex-1">
@@ -571,7 +724,12 @@ export default function DashboardPage() {
 
             <DashboardStats data={dashboardData} />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <PerformanceChart />
+              <PerformanceChart
+                startDate={
+                  dashboardData.periodMode === 'custom_range' ? dashboardData.rangeStart : undefined
+                }
+                endDate={dashboardData.periodMode === 'custom_range' ? dashboardData.rangeEnd : undefined}
+              />
               <div className="space-y-3">
                 <TopRidersTable topRiders={dashboardData.topRiders} />
                 {dashboardData.topRiders?.length > 0 && (

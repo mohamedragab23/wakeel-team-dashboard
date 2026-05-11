@@ -25,6 +25,8 @@ export interface RiderData {
   debt: number;
 }
 
+export type DashboardPeriodMode = 'last_upload_day' | 'custom_range';
+
 export interface DashboardData {
   totalHours: number;
   totalOrders: number;
@@ -34,10 +36,15 @@ export interface DashboardData {
   lastUploadDate: string;
   targetHours: number;
   targetAchievement: number;
-  /** من أول الشهر حتى اليوم (شامل) — لحساب الهدف التراكمي */
+  /** عدد الأيام (شامل) في الفترة المعروضة */
   periodDays: number;
-  /** الهدف اليومي من الشيت × periodDays */
+  /** الهدف اليومي × periodDays */
   targetHoursPeriod: number;
+  periodMode: DashboardPeriodMode;
+  /** YYYY-MM-DD — بداية الفترة (آخر يوم تحديث: يساوي rangeEnd) */
+  rangeStart: string;
+  /** YYYY-MM-DD — نهاية الفترة */
+  rangeEnd: string;
   topRiders: Array<{
     name: string;
     orders: number;
@@ -307,34 +314,73 @@ export async function getLatestRiderData(riderCode: string): Promise<(RiderData 
   }
 }
 
-function diffDaysInclusiveMonthSlice(start: Date, end: Date): number {
+function diffDaysInclusive(start: Date, end: Date): number {
   const s = new Date(start.getFullYear(), start.getMonth(), start.getDate());
   const e = new Date(end.getFullYear(), end.getMonth(), end.getDate());
   const ms = e.getTime() - s.getTime();
-  if (!Number.isFinite(ms) || ms < 0) return 1;
+  if (!Number.isFinite(ms) || ms < 0) return 0;
   return Math.floor(ms / (24 * 60 * 60 * 1000)) + 1;
 }
 
-// Get dashboard data with caching and optimization
-export async function getDashboardData(supervisorCode: string): Promise<DashboardData> {
-  const supTrim = (supervisorCode ?? '').toString().trim();
-  const cacheKey = CACHE_KEYS.dashboardData(supTrim);
+function ymd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
-  // Check cache first (15 seconds — أرقام أقرب لشيت البيانات اليومية)
+export type GetDashboardDataOptions = {
+  /** إن وُجدت مع endDate: فترة مخصصة؛ وإلا يُحسب آخر يوم ظهرت فيه بيانات للمناديب */
+  startDate?: Date;
+  endDate?: Date;
+};
+
+// Get dashboard data with caching and optimization
+export async function getDashboardData(
+  supervisorCode: string,
+  options?: GetDashboardDataOptions
+): Promise<DashboardData> {
+  const supTrim = (supervisorCode ?? '').toString().trim();
+  let rangeKey = 'last';
+  if (options?.startDate && options?.endDate) {
+    rangeKey = `${ymd(options.startDate)}_${ymd(options.endDate)}`;
+  }
+  const cacheKey = CACHE_KEYS.dashboardData(supTrim, rangeKey);
+
   const cached = cache.get<DashboardData>(cacheKey);
   if (cached) {
     return cached;
   }
 
+  const empty = (): DashboardData => ({
+    totalHours: 0,
+    totalOrders: 0,
+    totalAbsences: 0,
+    totalBreaks: 0,
+    avgAcceptance: 0,
+    lastUploadDate: '',
+    targetHours: 0,
+    targetAchievement: 0,
+    periodDays: 0,
+    targetHoursPeriod: 0,
+    periodMode: 'last_upload_day',
+    rangeStart: '',
+    rangeEnd: '',
+    topRiders: [],
+  });
+
   try {
-    const [
-      { aggregateSupervisorDailyPerformance, normalizeRiderCodeForPerformance, isDailyRowMarkedAbsent },
-      riders,
-      supervisorsData,
-    ] = await Promise.all([
-      import('./dataFilter'),
+    const {
+      aggregateSupervisorDailyPerformance,
+      normalizeRiderCodeForPerformance,
+      isDailyRowMarkedAbsent,
+      parseDailySheetDate,
+    } = await import('./dataFilter');
+
+    const [riders, supervisorsData, dailyData] = await Promise.all([
       getSupervisorRiders(supTrim, false),
       getSheetData('المشرفين'),
+      getSheetData('البيانات اليومية'),
     ]);
 
     let targetHours = 0;
@@ -351,18 +397,68 @@ export async function getDashboardData(supervisorCode: string): Promise<Dashboar
       }
     }
 
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const endToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-    const periodDays = diffDaysInclusiveMonthSlice(startOfMonth, now);
+    let periodMode: DashboardPeriodMode = 'last_upload_day';
+    let startD: Date;
+    let endD: Date;
 
-    const agg = await aggregateSupervisorDailyPerformance(supTrim, startOfMonth, endToday, {
+    if (options?.startDate && options?.endDate) {
+      periodMode = 'custom_range';
+      startD = new Date(
+        options.startDate.getFullYear(),
+        options.startDate.getMonth(),
+        options.startDate.getDate(),
+        0,
+        0,
+        0,
+        0
+      );
+      endD = new Date(
+        options.endDate.getFullYear(),
+        options.endDate.getMonth(),
+        options.endDate.getDate(),
+        23,
+        59,
+        59,
+        999
+      );
+      if (startD.getTime() > endD.getTime()) {
+        const tmpS = new Date(startD);
+        const tmpE = new Date(endD);
+        startD = new Date(tmpE.getFullYear(), tmpE.getMonth(), tmpE.getDate(), 0, 0, 0, 0);
+        endD = new Date(tmpS.getFullYear(), tmpS.getMonth(), tmpS.getDate(), 23, 59, 59, 999);
+      }
+    } else {
+      const riderCodesExact = new Set(riders.map((r) => (r.code ?? '').toString().trim()).filter(Boolean));
+      const riderCodesNorm = new Set(riders.map((r) => normalizeRiderCodeForPerformance(r.code)));
+      let lastDay: Date | null = null;
+      for (let i = 1; i < dailyData.length; i++) {
+        const row = dailyData[i];
+        if (!row[0] || !row[1]) continue;
+        const rc = row[1].toString().trim();
+        const rcn = normalizeRiderCodeForPerformance(rc);
+        if (!riderCodesExact.has(rc) && !riderCodesNorm.has(rcn)) continue;
+        const rd = parseDailySheetDate(row[0]);
+        if (!rd || isNaN(rd.getTime())) continue;
+        const dayOnly = new Date(rd.getFullYear(), rd.getMonth(), rd.getDate());
+        if (!lastDay || dayOnly.getTime() > lastDay.getTime()) lastDay = dayOnly;
+      }
+      if (!lastDay) {
+        const z = empty();
+        cache.set(cacheKey, z, 15000);
+        return z;
+      }
+      startD = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate(), 0, 0, 0, 0);
+      endD = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate(), 23, 59, 59, 999);
+    }
+
+    const agg = await aggregateSupervisorDailyPerformance(supTrim, startD, endD, {
       riders,
       useCache: false,
     });
 
     const totalHours = agg.totalHours;
     const totalOrders = agg.totalOrders;
+    const periodDays = Math.max(1, diffDaysInclusive(startD, endD));
 
     let totalAbsences = 0;
     let totalBreaks = 0;
@@ -418,10 +514,9 @@ export async function getDashboardData(supervisorCode: string): Promise<Dashboar
     const targetAchievement =
       targetTotalPeriod > 0 ? parseFloat(((totalHours / targetTotalPeriod) * 100).toFixed(1)) : 0;
 
-    let lastUploadDate = '';
-    if (agg.records.length > 0) {
-      lastUploadDate = agg.records.reduce((max, r) => (r.date > max ? r.date : max), agg.records[0].date);
-    }
+    const rangeStart = ymd(startD);
+    const rangeEnd = ymd(endD);
+    const lastUploadDate = rangeEnd;
 
     const result: DashboardData = {
       totalHours,
@@ -434,6 +529,9 @@ export async function getDashboardData(supervisorCode: string): Promise<Dashboar
       targetAchievement,
       periodDays,
       targetHoursPeriod: Math.round(targetTotalPeriod * 100) / 100,
+      periodMode,
+      rangeStart,
+      rangeEnd,
       topRiders: topRiders.slice(0, 5),
     };
 
@@ -442,19 +540,7 @@ export async function getDashboardData(supervisorCode: string): Promise<Dashboar
     return result;
   } catch (error) {
     console.error('Error fetching dashboard data:', error);
-    return {
-      totalHours: 0,
-      totalOrders: 0,
-      totalAbsences: 0,
-      totalBreaks: 0,
-      avgAcceptance: 0,
-      lastUploadDate: '',
-      targetHours: 0,
-      targetAchievement: 0,
-      periodDays: 0,
-      targetHoursPeriod: 0,
-      topRiders: [],
-    };
+    return empty();
   }
 }
 

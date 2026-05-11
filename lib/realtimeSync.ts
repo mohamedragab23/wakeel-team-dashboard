@@ -19,9 +19,13 @@ export function invalidateSupervisorCaches(supervisorCode?: string) {
 
   // Clear specific supervisor caches if code provided
   if (supervisorCode) {
-    cache.clear(CACHE_KEYS.supervisorRiders(supervisorCode));
-    cache.clear(CACHE_KEYS.dashboardData(supervisorCode));
-    cache.clear(CACHE_KEYS.ridersData(supervisorCode));
+    const c = supervisorCode.trim();
+    cache.clear(CACHE_KEYS.supervisorRiders(c));
+    const dashPrefix = `dashboard:${c}:`;
+    for (const k of cache.keys()) {
+      if (k.startsWith(dashPrefix)) cache.clear(k);
+    }
+    cache.clear(CACHE_KEYS.ridersData(c));
     // Clear performance caches for common date ranges (we clear all to be safe)
     // Performance data cache keys include date ranges, so we clear the sheet data cache
     // which will force a refresh on next request

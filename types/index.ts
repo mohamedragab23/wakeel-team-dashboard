@@ -36,6 +36,8 @@ export interface RiderData {
   debt: number;
 }
 
+export type DashboardPeriodMode = 'last_upload_day' | 'custom_range';
+
 export interface DashboardData {
   totalHours: number;
   totalOrders: number;
@@ -47,6 +49,9 @@ export interface DashboardData {
   targetAchievement?: number;
   periodDays?: number;
   targetHoursPeriod?: number;
+  periodMode?: DashboardPeriodMode;
+  rangeStart?: string;
+  rangeEnd?: string;
   topRiders: Array<{
     name: string;
     orders: number;
