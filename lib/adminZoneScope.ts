@@ -11,7 +11,7 @@ import {
   isLimitedAdminZoneScopeActive,
   parseLimitedFeatures,
 } from '@/lib/adminFeatureAccess';
-import { buildDescendantSupervisorCodes } from '@/lib/orgHierarchy';
+import { buildDescendantSupervisorCodesMulti, parseLinkedSupervisorRootCodes } from '@/lib/orgHierarchy';
 
 export type AdminDataScopeJwt = {
   role?: string;
@@ -54,8 +54,13 @@ export async function getSupervisorCodesInAdminDataScope(
         )
       : null;
 
-  const linked = String(decoded.linkedSupervisorCode ?? '').trim();
-  const treeFiltered = linked ? buildDescendantSupervisorCodes(sups, linked) : null;
+  const roots = parseLinkedSupervisorRootCodes(String(decoded.linkedSupervisorCode ?? ''));
+  let treeFiltered: Set<string> | null = null;
+  if (roots.length > 0) {
+    const tree = buildDescendantSupervisorCodesMulti(sups, roots);
+    /** إن كان الرابط غير صالح (لا يطابق أي صف في المشرفين) لا تُطبَّق شجرة فارغة — يُعتمد على الزون فقط */
+    treeFiltered = tree.size > 0 ? tree : null;
+  }
 
   if (!zoneFiltered && !treeFiltered) return null;
 

@@ -40,3 +40,25 @@ export function buildDescendantSupervisorCodes(sups: Supervisor[], rootCode: str
   }
   return out;
 }
+
+/** أكثر من جذر في JWT/الشيت: WA-014|WA-007 أو فاصلة عربية/إنجليزية */
+export function parseLinkedSupervisorRootCodes(raw: string | undefined | null): string[] {
+  const s = String(raw ?? '')
+    .replace(/\uFEFF/g, '')
+    .trim();
+  if (!s) return [];
+  /** فصل الأكواد بـ | أو فاصلة (لا نفصل بمسافة حتى لا نكسر أسماء إن وُضعت بالخطأ) */
+  return s
+    .split(/[|،,\n\r]+/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+/** اتحاد أشجار متعددة (مدير منطقة له عدة مديري زون كجذور صريحة). */
+export function buildDescendantSupervisorCodesMulti(sups: Supervisor[], rootCodes: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const r of rootCodes) {
+    for (const c of buildDescendantSupervisorCodes(sups, r)) out.add(c);
+  }
+  return out;
+}

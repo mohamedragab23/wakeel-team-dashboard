@@ -28,20 +28,28 @@ export async function POST(request: NextRequest) {
       );
       if (allowedCodes && allowedCodes.size > 0) {
         const sups = await getAllSupervisors(false);
-        const names = sups
-          .filter((s) => allowedCodes.has(String(s.code ?? '').trim()))
-          .map((s) => (s.name || '').trim())
-          .filter(Boolean);
-        allowedSupervisorNames = new Set(names);
+        const labels = new Set<string>();
+        for (const s of sups) {
+          if (!allowedCodes.has(String(s.code ?? '').trim())) continue;
+          const code = String(s.code ?? '').trim();
+          const name = String(s.name ?? '').trim();
+          if (code) labels.add(code);
+          if (name) labels.add(name);
+        }
+        allowedSupervisorNames = labels;
       } else {
         const scopeZones = parseAdminAllowedZonesList(decoded.dataZone);
         if (scopeZones.length > 0) {
           const sups = await getAllSupervisors(false);
-          const names = sups
-            .filter((s) => supervisorZonesOverlapAllowed(s.region, scopeZones))
-            .map((s) => (s.name || '').trim())
-            .filter(Boolean);
-          allowedSupervisorNames = new Set(names);
+          const labels = new Set<string>();
+          for (const s of sups) {
+            if (!supervisorZonesOverlapAllowed(s.region, scopeZones)) continue;
+            const code = String(s.code ?? '').trim();
+            const name = String(s.name ?? '').trim();
+            if (code) labels.add(code);
+            if (name) labels.add(name);
+          }
+          allowedSupervisorNames = labels;
         }
       }
     }

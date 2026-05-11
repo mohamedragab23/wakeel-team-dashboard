@@ -86,7 +86,7 @@ export default function ShiftsPage() {
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [zoneFilter, setZoneFilter] = useState<string>('all');
-  const [zoneMap, setZoneMap] = useState<Array<{ name: string; region: string }>>([]);
+  const [zoneMap, setZoneMap] = useState<Array<{ code?: string; name: string; region: string }>>([]);
 
   useEffect(() => {
     try {
@@ -115,11 +115,15 @@ export default function ShiftsPage() {
 
   const supervisorNamesInZone = useMemo(() => {
     if (!isAdmin || zoneFilter === 'all' || !zoneMap.length) return null;
-    const names = zoneMap
-      .filter((x) => supervisorRowMatchesZoneFilter(x.region, zoneFilter))
-      .map((x) => (x.name || '').trim())
-      .filter(Boolean);
-    return new Set(names);
+    const labels = new Set<string>();
+    for (const x of zoneMap) {
+      if (!supervisorRowMatchesZoneFilter(x.region, zoneFilter)) continue;
+      const name = (x.name || '').trim();
+      const code = (x.code || '').trim();
+      if (name) labels.add(name);
+      if (code) labels.add(code);
+    }
+    return labels;
   }, [isAdmin, zoneFilter, zoneMap]);
 
   const zoneFiltered = useMemo(() => {

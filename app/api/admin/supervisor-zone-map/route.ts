@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
     let supervisors = await getAllSupervisors(false);
     supervisors = await filterSupervisorsForAdminDataScope(decoded, supervisors);
     const data = supervisors.map((s) => ({
+      code: (s.code || '').trim(),
       name: (s.name || '').trim(),
       region: (s.region || '').trim(),
     }));

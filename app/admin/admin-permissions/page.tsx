@@ -19,8 +19,8 @@ export default function AdminPermissionsPage() {
   const [pickedZones, setPickedZones] = useState<Set<string>>(new Set());
   /** منصب الأدمن المحدود في الشيت: مدير منطقة / مدير زون */
   const [adminPositionSheet, setAdminPositionSheet] = useState<string>('');
-  /** كود الصف في «المشرفين» (العمود A) المرتبط بهذا الأدمن في الشجرة */
-  const [linkedSupervisorCode, setLinkedSupervisorCode] = useState<string>('');
+  /** جذور الشجرة: أكواد من «المشرفين» (عمود A) — أكثر من جذر يُفصل بينها بـ | في الشيت */
+  const [linkedSupervisorCodes, setLinkedSupervisorCodes] = useState<Set<string>>(new Set());
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [canGrant, setCanGrant] = useState(false);
 
@@ -86,6 +86,15 @@ export default function AdminPermissionsPage() {
 
   const selected = data?.admins?.find((a) => a.code === selectedCode);
 
+  function parseLinkedRootsFromSheet(s: string): string[] {
+    return String(s || '')
+      .replace(/\uFEFF/g, '')
+      .trim()
+      .split(/[|،,\n\r]+/g)
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+
   const loadSelectedIntoForm = (code: string) => {
     const a = data?.admins?.find((x) => x.code === code);
     setSelectedCode(code);
@@ -111,7 +120,7 @@ export default function AdminPermissionsPage() {
     if (pos.includes('منطقة')) setAdminPositionSheet('مدير منطقة');
     else if (pos.includes('زون')) setAdminPositionSheet('مدير زون');
     else setAdminPositionSheet('');
-    setLinkedSupervisorCode((a.linkedSupervisorCode || '').trim());
+    setLinkedSupervisorCodes(new Set(parseLinkedRootsFromSheet(a.linkedSupervisorCode || '')));
   };
 
   const saveMutation = useMutation({
@@ -132,7 +141,7 @@ export default function AdminPermissionsPage() {
           permissions,
           dataZones: Array.from(pickedZones),
           adminPosition: adminPositionSheet.trim(),
-          linkedSupervisorCode: linkedSupervisorCode.trim(),
+          linkedSupervisorCode: Array.from(linkedSupervisorCodes).join('|'),
         }),
       });
       const j = await res.json();
@@ -360,10 +369,11 @@ export default function AdminPermissionsPage() {
                   <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.2)] p-3 sm:p-4 space-y-3">
                     <p className="text-sm font-medium">الهرمية وربط صف «المشرفين»</p>
                     <p className="text-xs text-[rgba(234,240,255,0.55)] leading-relaxed">
-                      اختر <strong className="text-[rgba(234,240,255,0.85)]">نفس الكود (العمود A)</strong> في ورقة
-                      المشرفين للصف الذي يمثل هذا الأدمن (مثلاً WA-014 لمدير المنطقة). في شيت المشرفين يجب ملء عمود{' '}
-                      <strong className="text-[rgba(234,240,255,0.85)]">كود المدير المباشر</strong> للمشرفين ومديري
-                      الزون تحتك. نطاق الزونات أعلاه يُقاطع مع هذه الشجرة.
+                      علّم <strong className="text-[rgba(234,240,255,0.85)]">صفك/صفوفك</strong> في «المشرفين» (عمود
+                      A) — يمكن أكثر من كود (مثلاً مدير منطقة يعلّم WA-014 ومديري زون WA-007 و WA-013 معاً). كل من
+                      تحتهم في الشيت يجب أن يملأ عمود{' '}
+                      <strong className="text-[rgba(234,240,255,0.85)]">كود المدير المباشر</strong> بكود مديره.
+                      النطاق الجغرافي أعلاه يُقاطع مع اتحاد أشجار هذه الجذور.
                     </p>
                     <div>
                       <label className="block text-sm mb-1">منصب الأدمن (يُحفظ في عمود المنصب في Admins)</label>
@@ -378,20 +388,57 @@ export default function AdminPermissionsPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm mb-1">ربط بكود في شيت المشرفين (العمود A)</label>
-                      <select
-                        className="w-full max-w-md rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm"
-                        value={linkedSupervisorCode}
-                        onChange={(e) => setLinkedSupervisorCode(e.target.value)}
-                      >
-                        <option value="">— بدون ربط (يعتمد على الزونات فقط إن وُجدت) —</option>
+                      <label className="block text-sm mb-1">ربط بأكواد في شيت المشرفين (عمود A) — متعدد</label>
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        <button
+                          type="button"
+                          className="text-xs px-2 py-1 rounded border border-[rgba(255,255,255,0.2)]"
+                          onClick={() => setLinkedSupervisorCodes(new Set())}
+                        >
+                          مسح الربط
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs px-2 py-1 rounded border border-[rgba(255,255,255,0.2)]"
+                          onClick={() => {
+                            const c = selectedCode.trim();
+                            if (c) setLinkedSupervisorCodes((prev) => new Set(prev).add(c));
+                          }}
+                        >
+                          إضافة كود الأدمن الحالي ({selectedCode || '—'})
+                        </button>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.2)] p-2 space-y-1">
                         {supervisorChoices.map((s) => (
-                          <option key={s.code} value={s.code}>
-                            {s.code} — {s.name || ''}
-                            {s.region ? ` (${s.region})` : ''}
-                          </option>
+                          <label key={s.code} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={linkedSupervisorCodes.has(s.code)}
+                              onChange={() => {
+                                setLinkedSupervisorCodes((prev) => {
+                                  const n = new Set(prev);
+                                  if (n.has(s.code)) n.delete(s.code);
+                                  else n.add(s.code);
+                                  return n;
+                                });
+                              }}
+                            />
+                            <span>
+                              {s.code} — {s.name || ''}
+                              {s.region ? ` (${s.region})` : ''}
+                            </span>
+                          </label>
                         ))}
-                      </select>
+                      </div>
+                      {linkedSupervisorCodes.size > 0 ? (
+                        <p className="text-xs text-[rgba(234,240,255,0.55)] mt-2">
+                          سيُحفظ: {Array.from(linkedSupervisorCodes).join(' | ')}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-[rgba(234,240,255,0.45)] mt-2">
+                          بدون ربط — يُعتمد على نطاق الزونات فقط (إن وُجد).
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}

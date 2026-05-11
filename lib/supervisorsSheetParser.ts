@@ -75,7 +75,12 @@ function inferFromHeader(headerRow: any[]): SupervisorsSheetColumnMap {
     (x) => x.includes('صيغة') || x.includes('عمولة') && x.includes('multi'),
     (x) => x.includes('commission') || x.includes('formula'),
   ]);
-  const target = findCol(h, [(x) => x.includes('هدف') && !x.includes('مشرف'), (x) => x === 'target']);
+  const target = findCol(h, [
+    (x) => x.includes('تارجت') || x.includes('target'),
+    (x) => x.includes('يومي') && (x.includes('هدف') || x.includes('ساع') || x.includes('hour')),
+    (x) => x.includes('هدف') && !x.includes('مشرف'),
+    (x) => x === 'target',
+  ]);
 
   const orgRole = findCol(h, [
     (x) => x.includes('منصب') && (x.includes('تنفيذي') || x.includes('تنظيمي') || x.includes('تنظيم')),
@@ -90,6 +95,14 @@ function inferFromHeader(headerRow: any[]): SupervisorsSheetColumnMap {
 
   const safe = (n: number, fb: number) => (n >= 0 ? n : fb);
 
+  let targetCol = target >= 0 ? target : null;
+  let orgCol = orgRole >= 0 ? orgRole : safe(orgRole, 8);
+  let parentCol = parentCode >= 0 ? parentCode : safe(parentCode, 9);
+
+  /** لا تخلط عمود الهدف مع عمود المنصب */
+  if (targetCol !== null && targetCol === orgCol) targetCol = null;
+  if (targetCol !== null && targetCol === parentCol) targetCol = null;
+
   return {
     code: safe(code, 0),
     name: safe(name, 1),
@@ -99,9 +112,9 @@ function inferFromHeader(headerRow: any[]): SupervisorsSheetColumnMap {
     salaryType: safe(salaryType, 5),
     salaryAmount: safe(salaryAmount, 6),
     commissionFormula: safe(commissionFormula, 7),
-    target: target >= 0 ? target : null,
-    orgRole: safe(orgRole, 8),
-    parentCode: safe(parentCode, 9),
+    target: targetCol,
+    orgRole: orgCol,
+    parentCode: parentCol,
   };
 }
 
@@ -139,6 +152,21 @@ export function defaultSupervisorsWideColumnMap(): SupervisorsSheetColumnMap {
   };
 }
 
+function maxRowLengthInSample(rows: any[][], dataStart: number, maxRows: number): number {
+  let m = 0;
+  const end = Math.min(rows.length, dataStart + maxRows);
+  for (let i = dataStart; i < end; i++) {
+    const r = rows[i] || [];
+    for (let j = r.length - 1; j >= 0; j--) {
+      if (r[j] != null && String(r[j]).trim() !== '') {
+        m = Math.max(m, j + 1);
+        break;
+      }
+    }
+  }
+  return m;
+}
+
 export function resolveSupervisorsSheetLayout(rows: any[][]): {
   dataStartIndex: number;
   columns: SupervisorsSheetColumnMap;
@@ -149,10 +177,10 @@ export function resolveSupervisorsSheetLayout(rows: any[][]): {
   if (isSupervisorsProbablyHeaderRow(rows[0])) {
     return { dataStartIndex: 1, columns: inferFromHeader(rows[0]) };
   }
-  const sample = rows[0] || [];
-  const len = sample.length || 0;
-  if (len >= 11) return { dataStartIndex: 0, columns: defaultSupervisorsWideColumnMap() };
-  return { dataStartIndex: 0, columns: defaultSupervisorsCompactColumnMap() };
+  const dataStart = 0;
+  const maxLen = maxRowLengthInSample(rows, dataStart, 40);
+  if (maxLen >= 11) return { dataStartIndex: dataStart, columns: defaultSupervisorsWideColumnMap() };
+  return { dataStartIndex: dataStart, columns: defaultSupervisorsCompactColumnMap() };
 }
 
 function cell(row: any[] | undefined, idx: number | null): string {

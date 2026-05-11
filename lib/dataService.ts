@@ -42,6 +42,13 @@ export interface DashboardData {
 }
 
 // Get supervisor's riders with caching
+function normSupervisorCodeForMatch(code: string): string {
+  return String(code ?? '')
+    .replace(/\uFEFF/g, '')
+    .trim()
+    .replace(/^0+(?=\d)/, '');
+}
+
 export async function getSupervisorRiders(supervisorCode: string, useCache: boolean = true): Promise<Rider[]> {
   const cacheKey = CACHE_KEYS.supervisorRiders(supervisorCode);
   
@@ -58,6 +65,8 @@ export async function getSupervisorRiders(supervisorCode: string, useCache: bool
     const ridersData = await getSheetData('المناديب', useCache);
     const riders: Rider[] = [];
 
+    const supNorm = normSupervisorCodeForMatch(supervisorCode);
+
     for (let i = 1; i < ridersData.length; i++) {
       const row = ridersData[i];
       if (!row[0] || row[0].toString().trim() === '') continue;
@@ -66,10 +75,11 @@ export async function getSupervisorRiders(supervisorCode: string, useCache: bool
       const riderName = row[1] ? row[1].toString().trim() : '';
       const riderRegion = row[2] ? row[2].toString().trim() : '';
       const riderSupervisorCode = row[3] ? row[3].toString().trim() : '';
+      const riderSupNorm = normSupervisorCodeForMatch(riderSupervisorCode);
 
       // Only include riders that are assigned to this supervisor (not empty/null)
       // IMPORTANT: Empty string means rider is unassigned, so exclude it
-      if (riderSupervisorCode && riderSupervisorCode !== '' && riderSupervisorCode === supervisorCode) {
+      if (riderSupNorm && riderSupNorm === supNorm) {
         riders.push({
           code: riderCode,
           name: riderName,
