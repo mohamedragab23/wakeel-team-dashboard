@@ -28,6 +28,5 @@ export function redactSupervisorRowForViewer<T extends Partial<Supervisor>>(
     salaryType: undefined,
     salaryAmount: undefined,
     commissionFormula: undefined,
-    target: undefined,
   };
 }

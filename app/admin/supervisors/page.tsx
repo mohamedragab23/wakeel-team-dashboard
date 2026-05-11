@@ -289,8 +289,12 @@ export default function AdminSupervisorsPage() {
                         </div>
                       </td>
                       <td className="py-4 px-6 text-sm text-gray-600">
-                        {supervisor.target ? (
-                          <span className="font-medium text-blue-600">{supervisor.target.toLocaleString()} ساعة</span>
+                        {Number.isFinite(Number(supervisor.target)) && Number(supervisor.target) > 0 ? (
+                          <span className="font-medium text-blue-600">
+                            {Number(supervisor.target).toLocaleString()} ساعة
+                          </span>
+                        ) : Number(supervisor.target) === 0 ? (
+                          <span className="text-gray-500">0</span>
                         ) : (
                           <span className="text-gray-400">غير محدد</span>
                         )}
@@ -434,8 +438,16 @@ export default function AdminSupervisorsPage() {
                       id="supervisor-target"
                       name="supervisor-target"
                       type="number"
-                      value={formData.target || ''}
-                      onChange={(e) => setFormData({ ...formData, target: parseInt(e.target.value) || 0 })}
+                      step="0.01"
+                      value={formData.target === undefined || formData.target === null ? '' : formData.target}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === '') setFormData({ ...formData, target: undefined });
+                        else {
+                          const n = parseFloat(v);
+                          setFormData({ ...formData, target: Number.isFinite(n) ? n : undefined });
+                        }
+                      }}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       placeholder="مثال: 300 (ساعة)"
                     />

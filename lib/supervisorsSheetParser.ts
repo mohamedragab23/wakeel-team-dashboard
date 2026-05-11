@@ -120,6 +120,12 @@ function inferFromHeader(headerRow: any[]): SupervisorsSheetColumnMap {
   if (targetCol !== null && targetCol === orgCol) targetCol = null;
   if (targetCol !== null && targetCol === parentCol) targetCol = null;
 
+  /** شائع في الشيت: عمود I هدف، J منصب، K مدير — وعنوان الهدف لا يطابق الأنماط */
+  if (targetCol === null && orgCol === 9 && parentCol === 10) {
+    targetCol = 8;
+  }
+  if (targetCol !== null && targetCol === orgCol) targetCol = null;
+
   return {
     code: safe(code, 0),
     name: safe(name, 1),
@@ -182,21 +188,34 @@ function maxRowUsedColumnInSample(rows: any[][], dataStart: number, maxRows: num
   return m;
 }
 
-/** صفوف بدون عنوان: 10 أعمدة مستخدمة قد تكون إما (wide بدون K مملوء) أو compact — نميّز بعمود الهدف الرقمي في الفهرس 8 */
+/**
+ * صفوف بدون عنوان وطول الصف يظهر كـ 10 أعمدة: إما wide (عمود K فارغ) أو compact (I منصب، J مدير).
+ * الافتراضي **wide** حتى يُحفظ الهدف في العمود I حتى لو كان فارغاً لمعظم الصفوف.
+ */
 function inferWideVsCompactLen10(rows: any[][], dataStart: number, maxRows: number): SupervisorsSheetColumnMap {
   const end = Math.min(rows.length, dataStart + maxRows);
   let rowsWith8 = 0;
   let numericLike8 = 0;
+  let orgTextHints = 0;
   for (let i = dataStart; i < end; i++) {
     const r = rows[i] || [];
     const s = normCell(r[8]);
     if (!s) continue;
     rowsWith8++;
     const n = parseNumericSheetCell(s);
-    if (n !== undefined && n >= 0 && n <= 800) numericLike8++;
+    if (n !== undefined && n >= 0 && n <= 800) {
+      numericLike8++;
+      continue;
+    }
+    const low = s.toLowerCase();
+    if (/زون|منطقة|مدير|مشرف|zone|region|تنفيذي|تنظيمي|supervisor/i.test(low) && !/^\s*\d+([.,]\d+)?\s*$/.test(s)) {
+      orgTextHints++;
+    }
   }
-  if (rowsWith8 > 0 && numericLike8 / rowsWith8 >= 0.45) return defaultSupervisorsWideColumnMap();
-  return defaultSupervisorsCompactColumnMap();
+  if (rowsWith8 === 0) return defaultSupervisorsWideColumnMap();
+  if (numericLike8 > 0) return defaultSupervisorsWideColumnMap();
+  if (rowsWith8 >= 4 && orgTextHints / rowsWith8 >= 0.55) return defaultSupervisorsCompactColumnMap();
+  return defaultSupervisorsWideColumnMap();
 }
 
 export function resolveSupervisorsSheetLayout(rows: any[][]): {
