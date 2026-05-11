@@ -9,6 +9,21 @@ function normCell(v: unknown): string {
   return String(v ?? '').trim();
 }
 
+/** أرقام عربية / فارسية → أرقام غربية للتحليل */
+function normalizeWesternDigits(s: string): string {
+  return s
+    .replace(/[\u0660-\u0669]/g, (ch) => String(ch.charCodeAt(0) - 0x0660))
+    .replace(/[\u06F0-\u06F9]/g, (ch) => String(ch.charCodeAt(0) - 0x06f0));
+}
+
+/** قراءة رقم من خلية شيت (ساعات هدف، راتب، إلخ) */
+export function parseNumericSheetCell(raw: unknown): number | undefined {
+  const s = normalizeWesternDigits(normCell(raw).replace(/[%٪]/g, '').replace(/\s/g, '')).replace(/,/g, '.');
+  if (!s) return undefined;
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 function rowCellsLower(row: any[] | undefined): string[] {
   if (!row?.length) return [];
   return row.map((c) => normCell(c).toLowerCase());
@@ -78,7 +93,9 @@ function inferFromHeader(headerRow: any[]): SupervisorsSheetColumnMap {
   const target = findCol(h, [
     (x) => x.includes('تارجت') || x.includes('target'),
     (x) => x.includes('يومي') && (x.includes('هدف') || x.includes('ساع') || x.includes('hour')),
+    (x) => x.includes('هدف') && (x.includes('ساع') || x.includes('ساعة') || x.includes('hour')),
     (x) => x.includes('هدف') && !x.includes('مشرف'),
+    (x) => x.includes('هدف'),
     (x) => x === 'target',
   ]);
 
@@ -152,19 +169,34 @@ export function defaultSupervisorsWideColumnMap(): SupervisorsSheetColumnMap {
   };
 }
 
-function maxRowLengthInSample(rows: any[][], dataStart: number, maxRows: number): number {
+/** أقصى فهرس عمود (1-based طول) يحتوي على قيمة في أي خلية ضمن العينة — لا يعتمد على «آخر عمود غير فارغ» فقط */
+function maxRowUsedColumnInSample(rows: any[][], dataStart: number, maxRows: number): number {
   let m = 0;
   const end = Math.min(rows.length, dataStart + maxRows);
   for (let i = dataStart; i < end; i++) {
     const r = rows[i] || [];
-    for (let j = r.length - 1; j >= 0; j--) {
-      if (r[j] != null && String(r[j]).trim() !== '') {
-        m = Math.max(m, j + 1);
-        break;
-      }
+    for (let j = 0; j < r.length; j++) {
+      if (r[j] != null && String(r[j]).trim() !== '') m = Math.max(m, j + 1);
     }
   }
   return m;
+}
+
+/** صفوف بدون عنوان: 10 أعمدة مستخدمة قد تكون إما (wide بدون K مملوء) أو compact — نميّز بعمود الهدف الرقمي في الفهرس 8 */
+function inferWideVsCompactLen10(rows: any[][], dataStart: number, maxRows: number): SupervisorsSheetColumnMap {
+  const end = Math.min(rows.length, dataStart + maxRows);
+  let rowsWith8 = 0;
+  let numericLike8 = 0;
+  for (let i = dataStart; i < end; i++) {
+    const r = rows[i] || [];
+    const s = normCell(r[8]);
+    if (!s) continue;
+    rowsWith8++;
+    const n = parseNumericSheetCell(s);
+    if (n !== undefined && n >= 0 && n <= 800) numericLike8++;
+  }
+  if (rowsWith8 > 0 && numericLike8 / rowsWith8 >= 0.45) return defaultSupervisorsWideColumnMap();
+  return defaultSupervisorsCompactColumnMap();
 }
 
 export function resolveSupervisorsSheetLayout(rows: any[][]): {
@@ -178,8 +210,9 @@ export function resolveSupervisorsSheetLayout(rows: any[][]): {
     return { dataStartIndex: 1, columns: inferFromHeader(rows[0]) };
   }
   const dataStart = 0;
-  const maxLen = maxRowLengthInSample(rows, dataStart, 40);
+  const maxLen = maxRowUsedColumnInSample(rows, dataStart, 40);
   if (maxLen >= 11) return { dataStartIndex: dataStart, columns: defaultSupervisorsWideColumnMap() };
+  if (maxLen === 10) return { dataStartIndex: dataStart, columns: inferWideVsCompactLen10(rows, dataStart, 40) };
   return { dataStartIndex: dataStart, columns: defaultSupervisorsCompactColumnMap() };
 }
 
@@ -261,7 +294,7 @@ export function parseSupervisorRowFromSheet(row: any[], map: SupervisorsSheetCol
 
   const orgRaw = cell(row, map.orgRole);
   const parentRaw = cell(row, map.parentCode);
-  const targetStr = map.target != null ? cell(row, map.target) : '';
+  const targetRaw = map.target != null ? cell(row, map.target) : '';
 
   const stRaw = cell(row, map.salaryType);
   const salaryType =
@@ -278,7 +311,7 @@ export function parseSupervisorRowFromSheet(row: any[], map: SupervisorsSheetCol
     salaryType,
     salaryAmount: cell(row, map.salaryAmount) ? parseFloat(cell(row, map.salaryAmount)) : undefined,
     commissionFormula: cell(row, map.commissionFormula) || undefined,
-    target: targetStr ? parseInt(targetStr, 10) : undefined,
+    target: parseNumericSheetCell(targetRaw),
     orgRole: parseSupervisorOrgRole(orgRaw),
     parentCode: parentRaw || undefined,
   };

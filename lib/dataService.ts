@@ -1,5 +1,6 @@
 import { getSheetData, findDataInSheet, isSameDay } from './googleSheets';
 import { cache, CACHE_KEYS } from './cache';
+import { parseSupervisorRowFromSheet, resolveSupervisorsSheetLayout } from './supervisorsSheetParser';
 
 export interface Rider {
   code: string;
@@ -320,12 +321,13 @@ export async function getDashboardData(supervisorCode: string): Promise<Dashboar
       getSheetData('المشرفين'),
     ]);
 
-    // Find supervisor's target hours
+    // Find supervisor's target hours (نفس تخطيط أعمدة شيت المشرفين المستخدم في getAllSupervisors)
     let targetHours = 0;
-    for (let i = 1; i < supervisorsData.length; i++) {
-      const row = supervisorsData[i];
-      if (row[0] && row[0].toString().trim() === supervisorCode) {
-        targetHours = parseFloat(row[8]?.toString() || '0') || 0; // Column I (index 8) is target
+    const { dataStartIndex, columns } = resolveSupervisorsSheetLayout(supervisorsData);
+    for (let i = dataStartIndex; i < supervisorsData.length; i++) {
+      const parsed = parseSupervisorRowFromSheet(supervisorsData[i] || [], columns);
+      if (parsed?.code === supervisorCode) {
+        targetHours = parsed.target ?? 0;
         break;
       }
     }
