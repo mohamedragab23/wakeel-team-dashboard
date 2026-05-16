@@ -1,13 +1,19 @@
-import type { Supervisor } from './adminService';
 import { getSupervisorRiders } from './dataService';
 import { getSheetData } from './googleSheets';
-import { getDescendantLeafSupervisorCodes, type SupervisorOrgRole } from './orgHierarchy';
 
 /** Match rider codes across "00123" vs "123" styles (same as performance filter). */
 export function normalizeRiderCodeForPerformance(code: any): string {
   const s = (code ?? '').toString().trim();
   if (!s) return '';
   return s.replace(/^0+/, '') || '0';
+}
+
+/** تطبيع كود المشرف لمطابقة شيت طلبات الإقالة مع كود الجلسة */
+export function normalizeSupervisorCodeForMatch(code: any): string {
+  return String(code ?? '')
+    .replace(/\uFEFF/g, '')
+    .trim()
+    .replace(/^0+(?=\d)/, '');
 }
 
 /** غياب في شيت البيانات اليومية — لا تُحسب الساعات كعمل فعلي */
@@ -139,13 +145,48 @@ export type SupervisorDailyAggRecord = {
   debt: number;
 };
 
+export type SupervisorRiderAttribution = {
+  riderCodesExact: Set<string>;
+  riderCodesNormalized: Set<string>;
+  inclusiveEndByRider: Map<string, Date>;
+  terminatedCodes: Set<string>;
+  riderNamesByCode: Map<string, string>;
+  riders: Awaited<ReturnType<typeof getSupervisorRiders>>;
+};
+
+/**
+ * مناديب يُحتسب أداؤهم (طلبات/ساعات) لمشرف: المعيّنون حالياً + المُقالون بموافقة على طلب إقالة عند هذا المشرف.
+ */
+export async function buildSupervisorRiderAttribution(
+  supervisorCode: string,
+  options?: { useCache?: boolean; riders?: Awaited<ReturnType<typeof getSupervisorRiders>> }
+): Promise<SupervisorRiderAttribution> {
+  const supTrim = (supervisorCode ?? '').toString().trim();
+  const useCache = options?.useCache ?? false;
+  const riders = options?.riders ?? (await getSupervisorRiders(supTrim, useCache));
+  const { codes: terminatedCodes, inclusiveEndByRider, riderNamesByCode } =
+    await getApprovedTerminationAttributionForSupervisor(supTrim);
+
+  const riderCodesExact = new Set(riders.map((r) => (r.code ?? '').toString().trim()).filter(Boolean));
+  const riderCodesNormalized = new Set(riders.map((r) => normalizeRiderCodeForPerformance(r.code)));
+  for (const code of terminatedCodes) {
+    riderCodesExact.add(code);
+    riderCodesNormalized.add(normalizeRiderCodeForPerformance(code));
+  }
+
+  return {
+    riderCodesExact,
+    riderCodesNormalized,
+    inclusiveEndByRider,
+    terminatedCodes,
+    riderNamesByCode,
+    riders,
+  };
+}
+
 /**
  * Single pass over البيانات اليومية for a supervisor's riders (+ approved terminations).
  * Use for salary calculation to avoid O(riders × rows) sheet scans.
- *
- * **الطلبات (orders):** تُجمع من عمود الطلبات لكل يوم/مندوب في الفترة، لكل المناديب الحاليين تحت المشرف
- * **ومناديب لهم إقالة معتمدة** في `طلبات_الإقالة` عند نفس المشرف — حتى لو نُقل المندوب أو حُذف من شيت المناديب،
- * ما دامت صفوف **البيانات اليومية** ضمن الفترة و**لا تتجاوز** `inclusiveEndByRider` (آخر يوم شامل لصالح هذا المشرف).
  */
 export async function aggregateSupervisorDailyPerformance(
   supervisorCode: string,
@@ -158,18 +199,29 @@ export async function aggregateSupervisorDailyPerformance(
   totalHours: number;
   byRider: Map<string, { orders: number; hours: number }>;
   byDate: Map<string, { orders: number; hours: number }>;
+  /** مناديب لهم طلبات/ساعات في الفترة (نشطون + مُقالون ضمن نطاق الإقالة) */
+  attributedRiderCount: number;
+  /** معيّنون حالياً في شيت المناديب */
+  activeAssignedCount: number;
+  /** أكواد إقالة معتمدة غير موجودة بين المعيّنين الحاليين */
+  terminatedOnlyCount: number;
+  riderNamesByCode: Map<string, string>;
 }> {
   const supTrim = (supervisorCode ?? '').toString().trim();
   const useCache = options?.useCache ?? false;
-  const riders =
-    options?.riders ?? (await getSupervisorRiders(supTrim, useCache));
-  const { codes: terminatedCodes, inclusiveEndByRider } =
-    await getApprovedTerminationAttributionForSupervisor(supTrim);
-  const riderCodesExact = new Set(riders.map((r) => (r.code ?? '').toString().trim()).filter(Boolean));
-  const riderCodesNormalized = new Set(riders.map((r) => normalizeRiderCodeForPerformance(r.code)));
+  const {
+    riderCodesExact,
+    riderCodesNormalized,
+    inclusiveEndByRider,
+    terminatedCodes,
+    riders,
+    riderNamesByCode,
+  } = await buildSupervisorRiderAttribution(supTrim, { useCache, riders: options?.riders });
+
+  let terminatedOnlyCount = 0;
+  const activeNorm = new Set(riders.map((r) => normalizeRiderCodeForPerformance(r.code)));
   for (const code of terminatedCodes) {
-    riderCodesExact.add(code);
-    riderCodesNormalized.add(normalizeRiderCodeForPerformance(code));
+    if (!activeNorm.has(normalizeRiderCodeForPerformance(code))) terminatedOnlyCount++;
   }
 
   const records: SupervisorDailyAggRecord[] = [];
@@ -179,7 +231,17 @@ export async function aggregateSupervisorDailyPerformance(
   let totalHours = 0;
 
   if (riderCodesExact.size === 0) {
-    return { records, totalOrders: 0, totalHours: 0, byRider, byDate };
+    return {
+      records,
+      totalOrders: 0,
+      totalHours: 0,
+      byRider,
+      byDate,
+      attributedRiderCount: 0,
+      activeAssignedCount: riders.length,
+      terminatedOnlyCount: 0,
+      riderNamesByCode,
+    };
   }
 
   const allData = await getSheetData('البيانات اليومية', useCache);
@@ -248,79 +310,17 @@ export async function aggregateSupervisorDailyPerformance(
     byDate.set(rec.date, aggD);
   }
 
-  return { records, totalOrders, totalHours, byRider, byDate };
-}
-
-export type SupervisorDailyAggBundle = Awaited<ReturnType<typeof aggregateSupervisorDailyPerformance>>;
-
-/** دمج نتائج عدة مشرفين (مثلاً تجميع أداء مدير زون من مشرفيه). */
-export function mergeSupervisorDailyAggBundles(parts: SupervisorDailyAggBundle[]): SupervisorDailyAggBundle {
-  const records: SupervisorDailyAggRecord[] = [];
-  const byRider = new Map<string, { orders: number; hours: number }>();
-  const byDate = new Map<string, { orders: number; hours: number }>();
-  let totalOrders = 0;
-  let totalHours = 0;
-
-  for (const p of parts) {
-    totalOrders += p.totalOrders;
-    totalHours += p.totalHours;
-    records.push(...p.records);
-    for (const [k, v] of p.byRider) {
-      const cur = byRider.get(k) || { orders: 0, hours: 0 };
-      cur.orders += v.orders;
-      cur.hours += v.hours;
-      byRider.set(k, cur);
-    }
-    for (const [k, v] of p.byDate) {
-      const cur = byDate.get(k) || { orders: 0, hours: 0 };
-      cur.orders += v.orders;
-      cur.hours += v.hours;
-      byDate.set(k, cur);
-    }
-  }
-
-  return { records, totalOrders, totalHours, byRider, byDate };
-}
-
-/**
- * أداء صف في شيت المشرفين: مشرف مباشر من مناديبه، أو مدير زون/منطقة من مجموع أداء مشرفيه.
- */
-export async function aggregatePerformanceForOrgRow(
-  sup: Pick<Supervisor, 'code' | 'orgRole'>,
-  allSupervisors: Supervisor[],
-  startDate: Date,
-  endDate: Date,
-  allowedSupervisorCodes?: Set<string> | null
-): Promise<{ agg: SupervisorDailyAggBundle; riderCount: number }> {
-  const code = String(sup.code ?? '').trim();
-  const role: SupervisorOrgRole = sup.orgRole ?? 'supervisor';
-
-  if (role === 'supervisor') {
-    const riders = await getSupervisorRiders(code, false);
-    const agg = await aggregateSupervisorDailyPerformance(code, startDate, endDate, {
-      riders,
-      useCache: false,
-    });
-    return { agg, riderCount: riders.length };
-  }
-
-  let leafCodes = getDescendantLeafSupervisorCodes(allSupervisors, code);
-  if (allowedSupervisorCodes) {
-    leafCodes = leafCodes.filter((c) => allowedSupervisorCodes.has(c));
-  }
-  const parts: SupervisorDailyAggBundle[] = [];
-  let riderCount = 0;
-  for (const leaf of leafCodes) {
-    const riders = await getSupervisorRiders(leaf, false);
-    riderCount += riders.length;
-    parts.push(
-      await aggregateSupervisorDailyPerformance(leaf, startDate, endDate, {
-        riders,
-        useCache: false,
-      })
-    );
-  }
-  return { agg: mergeSupervisorDailyAggBundles(parts), riderCount };
+  return {
+    records,
+    totalOrders,
+    totalHours,
+    byRider,
+    byDate,
+    attributedRiderCount: byRider.size,
+    activeAssignedCount: riders.length,
+    terminatedOnlyCount,
+    riderNamesByCode,
+  };
 }
 
 /** آخر يوم (منتصف الليل المحلي) يُحتسب فيه أداء المندوب لهذا المشرف بعد إقالة معتمدة. */
@@ -332,26 +332,30 @@ function mergeInclusiveEndDay(existing: Date | undefined, candidate: Date): Date
 }
 
 /**
- * مناديب لهم إقالة معتمدة عند هذا المشرف — يُحسب أوردراتهم وساعاتهم في الفترة التي يحددها المشرف، بما فيهم من أُعيد تعيينهم لمشرف آخر.
- * إن وُجد تاريخ موافقة (أو تاريخ طلب) يُستبعد من الاحتساب لصالح هذا المشرف ما بعد ذلك اليوم (ذلك اليوم **شامل**).
- * أعمدة طلبات_الإقالة: 0 كود المشرف، 2 كود المندوب، 5 الحالة، 6 تاريخ الطلب، 7 تاريخ الموافقة.
+ * مناديب لهم إقالة معتمدة عند هذا المشرف — تُحسب طلباتهم/ساعاتهم ضمن فترة التقرير حتى آخر يوم إقالة (شامل).
+ * بعد تاريخ الموافقة/الطلب لا تُحسب لصالح هذا المشرف (حتى لو نُقل المندوب لمشرف آخر).
+ * أعمدة طلبات_الإقالة: 0 كود المشرف، 2 كود المندوب، 3 اسم المندوب، 5 الحالة، 6 تاريخ الطلب، 7 تاريخ الموافقة.
  */
 export async function getApprovedTerminationAttributionForSupervisor(supervisorCode: string): Promise<{
   codes: Set<string>;
   /** مفتاح: كود المندوب كما في الشيت أو بعد التطبيع؛ القيمة: آخر يوم (شامل) يُحتسب للمشرف */
   inclusiveEndByRider: Map<string, Date>;
+  riderNamesByCode: Map<string, string>;
 }> {
   const codes = new Set<string>();
   const inclusiveEndByRider = new Map<string, Date>();
+  const riderNamesByCode = new Map<string, string>();
   const supTrim = (supervisorCode ?? '').toString().trim();
-  if (!supTrim) return { codes, inclusiveEndByRider };
+  const supNorm = normalizeSupervisorCodeForMatch(supTrim);
+  if (!supTrim) return { codes, inclusiveEndByRider, riderNamesByCode };
 
   try {
     const data = await getSheetData('طلبات_الإقالة');
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       if (!row || row.length < 6) continue;
-      if (row[0]?.toString().trim() !== supTrim) continue;
+      const rowSup = row[0]?.toString().trim() ?? '';
+      if (normalizeSupervisorCodeForMatch(rowSup) !== supNorm) continue;
       if (row[5]?.toString().trim().toLowerCase() !== 'approved') continue;
       const rc = row[2]?.toString().trim();
       if (!rc) continue;
@@ -359,22 +363,22 @@ export async function getApprovedTerminationAttributionForSupervisor(supervisorC
       codes.add(rc);
       const norm = normalizeRiderCodeForPerformance(rc);
 
-      /** تفضيل تاريخ الموافقة؛ إن تعذّر التحليل نستخدم تاريخ الطلب حتى لا يُفقد احتساب أوردرات المندوب حتى يوم الإقالة */
-      let endDay: Date | null = null;
-      const approvalParsed = parseDailySheetDate(row[7]);
-      if (approvalParsed && !isNaN(approvalParsed.getTime())) {
-        endDay = new Date(
-          approvalParsed.getFullYear(),
-          approvalParsed.getMonth(),
-          approvalParsed.getDate()
-        );
-      } else {
-        const reqParsed = parseDailySheetDate(row[6]);
-        if (reqParsed && !isNaN(reqParsed.getTime())) {
-          endDay = new Date(reqParsed.getFullYear(), reqParsed.getMonth(), reqParsed.getDate());
-        }
+      const riderName = row[3]?.toString().trim();
+      if (riderName) {
+        riderNamesByCode.set(rc, riderName);
+        riderNamesByCode.set(norm, riderName);
       }
-      if (endDay) {
+
+      const parsedApproval = parseDailySheetDate(row[7]);
+      const parsedRequest = parseDailySheetDate(row[6]);
+      const parsed =
+        parsedApproval && !isNaN(parsedApproval.getTime())
+          ? parsedApproval
+          : parsedRequest && !isNaN(parsedRequest.getTime())
+            ? parsedRequest
+            : null;
+      if (parsed) {
+        const endDay = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
         inclusiveEndByRider.set(rc, mergeInclusiveEndDay(inclusiveEndByRider.get(rc), endDay));
         inclusiveEndByRider.set(norm, mergeInclusiveEndDay(inclusiveEndByRider.get(norm), endDay));
       }
@@ -382,7 +386,7 @@ export async function getApprovedTerminationAttributionForSupervisor(supervisorC
   } catch {
     // sheet missing
   }
-  return { codes, inclusiveEndByRider };
+  return { codes, inclusiveEndByRider, riderNamesByCode };
 }
 
 /**
@@ -472,16 +476,10 @@ export async function getSupervisorPerformanceFiltered(
 
     if (!allRidersMode) {
       const supCode = (supervisorCode ?? '').toString().trim();
-      const riders = await getSupervisorRiders(supCode);
-      const { codes: terminatedCodes, inclusiveEndByRider: termEnds } =
-        await getApprovedTerminationAttributionForSupervisor(supCode);
-      inclusiveEndByRider = termEnds;
-      riderCodesExact = new Set(riders.map((r) => (r.code ?? '').toString().trim()).filter(Boolean));
-      riderCodesNormalized = new Set(riders.map((r) => normalizeRiderCodeForPerformance(r.code)));
-      for (const code of terminatedCodes) {
-        riderCodesExact.add(code);
-        riderCodesNormalized.add(normalizeRiderCodeForPerformance(code));
-      }
+      const attr = await buildSupervisorRiderAttribution(supCode);
+      inclusiveEndByRider = attr.inclusiveEndByRider;
+      riderCodesExact = attr.riderCodesExact;
+      riderCodesNormalized = attr.riderCodesNormalized;
 
       if (riderCodesExact.size === 0) {
         return [];

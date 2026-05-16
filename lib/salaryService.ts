@@ -682,9 +682,10 @@ export async function calculateSupervisorSalary(
     }[] = [];
     for (const [code, t] of agg.byRider.entries()) {
       const rider = riderByCode.get(code);
+      const termName = agg.riderNamesByCode.get(code);
       riderPerformance.push({
         code,
-        name: rider?.name ?? code,
+        name: rider?.name ?? termName ?? code,
         totalOrders: t.orders,
         totalHours: t.hours,
       });
