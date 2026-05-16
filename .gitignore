@@ -65,3 +65,5 @@ next-env.d.ts
 Thumbs.db
 .DS_Store
 
+
+.vercel

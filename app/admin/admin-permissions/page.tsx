@@ -14,6 +14,48 @@ import {
   LIMITED_PRESET_REGIONAL_MANAGER,
   LIMITED_PRESET_ZONE_MANAGER,
 } from '@/lib/adminOrgPresets';
+import { buildDescendantSupervisorCodesMulti } from '@/lib/orgHierarchy';
+
+type SupervisorPickerRow = {
+  code: string;
+  name: string;
+  region?: string;
+  orgRole?: string;
+  parentCode?: string;
+};
+
+function orgRoleBadge(orgRole?: string): string {
+  if (orgRole === 'zone_manager') return 'مدير زون';
+  if (orgRole === 'regional_manager') return 'مدير منطقة';
+  return 'مشرف تشغيلي';
+}
+
+/** من تحت الجذور مباشرة أو عبر parentCode (مشرفون تشغيليون فقط) */
+function listOperationalSupervisorsUnderRoots(
+  all: SupervisorPickerRow[],
+  rootCodes: string[]
+): SupervisorPickerRow[] {
+  if (!rootCodes.length) return [];
+  const tree = buildDescendantSupervisorCodesMulti(
+    all.map((s) => ({
+      code: s.code,
+      name: s.name,
+      region: s.region ?? '',
+      email: '',
+      password: '',
+      parentCode: s.parentCode,
+      orgRole: (s.orgRole as 'supervisor' | 'zone_manager' | 'regional_manager') || 'supervisor',
+    })),
+    rootCodes
+  );
+  const roots = new Set(rootCodes.map((c) => c.trim()));
+  return all.filter((s) => {
+    const c = String(s.code ?? '').trim();
+    if (!tree.has(c) || roots.has(c)) return false;
+    const role = s.orgRole ?? 'supervisor';
+    return role === 'supervisor';
+  });
+}
 
 export default function AdminPermissionsPage() {
   const queryClient = useQueryClient();
@@ -87,7 +129,7 @@ export default function AdminPermissionsPage() {
       });
       const j = await res.json();
       if (!j.success) return [];
-      return j.data as Array<{ code: string; name: string; region?: string; orgRole?: string }>;
+      return j.data as SupervisorPickerRow[];
     },
     enabled: !!canGrant,
   });
@@ -212,14 +254,24 @@ export default function AdminPermissionsPage() {
     onError: (e: any) => setMsg({ type: 'err', text: e?.message || 'فشل الإنشاء' }),
   });
 
+  const isRegionalPosition = adminPositionSheet.includes('منطقة');
+  const isZonePosition = adminPositionSheet.includes('زون');
+
+  /** جذور الشجرة فقط — ليست قائمة المشرفين التشغيليين */
   const linkPickerChoices = supervisorChoices.filter((s) => {
-    if (adminPositionSheet.includes('منطقة')) {
-      return s.orgRole === 'zone_manager';
-    }
-    if (adminPositionSheet.includes('زون')) {
-      return s.orgRole === 'zone_manager' || s.orgRole === 'regional_manager' || !s.orgRole;
-    }
+    if (isRegionalPosition) return s.orgRole === 'zone_manager';
+    if (isZonePosition) return s.orgRole === 'zone_manager';
     return true;
+  });
+
+  const operationalUnderRoots = listOperationalSupervisorsUnderRoots(
+    supervisorChoices,
+    Array.from(linkedSupervisorCodes)
+  );
+
+  const operationalNotUnderRoots = supervisorChoices.filter((s) => {
+    if ((s.orgRole ?? 'supervisor') !== 'supervisor') return false;
+    return !operationalUnderRoots.some((x) => x.code === s.code);
   });
 
   if (!canGrant) {
@@ -523,11 +575,37 @@ export default function AdminPermissionsPage() {
                 {mode === 'limited' && (
                   <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.2)] p-3 sm:p-4 space-y-3">
                     <p className="text-sm font-medium">الهرمية (تُزامَن مع الشيت تلقائياً)</p>
-                    <p className="text-xs text-[rgba(234,240,255,0.55)] leading-relaxed">
-                      مدير المنطقة يختار أكواد <strong className="text-[rgba(234,240,255,0.85)]">مديري الزون</strong>.
-                      مدير الزون يختار صفه أو يُنشأ تلقائياً. اربط المشرفين التشغيليين بمديريهم من صفحة{' '}
-                      <strong className="text-[rgba(234,240,255,0.85)]">إدارة المشرفين</strong>.
-                    </p>
+                    <div className="text-xs text-[rgba(234,240,255,0.72)] leading-relaxed space-y-2 rounded-lg border border-cyan-500/25 bg-cyan-500/5 p-3">
+                      <p>
+                        <strong className="text-cyan-100">مهم:</strong> القائمة أدناه لـ{' '}
+                        <strong>جذر الشجرة</strong> (صف مدير زون)، وليست لاختيار المشرفين التشغيليين.
+                      </p>
+                      {isRegionalPosition ? (
+                        <ol className="list-decimal list-inside space-y-1 ps-1">
+                          <li>اختر كل أكواد <strong>مديري الزون</strong> التابعين لمدير المنطقة.</li>
+                          <li>
+                            في{' '}
+                            <a href="/admin/supervisors" className="text-cyan-300 underline">
+                              إدارة المشرفين
+                            </a>
+                            : لكل مشرف تشغيلي — المدير المباشر = كود مدير الزون.
+                          </li>
+                        </ol>
+                      ) : isZonePosition ? (
+                        <ol className="list-decimal list-inside space-y-1 ps-1">
+                          <li>جذر واحد فقط: كود مدير الزون (يفضّل «استخدم كود الدخول كجذر»).</li>
+                          <li>
+                            المشرفون التشغيليون يُربطون من{' '}
+                            <a href="/admin/supervisors" className="text-cyan-300 underline">
+                              إدارة المشرفين
+                            </a>{' '}
+                            — المنصب = مشرف تشغيلي، المدير المباشر = كود مدير الزون.
+                          </li>
+                        </ol>
+                      ) : (
+                        <p>اختر المنصب أولاً.</p>
+                      )}
+                    </div>
                     <div>
                       <label className="block text-sm mb-1">منصب المستخدم</label>
                       <select
@@ -552,6 +630,9 @@ export default function AdminPermissionsPage() {
                                   .filter(Boolean) as AdminFeatureKey[]
                               )
                             );
+                            setUseAdminCodeAsLink(true);
+                            const c = (showCreateForm ? newAdmin.code : selectedCode).trim();
+                            if (c) setLinkedSupervisorCodes(new Set([c]));
                           }
                         }}
                       >
@@ -564,7 +645,14 @@ export default function AdminPermissionsPage() {
                       <input
                         type="checkbox"
                         checked={useAdminCodeAsLink}
-                        onChange={(e) => setUseAdminCodeAsLink(e.target.checked)}
+                        onChange={(e) => {
+                          const on = e.target.checked;
+                          setUseAdminCodeAsLink(on);
+                          if (on && isZonePosition) {
+                            const c = (showCreateForm ? newAdmin.code : selectedCode).trim();
+                            if (c) setLinkedSupervisorCodes(new Set([c]));
+                          }
+                        }}
                       />
                       استخدم كود الدخول كجذر في المشرفين (يُنشأ الصف تلقائياً إن لم يوجد)
                     </label>
@@ -577,7 +665,27 @@ export default function AdminPermissionsPage() {
                       إنشاء/تحديث صفوف المشرفين المربوطة تلقائياً عند الحفظ
                     </label>
                     <div>
-                      <label className="block text-sm mb-1">جذور الشجرة في «المشرفين» — متعدد</label>
+                      <label className="block text-sm mb-1">
+                        {isRegionalPosition
+                          ? 'جذور الشجرة: أكواد مديري الزون (متعدد)'
+                          : isZonePosition
+                            ? 'جذر الشجرة: صف مدير الزون (كود واحد)'
+                            : 'جذور الشجرة في «المشرفين»'}
+                      </label>
+                      {isZonePosition && linkedSupervisorCodes.size > 1 ? (
+                        <p className="text-xs text-amber-200/90 mb-2">
+                          مدير الزون يجب أن يكون له جذر واحد فقط. امسح الزائد واترك كود مدير الزون.
+                        </p>
+                      ) : null}
+                      {linkPickerChoices.length === 0 ? (
+                        <p className="text-xs text-amber-200/90 mb-2 rounded border border-amber-400/30 p-2">
+                          لا يوجد صف «مدير زون» في شيت المشرفين. أنشئه من{' '}
+                          <a href="/admin/supervisors" className="underline text-amber-100">
+                            إدارة المشرفين
+                          </a>{' '}
+                          (المنصب = مدير زون) أو فعّل إنشاء الصف تلقائياً عند الحفظ.
+                        </p>
+                      ) : null}
                       <div className="flex flex-wrap gap-2 mb-2">
                         <button
                           type="button"
@@ -605,6 +713,9 @@ export default function AdminPermissionsPage() {
                               checked={linkedSupervisorCodes.has(s.code)}
                               onChange={() => {
                                 setLinkedSupervisorCodes((prev) => {
+                                  if (isZonePosition) {
+                                    return new Set([s.code]);
+                                  }
                                   const n = new Set(prev);
                                   if (n.has(s.code)) n.delete(s.code);
                                   else n.add(s.code);
@@ -613,12 +724,54 @@ export default function AdminPermissionsPage() {
                               }}
                             />
                             <span>
-                              {s.code} — {s.name || ''}
+                              {s.code} — {s.name || ''}{' '}
+                              <span className="text-[rgba(234,240,255,0.45)]">
+                                [{orgRoleBadge(s.orgRole)}]
+                              </span>
                               {s.region ? ` (${s.region})` : ''}
                             </span>
                           </label>
                         ))}
                       </div>
+
+                      {linkedSupervisorCodes.size > 0 && (
+                        <div className="mt-3 rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(0,0,0,0.15)] p-3 space-y-2">
+                          <p className="text-xs font-medium text-emerald-200/90">
+                            مشرفون تشغيليون تحت الجذر الحالي ({operationalUnderRoots.length})
+                          </p>
+                          {operationalUnderRoots.length === 0 ? (
+                            <p className="text-xs text-[rgba(234,240,255,0.55)]">
+                              لا يوجد بعد — افتح إدارة المشرفين وعيّن «المدير المباشر» لكل مشرف = كود الجذر أعلاه.
+                            </p>
+                          ) : (
+                            <ul className="text-xs text-[rgba(234,240,255,0.7)] max-h-32 overflow-y-auto space-y-0.5">
+                              {operationalUnderRoots.map((s) => (
+                                <li key={s.code}>
+                                  {s.code} — {s.name}
+                                  {s.parentCode ? ` (مدير: ${s.parentCode})` : ''}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {operationalNotUnderRoots.length > 0 && (
+                            <details className="text-xs text-[rgba(234,240,255,0.5)]">
+                              <summary className="cursor-pointer">
+                                مشرفون غير مربوطين بهذا الجذر ({operationalNotUnderRoots.length}) — يحتاجون
+                                تعديل في إدارة المشرفين
+                              </summary>
+                              <ul className="mt-1 max-h-24 overflow-y-auto space-y-0.5 ps-2">
+                                {operationalNotUnderRoots.slice(0, 30).map((s) => (
+                                  <li key={s.code}>
+                                    {s.code} — {s.name}
+                                    {s.parentCode ? ` (مدير حالي: ${s.parentCode})` : ' (بدون مدير مباشر)'}
+                                  </li>
+                                ))}
+                              </ul>
+                            </details>
+                          )}
+                        </div>
+                      )}
+
                       {linkedSupervisorCodes.size > 0 ? (
                         <p className="text-xs text-[rgba(234,240,255,0.55)] mt-2">
                           سيُحفظ: {Array.from(linkedSupervisorCodes).join(' | ')}
