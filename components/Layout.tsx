@@ -74,7 +74,7 @@ export default function Layout({ children }: LayoutProps) {
         icon: d.icon,
       }));
       if (isGrantingAdmin(user)) {
-        base.push({ href: '/admin/admin-permissions', label: 'صلاحيات المستخدمين', icon: '🔐' });
+        base.push({ href: '/admin/admin-permissions', label: 'المستخدمون والهرمية', icon: '🔐' });
       }
       return base;
     } else {

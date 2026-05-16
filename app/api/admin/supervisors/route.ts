@@ -4,6 +4,7 @@ import { getAllSupervisors, addSupervisor, updateSupervisor, deleteSupervisor } 
 import { assertAdminApiAccess, assertAdminSupervisorsReadAccess } from '@/lib/adminFeatureAccess';
 import { filterSupervisorsForAdminDataScope } from '@/lib/adminZoneScope';
 import { redactSupervisorRowForViewer } from '@/lib/adminSalaryRedaction';
+import { ensureSupervisorsOrgColumns } from '@/lib/supervisorsSheetSetup';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,6 +66,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     console.log(`[POST /api/admin/supervisors] Adding supervisor:`, body);
+    await ensureSupervisorsOrgColumns();
     const result = await addSupervisor(body);
     console.log(`[POST /api/admin/supervisors] Result:`, result);
 
@@ -106,6 +108,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'كود المشرف مطلوب' }, { status: 400 });
     }
 
+    await ensureSupervisorsOrgColumns();
     const result = await updateSupervisor(code, updates);
 
     if (result.success) {

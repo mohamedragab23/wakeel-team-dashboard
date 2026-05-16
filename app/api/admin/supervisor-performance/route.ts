@@ -6,10 +6,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { getAllSupervisors } from '@/lib/adminService';
-import { getSupervisorRiders } from '@/lib/dataService';
-import { aggregateSupervisorDailyPerformance } from '@/lib/dataFilter';
+import { aggregatePerformanceForOrgRow } from '@/lib/dataFilter';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
+import { shouldIncludeInSupervisorPerformanceReport } from '@/lib/orgHierarchy';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +34,8 @@ export async function GET(request: NextRequest) {
       role?: string;
       permissions?: string;
       dataZone?: string;
+      adminOrgRole?: 'full' | 'regional' | 'zone';
+      linkedSupervisorCode?: string;
     } | null;
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
@@ -62,11 +64,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'تاريخ البداية يجب أن يكون قبل تاريخ النهاية' }, { status: 400 });
     }
 
-    let supervisors = await getAllSupervisors(false);
+    const allSupervisors = await getAllSupervisors(false);
+    let supervisors = allSupervisors;
     const allowed = await getSupervisorCodesInAdminDataScope(decoded);
     if (allowed) {
       supervisors = supervisors.filter((s) => allowed.has(String(s.code ?? '').trim()));
     }
+
+    const viewerOrgRole = decoded.adminOrgRole;
+    supervisors = supervisors.filter((s) =>
+      shouldIncludeInSupervisorPerformanceReport(viewerOrgRole, s.orgRole)
+    );
 
     const results: Array<{
       code: string;
@@ -89,12 +97,13 @@ export async function GET(request: NextRequest) {
     let grandAcceptanceCount = 0;
 
     for (const sup of supervisors) {
-      const code = String(sup.code ?? '').trim();
-      const riders = await getSupervisorRiders(code, false);
-      const agg = await aggregateSupervisorDailyPerformance(code, startDate, endDate, {
-        riders,
-        useCache: false,
-      });
+      const { agg, riderCount } = await aggregatePerformanceForOrgRow(
+        sup,
+        allSupervisors,
+        startDate,
+        endDate,
+        allowed
+      );
 
       let totalOrders = agg.totalOrders;
       let totalHours = agg.totalHours;
@@ -116,7 +125,10 @@ export async function GET(request: NextRequest) {
       grandAcceptanceCount += acceptanceCount;
 
       const avgAcceptance = acceptanceCount > 0 ? Math.round((acceptanceSum / acceptanceCount) * 100) / 100 : 0;
-      const ordersPerRider = riders.length > 0 ? Math.round((totalOrders / riders.length) * 100) / 100 : 0;
+      const ridersWithActivity = agg.byRider.size;
+      const ordersPerRiderDen =
+        ridersWithActivity > 0 ? ridersWithActivity : Math.max(1, riderCount);
+      const ordersPerRider = Math.round((totalOrders / ordersPerRiderDen) * 100) / 100;
       const days = diffDaysInclusive(startDate, endDate);
       const targetDaily = Number.isFinite(Number(sup.target)) ? Number(sup.target) : 0;
       const targetTotal = days > 0 && targetDaily > 0 ? targetDaily * days : 0;
@@ -127,7 +139,7 @@ export async function GET(request: NextRequest) {
         code: sup.code,
         name: sup.name || sup.code,
         region: sup.region || '',
-        subordinate_count: riders.length,
+        subordinate_count: riderCount,
         total_orders: totalOrders,
         total_hours: Math.round(totalHours * 100) / 100,
         avg_acceptance: avgAcceptance,

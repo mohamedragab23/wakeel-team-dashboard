@@ -10,6 +10,7 @@ import {
   serializeAdminAllowedZones,
   type ZoneOption,
 } from '@/lib/zones';
+import type { SupervisorOrgRole } from '@/lib/orgHierarchy';
 
 interface Supervisor {
   code: string;
@@ -20,7 +21,19 @@ interface Supervisor {
   salaryType?: 'fixed' | 'commission_type1' | 'commission_type2';
   salaryAmount?: number;
   commissionFormula?: string;
-  target?: number; // Monthly target for supervisor
+  target?: number;
+  orgRole?: SupervisorOrgRole;
+  parentCode?: string;
+}
+
+const ORG_ROLE_OPTIONS: { value: SupervisorOrgRole; label: string }[] = [
+  { value: 'supervisor', label: 'مشرف تشغيلي' },
+  { value: 'zone_manager', label: 'مدير زون' },
+  { value: 'regional_manager', label: 'مدير منطقة' },
+];
+
+function orgRoleLabel(role?: SupervisorOrgRole): string {
+  return ORG_ROLE_OPTIONS.find((o) => o.value === (role ?? 'supervisor'))?.label ?? 'مشرف تشغيلي';
 }
 
 export default function AdminSupervisorsPage() {
@@ -36,6 +49,8 @@ export default function AdminSupervisorsPage() {
     password: '',
     salaryType: 'commission_type1',
     target: 0,
+    orgRole: 'supervisor',
+    parentCode: '',
   });
 
   const queryClient = useQueryClient();
@@ -103,7 +118,17 @@ export default function AdminSupervisorsPage() {
       console.log('[AdminSupervisorsPage] Refetched supervisors:', freshData.data?.length || 0);
       setShowAddModal(false);
       setSelectedZones([]);
-      setFormData({ code: '', name: '', region: '', email: '', password: '', salaryType: 'commission_type1', target: 0 });
+      setFormData({
+        code: '',
+        name: '',
+        region: '',
+        email: '',
+        password: '',
+        salaryType: 'commission_type1',
+        target: 0,
+        orgRole: 'supervisor',
+        parentCode: '',
+      });
       alert('✅ تم إضافة المشرف بنجاح');
     },
     onError: (error: any) => {
@@ -137,7 +162,17 @@ export default function AdminSupervisorsPage() {
       await refetch(); // Force refetch
       setEditingSupervisor(null);
       setSelectedZones([]);
-      setFormData({ code: '', name: '', region: '', email: '', password: '', salaryType: 'commission_type1', target: 0 });
+      setFormData({
+        code: '',
+        name: '',
+        region: '',
+        email: '',
+        password: '',
+        salaryType: 'commission_type1',
+        target: 0,
+        orgRole: 'supervisor',
+        parentCode: '',
+      });
       alert('✅ تم تحديث المشرف بنجاح');
     },
     onError: (error: any) => {
@@ -196,10 +231,22 @@ export default function AdminSupervisorsPage() {
 
   const handleEdit = (supervisor: Supervisor) => {
     setEditingSupervisor(supervisor);
-    setFormData(supervisor);
+    setFormData({
+      ...supervisor,
+      orgRole: supervisor.orgRole ?? 'supervisor',
+      parentCode: supervisor.parentCode ?? '',
+    });
     setSelectedZones(parseAdminAllowedZonesList(supervisor.region));
     setShowAddModal(true);
   };
+
+  const parentManagerOptions = supervisors.filter((s: Supervisor) => {
+    const role = s.orgRole ?? 'supervisor';
+    const mine = formData.orgRole ?? 'supervisor';
+    if (mine === 'supervisor') return role === 'zone_manager' || role === 'regional_manager';
+    if (mine === 'zone_manager') return role === 'regional_manager';
+    return false;
+  });
 
   if (isLoading) {
     return (
@@ -217,13 +264,25 @@ export default function AdminSupervisorsPage() {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-semibold text-[#EAF0FF] mb-2">إدارة المشرفين</h1>
-            <p className="text-[rgba(234,240,255,0.70)]">إضافة وتعديل وحذف المشرفين</p>
+            <p className="text-[rgba(234,240,255,0.70)]">
+              إضافة وتعديل الهرمية (مشرف / مدير زون / مدير منطقة) — يُحفظ تلقائياً في الشيت
+            </p>
           </div>
           <button
             onClick={() => {
               setEditingSupervisor(null);
               setSelectedZones([]);
-              setFormData({ code: '', name: '', region: '', email: '', password: '', salaryType: 'commission_type1', target: 0 });
+              setFormData({
+                code: '',
+                name: '',
+                region: '',
+                email: '',
+                password: '',
+                salaryType: 'commission_type1',
+                target: 0,
+                orgRole: 'supervisor',
+                parentCode: '',
+              });
               setShowAddModal(true);
             }}
             className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
@@ -240,6 +299,8 @@ export default function AdminSupervisorsPage() {
                   <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الكود</th>
                   <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الاسم</th>
                   <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الزونات</th>
+                  <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">المنصب</th>
+                  <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">المدير المباشر</th>
                   <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">البريد</th>
                   <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">نوع الراتب</th>
                   <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الهدف</th>
@@ -249,7 +310,7 @@ export default function AdminSupervisorsPage() {
               <tbody className="divide-y divide-gray-200">
                 {supervisors.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-gray-500">
+                    <td colSpan={9} className="py-12 text-center text-gray-500">
                       لا توجد مشرفين
                     </td>
                   </tr>
@@ -267,6 +328,8 @@ export default function AdminSupervisorsPage() {
                           return supervisor.region?.trim() || '—';
                         })()}
                       </td>
+                      <td className="py-4 px-6 text-sm text-gray-600">{orgRoleLabel(supervisor.orgRole)}</td>
+                      <td className="py-4 px-6 text-sm text-gray-600">{supervisor.parentCode?.trim() || '—'}</td>
                       <td className="py-4 px-6 text-sm text-gray-600">{supervisor.email}</td>
                       <td className="py-4 px-6 text-sm text-gray-600">
                         <div className="space-y-1">
@@ -362,12 +425,58 @@ export default function AdminSupervisorsPage() {
                       required
                     />
                   </div>
+                  <div>
+                    <label htmlFor="supervisor-org-role" className="block text-sm font-medium text-gray-700 mb-2">
+                      المنصب في الهرمية
+                    </label>
+                    <select
+                      id="supervisor-org-role"
+                      value={formData.orgRole ?? 'supervisor'}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          orgRole: e.target.value as SupervisorOrgRole,
+                          parentCode:
+                            e.target.value === 'regional_manager' ? '' : formData.parentCode,
+                        })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    >
+                      {ORG_ROLE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="supervisor-parent" className="block text-sm font-medium text-gray-700 mb-2">
+                      المدير المباشر (كود)
+                    </label>
+                    <select
+                      id="supervisor-parent"
+                      value={formData.parentCode ?? ''}
+                      onChange={(e) => setFormData({ ...formData, parentCode: e.target.value })}
+                      disabled={formData.orgRole === 'regional_manager'}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100"
+                    >
+                      <option value="">— بدون —</option>
+                      {parentManagerOptions.map((s: Supervisor) => (
+                        <option key={s.code} value={s.code}>
+                          {s.code} — {s.name} ({orgRoleLabel(s.orgRole)})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      المشرف يرتبط بمدير الزون؛ مدير الزون بمدير المنطقة.
+                    </p>
+                  </div>
                   <div className="md:col-span-2">
                     <span className="block text-sm font-medium text-gray-700 mb-2" id="supervisor-zones-label">
                       الزونات (نفس زونات الشفتات)
                     </span>
                     <p className="text-xs text-gray-500 mb-2">
-                      اختر زوناً واحداً أو أكثر لنفس المشرف. يُخزَّن في الشيت كقيم معتمدة مفصولة بـ | بدون تغيير منطق الداشبورد للمشرف.
+                      اختر زوناً واحداً أو أكثر. يُحفظ تلقائياً في الشيت.
                     </p>
                     <select
                       id="supervisor-zones"

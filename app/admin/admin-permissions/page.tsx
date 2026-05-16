@@ -10,6 +10,10 @@ import {
   type AdminFeatureKey,
 } from '@/lib/adminFeatureAccess';
 import { ZONE_OPTIONS, parseAdminAllowedZonesList } from '@/lib/zones';
+import {
+  LIMITED_PRESET_REGIONAL_MANAGER,
+  LIMITED_PRESET_ZONE_MANAGER,
+} from '@/lib/orgDashboardSync';
 
 export default function AdminPermissionsPage() {
   const queryClient = useQueryClient();
@@ -21,6 +25,10 @@ export default function AdminPermissionsPage() {
   const [adminPositionSheet, setAdminPositionSheet] = useState<string>('');
   /** جذور الشجرة: أكواد من «المشرفين» (عمود A) — أكثر من جذر يُفصل بينها بـ | في الشيت */
   const [linkedSupervisorCodes, setLinkedSupervisorCodes] = useState<Set<string>>(new Set());
+  const [useAdminCodeAsLink, setUseAdminCodeAsLink] = useState(false);
+  const [autoCreateSupervisorRows, setAutoCreateSupervisorRows] = useState(true);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newAdmin, setNewAdmin] = useState({ code: '', name: '', password: '' });
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [canGrant, setCanGrant] = useState(false);
 
@@ -123,16 +131,17 @@ export default function AdminPermissionsPage() {
     setLinkedSupervisorCodes(new Set(parseLinkedRootsFromSheet(a.linkedSupervisorCode || '')));
   };
 
+  function buildPermissionsString(): string {
+    if (mode === 'full') return '';
+    const keys = Array.from(picked);
+    if (!keys.length) throw new Error('اختر ميزة واحدة على الأقل أو اختر وصول كامل');
+    return `limited:${keys.join(',')}`;
+  }
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const token = localStorage.getItem('token');
-      let permissions = '';
-      if (mode === 'full') permissions = '';
-      else {
-        const keys = Array.from(picked);
-        if (!keys.length) throw new Error('اختر ميزة واحدة على الأقل أو اختر وصول كامل');
-        permissions = `limited:${keys.join(',')}`;
-      }
+      const permissions = buildPermissionsString();
       const res = await fetch('/api/admin/admin-permissions', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -142,22 +151,75 @@ export default function AdminPermissionsPage() {
           dataZones: Array.from(pickedZones),
           adminPosition: adminPositionSheet.trim(),
           linkedSupervisorCode: Array.from(linkedSupervisorCodes).join('|'),
+          useAdminCodeAsLink,
+          autoCreateSupervisorRows,
         }),
       });
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'فشل الحفظ');
       return j;
     },
-    onSuccess: () => {
+    onSuccess: (j: { sync?: { created?: string[]; updated?: string[] } }) => {
+      const extra =
+        j.sync?.created?.length || j.sync?.updated?.length
+          ? ` — صفوف المشرفين: أُنشئ ${j.sync?.created?.length ?? 0}، حُدّث ${j.sync?.updated?.length ?? 0}.`
+          : '';
       setMsg({
         type: 'ok',
-        text: 'تم الحفظ. يجب على المستخدم المستهدف تسجيل الخروج ثم الدخول مجدداً.',
+        text: `تم الحفظ.${extra} يجب على المستخدم تسجيل الخروج ثم الدخول مجدداً.`,
       });
       queryClient.invalidateQueries({ queryKey: ['admin-permissions-list'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-supervisors-picker'] });
     },
     onError: (e: any) => {
       setMsg({ type: 'err', text: e?.message || 'فشل الحفظ' });
     },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const token = localStorage.getItem('token');
+      const permissions = buildPermissionsString();
+      const res = await fetch('/api/admin/admin-permissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          code: newAdmin.code.trim(),
+          name: newAdmin.name.trim(),
+          password: newAdmin.password,
+          permissions,
+          dataZones: Array.from(pickedZones),
+          adminPosition: adminPositionSheet.trim(),
+          linkedSupervisorCode: Array.from(linkedSupervisorCodes).join('|'),
+          useAdminCodeAsLink,
+          autoCreateSupervisorRows,
+        }),
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'فشل الإنشاء');
+      return j;
+    },
+    onSuccess: (j: { sync?: { created?: string[] } }) => {
+      setMsg({
+        type: 'ok',
+        text: `تم إنشاء حساب الأدمن.${j.sync?.created?.length ? ` أُنشئ ${j.sync.created.length} صف في المشرفين.` : ''}`,
+      });
+      setShowCreateForm(false);
+      setNewAdmin({ code: '', name: '', password: '' });
+      queryClient.invalidateQueries({ queryKey: ['admin-permissions-list'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-supervisors-picker'] });
+    },
+    onError: (e: any) => setMsg({ type: 'err', text: e?.message || 'فشل الإنشاء' }),
+  });
+
+  const linkPickerChoices = supervisorChoices.filter((s) => {
+    if (adminPositionSheet.includes('منطقة')) {
+      return s.orgRole === 'zone_manager';
+    }
+    if (adminPositionSheet.includes('زون')) {
+      return s.orgRole === 'zone_manager' || s.orgRole === 'regional_manager' || !s.orgRole;
+    }
+    return true;
   });
 
   if (!canGrant) {
@@ -174,14 +236,12 @@ export default function AdminPermissionsPage() {
     <Layout>
       <div className="space-y-6 max-w-4xl min-w-0 text-[#EAF0FF]">
         <div>
-          <h1 className="text-2xl font-bold">إدارة صلاحيات الأدمن</h1>
+          <h1 className="text-2xl font-bold">إدارة المستخدمين والهرمية</h1>
           <p className="text-sm text-[rgba(234,240,255,0.72)] mt-1">
-            اختر مستخدمًا من ورقة <strong className="text-[rgba(234,240,255,0.9)]">Admins</strong> (دخول كمدير) ثم حدد الميزات.
-            الصلاحيات هنا لا تنطبق على حسابات <strong className="text-[rgba(234,240,255,0.9)]">المشرفين</strong> في ورقة المشرفين — لمشرف مختلف القائمة والصلاحيات.
-            بعد الحفظ يجب أن يُسجّل المستخدم المستهدف <strong className="text-[rgba(234,240,255,0.9)]">الخروج ثم الدخول</strong> ليُحمَّل التوكن الجديد.
-            عمود «نطاق الزونات» (إن وُجد في Admins) يقيّد البيانات مع زونات المشرفين. مع ربط صف المشرفين والمنصب
-            يُطبَّق تقاطع الشجرة + الزون. أضف في Admins عموداً بعنوان مثل «نطاق الزونات» أو «ربط شيت المشرفين» إن
-            لم يكن ظاهراً في القائمة بعد الحفظ.
+            أنشئ أو عدّل حسابات الدخول كمدير، الصلاحيات، نطاق الزون، وربط الهرمية — كل ذلك من هنا ويُزامَن تلقائياً مع
+            الشيت. لربط المشرفين التشغيليين بمديريهم استخدم صفحة{' '}
+            <strong className="text-[rgba(234,240,255,0.9)]">إدارة المشرفين</strong> (المنصب + المدير المباشر).
+            بعد أي تعديل يُفضَّل أن يُسجّل المستخدم <strong className="text-[rgba(234,240,255,0.9)]">خروجاً ثم دخولاً</strong>.
           </p>
         </div>
 
@@ -216,13 +276,72 @@ export default function AdminPermissionsPage() {
               ) : null}
               {data.admins.length <= 1 ? (
                 <p className="text-amber-200/90 border border-amber-400/30 rounded-lg px-3 py-2 mt-2">
-                  يظهر هنا فقط من لهم <strong>صف في ورقة Admins</strong> مع <strong>كود غير فارغ</strong> في عمود الكود
-                  (بعد صف العناوين إن وُجد). المشرفون في تبويب «المشرفين» لا يُعرضون هنا — أضف مستخدم الأدمن كصف
-                  جديد في Admins (كود، اسم، كلمة مرور، …) ليظهر في القائمة ويستطيع الدخول كمدير.
+                  لا يوجد مستخدمون بعد — استخدم «مستخدم أدمن جديد» لإنشاء أول حساب (يُزامَن مع الشيت تلقائياً).
                 </p>
               ) : null}
             </div>
 
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateForm(false);
+                  setMsg(null);
+                }}
+                className={`text-sm px-4 py-2 rounded-lg border ${!showCreateForm ? 'bg-[color:var(--v2-accent-cyan)] text-black border-transparent' : 'border-[rgba(255,255,255,0.2)]'}`}
+              >
+                تعديل مستخدم موجود
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateForm(true);
+                  setSelectedCode('');
+                  setMode('limited');
+                  setPicked(
+                    new Set(
+                      LIMITED_PRESET_ZONE_MANAGER.replace('limited:', '')
+                        .split(',')
+                        .filter(Boolean) as AdminFeatureKey[]
+                    )
+                  );
+                  setAdminPositionSheet('مدير زون');
+                  setUseAdminCodeAsLink(true);
+                  setAutoCreateSupervisorRows(true);
+                  setMsg(null);
+                }}
+                className={`text-sm px-4 py-2 rounded-lg border ${showCreateForm ? 'bg-[color:var(--v2-accent-cyan)] text-black border-transparent' : 'border-[rgba(255,255,255,0.2)]'}`}
+              >
+                + مستخدم أدمن جديد
+              </button>
+            </div>
+
+            {showCreateForm && (
+              <div className="rounded-lg border border-[rgba(255,255,255,0.15)] bg-[rgba(0,0,0,0.25)] p-4 space-y-3 max-w-lg">
+                <p className="text-sm font-medium">بيانات الدخول الجديدة</p>
+                <input
+                  className="w-full rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm"
+                  placeholder="كود الدخول"
+                  value={newAdmin.code}
+                  onChange={(e) => setNewAdmin({ ...newAdmin, code: e.target.value })}
+                />
+                <input
+                  className="w-full rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm"
+                  placeholder="الاسم"
+                  value={newAdmin.name}
+                  onChange={(e) => setNewAdmin({ ...newAdmin, name: e.target.value })}
+                />
+                <input
+                  type="password"
+                  className="w-full rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm"
+                  placeholder="كلمة المرور"
+                  value={newAdmin.password}
+                  onChange={(e) => setNewAdmin({ ...newAdmin, password: e.target.value })}
+                />
+              </div>
+            )}
+
+            {!showCreateForm && (
             <div>
               <label className="block text-sm mb-1">الأدمن المستهدف</label>
               <select
@@ -238,8 +357,9 @@ export default function AdminPermissionsPage() {
                 ))}
               </select>
             </div>
+            )}
 
-            {selected && (
+            {(showCreateForm || selected) && (
               <>
                 <div className="flex flex-wrap gap-4">
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -261,6 +381,41 @@ export default function AdminPermissionsPage() {
                     صلاحيات محددة فقط
                   </label>
                 </div>
+
+                {mode === 'limited' && (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="text-xs px-3 py-1.5 rounded-md border border-[rgba(255,255,255,0.2)]"
+                      onClick={() =>
+                        setPicked(
+                          new Set(
+                            LIMITED_PRESET_ZONE_MANAGER.replace('limited:', '')
+                              .split(',')
+                              .filter(Boolean) as AdminFeatureKey[]
+                          )
+                        )
+                      }
+                    >
+                      قالب: مدير زون
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs px-3 py-1.5 rounded-md border border-[rgba(255,255,255,0.2)]"
+                      onClick={() =>
+                        setPicked(
+                          new Set(
+                            LIMITED_PRESET_REGIONAL_MANAGER.replace('limited:', '')
+                              .split(',')
+                              .filter(Boolean) as AdminFeatureKey[]
+                          )
+                        )
+                      }
+                    >
+                      قالب: مدير منطقة
+                    </button>
+                  </div>
+                )}
 
                 {mode === 'limited' && (
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -367,28 +522,62 @@ export default function AdminPermissionsPage() {
 
                 {mode === 'limited' && (
                   <div className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.2)] p-3 sm:p-4 space-y-3">
-                    <p className="text-sm font-medium">الهرمية وربط صف «المشرفين»</p>
+                    <p className="text-sm font-medium">الهرمية (تُزامَن مع الشيت تلقائياً)</p>
                     <p className="text-xs text-[rgba(234,240,255,0.55)] leading-relaxed">
-                      علّم <strong className="text-[rgba(234,240,255,0.85)]">صفك/صفوفك</strong> في «المشرفين» (عمود
-                      A) — يمكن أكثر من كود (مثلاً مدير منطقة يعلّم WA-014 ومديري زون WA-007 و WA-013 معاً). كل من
-                      تحتهم في الشيت يجب أن يملأ عمود{' '}
-                      <strong className="text-[rgba(234,240,255,0.85)]">كود المدير المباشر</strong> بكود مديره.
-                      النطاق الجغرافي أعلاه يُقاطع مع اتحاد أشجار هذه الجذور.
+                      مدير المنطقة يختار أكواد <strong className="text-[rgba(234,240,255,0.85)]">مديري الزون</strong>.
+                      مدير الزون يختار صفه أو يُنشأ تلقائياً. اربط المشرفين التشغيليين بمديريهم من صفحة{' '}
+                      <strong className="text-[rgba(234,240,255,0.85)]">إدارة المشرفين</strong>.
                     </p>
                     <div>
-                      <label className="block text-sm mb-1">منصب الأدمن (يُحفظ في عمود المنصب في Admins)</label>
+                      <label className="block text-sm mb-1">منصب المستخدم</label>
                       <select
                         className="w-full max-w-md rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm"
                         value={adminPositionSheet}
-                        onChange={(e) => setAdminPositionSheet(e.target.value)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setAdminPositionSheet(v);
+                          if (mode === 'limited' && v.includes('منطقة')) {
+                            setPicked(
+                              new Set(
+                                LIMITED_PRESET_REGIONAL_MANAGER.replace('limited:', '')
+                                  .split(',')
+                                  .filter(Boolean) as AdminFeatureKey[]
+                              )
+                            );
+                          } else if (mode === 'limited' && v.includes('زون')) {
+                            setPicked(
+                              new Set(
+                                LIMITED_PRESET_ZONE_MANAGER.replace('limited:', '')
+                                  .split(',')
+                                  .filter(Boolean) as AdminFeatureKey[]
+                              )
+                            );
+                          }
+                        }}
                       >
                         <option value="">— اختر (افتراضي: مدير زون في النظام) —</option>
                         <option value="مدير زون">مدير زون</option>
                         <option value="مدير منطقة">مدير منطقة</option>
                       </select>
                     </div>
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useAdminCodeAsLink}
+                        onChange={(e) => setUseAdminCodeAsLink(e.target.checked)}
+                      />
+                      استخدم كود الدخول كجذر في المشرفين (يُنشأ الصف تلقائياً إن لم يوجد)
+                    </label>
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={autoCreateSupervisorRows}
+                        onChange={(e) => setAutoCreateSupervisorRows(e.target.checked)}
+                      />
+                      إنشاء/تحديث صفوف المشرفين المربوطة تلقائياً عند الحفظ
+                    </label>
                     <div>
-                      <label className="block text-sm mb-1">ربط بأكواد في شيت المشرفين (عمود A) — متعدد</label>
+                      <label className="block text-sm mb-1">جذور الشجرة في «المشرفين» — متعدد</label>
                       <div className="flex flex-wrap gap-2 mb-2">
                         <button
                           type="button"
@@ -401,15 +590,15 @@ export default function AdminPermissionsPage() {
                           type="button"
                           className="text-xs px-2 py-1 rounded border border-[rgba(255,255,255,0.2)]"
                           onClick={() => {
-                            const c = selectedCode.trim();
+                            const c = (showCreateForm ? newAdmin.code : selectedCode).trim();
                             if (c) setLinkedSupervisorCodes((prev) => new Set(prev).add(c));
                           }}
                         >
-                          إضافة كود الأدمن الحالي ({selectedCode || '—'})
+                          إضافة كود الدخول ({(showCreateForm ? newAdmin.code : selectedCode) || '—'})
                         </button>
                       </div>
                       <div className="max-h-48 overflow-y-auto rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.2)] p-2 space-y-1">
-                        {supervisorChoices.map((s) => (
+                        {linkPickerChoices.map((s) => (
                           <label key={s.code} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
                             <input
                               type="checkbox"
@@ -445,14 +634,25 @@ export default function AdminPermissionsPage() {
 
                 <button
                   type="button"
-                  disabled={!selectedCode || saveMutation.isPending}
+                  disabled={
+                    showCreateForm
+                      ? !newAdmin.code.trim() || !newAdmin.name.trim() || !newAdmin.password || createMutation.isPending
+                      : !selectedCode || saveMutation.isPending
+                  }
                   onClick={() => {
                     setMsg(null);
-                    saveMutation.mutate();
+                    if (showCreateForm) createMutation.mutate();
+                    else saveMutation.mutate();
                   }}
                   className="px-5 py-2 rounded-lg bg-[color:var(--v2-accent-cyan)] text-black font-semibold disabled:opacity-50"
                 >
-                  {saveMutation.isPending ? 'جاري الحفظ…' : 'حفظ على الشيت'}
+                  {showCreateForm
+                    ? createMutation.isPending
+                      ? 'جاري الإنشاء…'
+                      : 'إنشاء وحفظ'
+                    : saveMutation.isPending
+                      ? 'جاري الحفظ…'
+                      : 'حفظ ومزامنة'}
                 </button>
               </>
             )}

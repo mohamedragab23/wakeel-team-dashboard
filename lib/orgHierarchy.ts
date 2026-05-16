@@ -62,3 +62,27 @@ export function buildDescendantSupervisorCodesMulti(sups: Supervisor[], rootCode
   }
   return out;
 }
+
+/** أكواد المشرفين التشغيليين (منصب مشرف) ضمن شجرة `rootCode` — بدون مديري زون/منطقة. */
+export function getDescendantLeafSupervisorCodes(sups: Supervisor[], rootCode: string): string[] {
+  const tree = buildDescendantSupervisorCodes(sups, rootCode);
+  const out: string[] = [];
+  for (const c of tree) {
+    const s = sups.find((x) => String(x.code ?? '').trim() === c);
+    const role = s?.orgRole ?? 'supervisor';
+    if (role === 'supervisor') out.push(c);
+  }
+  return out;
+}
+
+/** من يظهر في تقرير أداء المشرفين حسب منصب الأدمن في JWT. */
+export function shouldIncludeInSupervisorPerformanceReport(
+  viewerAdminOrgRole: 'full' | 'regional' | 'zone' | undefined,
+  subjectOrgRole: SupervisorOrgRole | undefined
+): boolean {
+  const subject = subjectOrgRole ?? 'supervisor';
+  if (!viewerAdminOrgRole || viewerAdminOrgRole === 'full') return true;
+  if (viewerAdminOrgRole === 'zone') return subject === 'supervisor';
+  if (viewerAdminOrgRole === 'regional') return subject === 'supervisor' || subject === 'zone_manager';
+  return true;
+}

@@ -1,5 +1,7 @@
+import type { Supervisor } from './adminService';
 import { getSupervisorRiders } from './dataService';
 import { getSheetData } from './googleSheets';
+import { getDescendantLeafSupervisorCodes, type SupervisorOrgRole } from './orgHierarchy';
 
 /** Match rider codes across "00123" vs "123" styles (same as performance filter). */
 export function normalizeRiderCodeForPerformance(code: any): string {
@@ -140,6 +142,10 @@ export type SupervisorDailyAggRecord = {
 /**
  * Single pass over البيانات اليومية for a supervisor's riders (+ approved terminations).
  * Use for salary calculation to avoid O(riders × rows) sheet scans.
+ *
+ * **الطلبات (orders):** تُجمع من عمود الطلبات لكل يوم/مندوب في الفترة، لكل المناديب الحاليين تحت المشرف
+ * **ومناديب لهم إقالة معتمدة** في `طلبات_الإقالة` عند نفس المشرف — حتى لو نُقل المندوب أو حُذف من شيت المناديب،
+ * ما دامت صفوف **البيانات اليومية** ضمن الفترة و**لا تتجاوز** `inclusiveEndByRider` (آخر يوم شامل لصالح هذا المشرف).
  */
 export async function aggregateSupervisorDailyPerformance(
   supervisorCode: string,
@@ -245,6 +251,78 @@ export async function aggregateSupervisorDailyPerformance(
   return { records, totalOrders, totalHours, byRider, byDate };
 }
 
+export type SupervisorDailyAggBundle = Awaited<ReturnType<typeof aggregateSupervisorDailyPerformance>>;
+
+/** دمج نتائج عدة مشرفين (مثلاً تجميع أداء مدير زون من مشرفيه). */
+export function mergeSupervisorDailyAggBundles(parts: SupervisorDailyAggBundle[]): SupervisorDailyAggBundle {
+  const records: SupervisorDailyAggRecord[] = [];
+  const byRider = new Map<string, { orders: number; hours: number }>();
+  const byDate = new Map<string, { orders: number; hours: number }>();
+  let totalOrders = 0;
+  let totalHours = 0;
+
+  for (const p of parts) {
+    totalOrders += p.totalOrders;
+    totalHours += p.totalHours;
+    records.push(...p.records);
+    for (const [k, v] of p.byRider) {
+      const cur = byRider.get(k) || { orders: 0, hours: 0 };
+      cur.orders += v.orders;
+      cur.hours += v.hours;
+      byRider.set(k, cur);
+    }
+    for (const [k, v] of p.byDate) {
+      const cur = byDate.get(k) || { orders: 0, hours: 0 };
+      cur.orders += v.orders;
+      cur.hours += v.hours;
+      byDate.set(k, cur);
+    }
+  }
+
+  return { records, totalOrders, totalHours, byRider, byDate };
+}
+
+/**
+ * أداء صف في شيت المشرفين: مشرف مباشر من مناديبه، أو مدير زون/منطقة من مجموع أداء مشرفيه.
+ */
+export async function aggregatePerformanceForOrgRow(
+  sup: Pick<Supervisor, 'code' | 'orgRole'>,
+  allSupervisors: Supervisor[],
+  startDate: Date,
+  endDate: Date,
+  allowedSupervisorCodes?: Set<string> | null
+): Promise<{ agg: SupervisorDailyAggBundle; riderCount: number }> {
+  const code = String(sup.code ?? '').trim();
+  const role: SupervisorOrgRole = sup.orgRole ?? 'supervisor';
+
+  if (role === 'supervisor') {
+    const riders = await getSupervisorRiders(code, false);
+    const agg = await aggregateSupervisorDailyPerformance(code, startDate, endDate, {
+      riders,
+      useCache: false,
+    });
+    return { agg, riderCount: riders.length };
+  }
+
+  let leafCodes = getDescendantLeafSupervisorCodes(allSupervisors, code);
+  if (allowedSupervisorCodes) {
+    leafCodes = leafCodes.filter((c) => allowedSupervisorCodes.has(c));
+  }
+  const parts: SupervisorDailyAggBundle[] = [];
+  let riderCount = 0;
+  for (const leaf of leafCodes) {
+    const riders = await getSupervisorRiders(leaf, false);
+    riderCount += riders.length;
+    parts.push(
+      await aggregateSupervisorDailyPerformance(leaf, startDate, endDate, {
+        riders,
+        useCache: false,
+      })
+    );
+  }
+  return { agg: mergeSupervisorDailyAggBundles(parts), riderCount };
+}
+
 /** آخر يوم (منتصف الليل المحلي) يُحتسب فيه أداء المندوب لهذا المشرف بعد إقالة معتمدة. */
 function mergeInclusiveEndDay(existing: Date | undefined, candidate: Date): Date {
   const c = new Date(candidate.getFullYear(), candidate.getMonth(), candidate.getDate());
@@ -255,7 +333,7 @@ function mergeInclusiveEndDay(existing: Date | undefined, candidate: Date): Date
 
 /**
  * مناديب لهم إقالة معتمدة عند هذا المشرف — يُحسب أوردراتهم وساعاتهم في الفترة التي يحددها المشرف، بما فيهم من أُعيد تعيينهم لمشرف آخر.
- * إن وُجد تاريخ موافقة (أو تاريخ طلب) يُستبعد من الاحتساب لصالح هذا المشرف ما بعد ذلك اليوم.
+ * إن وُجد تاريخ موافقة (أو تاريخ طلب) يُستبعد من الاحتساب لصالح هذا المشرف ما بعد ذلك اليوم (ذلك اليوم **شامل**).
  * أعمدة طلبات_الإقالة: 0 كود المشرف، 2 كود المندوب، 5 الحالة، 6 تاريخ الطلب، 7 تاريخ الموافقة.
  */
 export async function getApprovedTerminationAttributionForSupervisor(supervisorCode: string): Promise<{
@@ -281,10 +359,22 @@ export async function getApprovedTerminationAttributionForSupervisor(supervisorC
       codes.add(rc);
       const norm = normalizeRiderCodeForPerformance(rc);
 
-      const approvalRaw = row[7] ?? row[6];
-      const parsed = parseDailySheetDate(approvalRaw);
-      if (parsed && !isNaN(parsed.getTime())) {
-        const endDay = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+      /** تفضيل تاريخ الموافقة؛ إن تعذّر التحليل نستخدم تاريخ الطلب حتى لا يُفقد احتساب أوردرات المندوب حتى يوم الإقالة */
+      let endDay: Date | null = null;
+      const approvalParsed = parseDailySheetDate(row[7]);
+      if (approvalParsed && !isNaN(approvalParsed.getTime())) {
+        endDay = new Date(
+          approvalParsed.getFullYear(),
+          approvalParsed.getMonth(),
+          approvalParsed.getDate()
+        );
+      } else {
+        const reqParsed = parseDailySheetDate(row[6]);
+        if (reqParsed && !isNaN(reqParsed.getTime())) {
+          endDay = new Date(reqParsed.getFullYear(), reqParsed.getMonth(), reqParsed.getDate());
+        }
+      }
+      if (endDay) {
         inclusiveEndByRider.set(rc, mergeInclusiveEndDay(inclusiveEndByRider.get(rc), endDay));
         inclusiveEndByRider.set(norm, mergeInclusiveEndDay(inclusiveEndByRider.get(norm), endDay));
       }
