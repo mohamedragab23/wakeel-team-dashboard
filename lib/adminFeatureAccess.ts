@@ -168,6 +168,25 @@ export function assertAdminApiAccess(
   return NextResponse.json({ success: false, error: 'لا تملك صلاحية هذه العملية' }, { status: 403 });
 }
 
+/** قراءة أداء المناديب في صفحة إدارة المناديب — لا يتطلب صلاحية رفع الأداء. */
+export function assertAdminRidersPerformanceReadAccess(
+  decoded: { role?: string; permissions?: string } | null
+): NextResponse | null {
+  if (!decoded || decoded.role !== 'admin') {
+    return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
+  }
+  if (parseLimitedFeatures(decoded.permissions) === null) return null;
+  const limited = parseLimitedFeatures(decoded.permissions) || [];
+  if (
+    limited.includes('riders') ||
+    limited.includes('performance_upload') ||
+    limited.includes('supervisor_performance')
+  ) {
+    return null;
+  }
+  return NextResponse.json({ success: false, error: 'لا تملك صلاحية هذه العملية' }, { status: 403 });
+}
+
 export function assertAdminSupervisorsReadAccess(decoded: { role?: string; permissions?: string } | null): NextResponse | null {
   if (!decoded || decoded.role !== 'admin') {
     return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });

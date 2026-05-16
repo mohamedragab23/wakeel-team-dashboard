@@ -9,7 +9,7 @@ import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import {
   adminScopeHasSupervisorCode,
   assertLimitedAdminSupervisorZoneAccess,
-  getSupervisorCodesInZoneScope,
+  getSupervisorCodesInAdminDataScope,
 } from '@/lib/adminZoneScope';
 import { getAllRiders, addRider, updateRider, deleteRider } from '@/lib/adminService';
 
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const refresh = searchParams.get('refresh') === 'true';
     let riders = await getAllRiders(refresh);
-    const allowed = await getSupervisorCodesInZoneScope(decoded);
+    const allowed = await getSupervisorCodesInAdminDataScope(decoded);
     if (allowed) {
       riders = riders.filter((r) =>
         adminScopeHasSupervisorCode(allowed, String(r.supervisorCode ?? '').trim())
@@ -133,7 +133,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'المندوب غير موجود' }, { status: 404 });
     }
     const curSup = String(existing.supervisorCode ?? '').trim();
-    const allowed = await getSupervisorCodesInZoneScope(decoded);
+    const allowed = await getSupervisorCodesInAdminDataScope(decoded);
     if (allowed) {
       if (!curSup || !adminScopeHasSupervisorCode(allowed, curSup)) {
         return NextResponse.json(
@@ -198,7 +198,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'المندوب غير موجود' }, { status: 404 });
     }
     const curSup = String(existing.supervisorCode ?? '').trim();
-    const allowedDel = await getSupervisorCodesInZoneScope(decoded);
+    const allowedDel = await getSupervisorCodesInAdminDataScope(decoded);
     if (allowedDel) {
       if (!curSup || !adminScopeHasSupervisorCode(allowedDel, curSup)) {
         return NextResponse.json(

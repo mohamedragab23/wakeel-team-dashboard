@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminRidersPerformanceReadAccess } from '@/lib/adminFeatureAccess';
 import { getAllRiders } from '@/lib/adminService';
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { aggregateRidersInDateRange, type RiderSeed } from '@/lib/riderPerformanceAggregate';
-import { adminScopeHasSupervisorCode, getSupervisorCodesInZoneScope } from '@/lib/adminZoneScope';
+import {
+  adminScopeHasSupervisorCode,
+  getSupervisorCodesInAdminDataScope,
+} from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +22,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const rp = assertAdminApiAccess(decoded, 'performance_upload');
+    const rp = assertAdminRidersPerformanceReadAccess(decoded);
     if (rp) return rp;
 
     const { searchParams } = new URL(request.url);
@@ -41,7 +44,7 @@ export async function GET(request: NextRequest) {
       getSupervisorPerformanceFiltered(null, startDate, endDate),
     ]);
 
-    const allowed = await getSupervisorCodesInZoneScope(decoded);
+    const allowed = await getSupervisorCodesInAdminDataScope(decoded);
     const ridersScoped = allowed
       ? allRiders.filter((r) =>
           adminScopeHasSupervisorCode(allowed, String(r.supervisorCode ?? '').trim())
