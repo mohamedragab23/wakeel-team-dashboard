@@ -1,7 +1,86 @@
 import { getSheetData, findDataInSheet } from './googleSheets';
 import { getSupervisorRiders } from './dataService';
 import { getAllSupervisors } from './adminService';
-import { aggregateSupervisorDailyPerformance, normalizeRiderCodeForPerformance } from './dataFilter';
+import {
+  aggregateSupervisorDailyPerformance,
+  normalizeRiderCodeForPerformance,
+  normalizeSupervisorCodeForMatch,
+} from './dataFilter';
+
+function rowMatchesSupervisorCode(rowSupervisor: unknown, supervisorCode: string): boolean {
+  return normalizeSupervisorCodeForMatch(rowSupervisor) === normalizeSupervisorCodeForMatch(supervisorCode);
+}
+
+/** YYYY-MM-DD بدون انزياح التوقيت */
+function parseSalaryPeriodDate(value: string, kind: 'start' | 'end'): Date {
+  const s = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return new Date(s + (kind === 'end' ? 'T23:59:59' : 'T00:00:00'));
+  }
+  const d = parseDateForSalary(s);
+  if (d) return d;
+  return new Date(s);
+}
+
+const DEFAULT_TYPE1_RANGES = [
+  { minHours: 0, maxHours: 100, ratePerOrder: 1.0 },
+  { minHours: 101, maxHours: 200, ratePerOrder: 1.2 },
+  { minHours: 201, maxHours: 300, ratePerOrder: 1.3 },
+  { minHours: 301, maxHours: 400, ratePerOrder: 1.4 },
+  { minHours: 401, maxHours: 999999, ratePerOrder: 1.5 },
+];
+
+function resolveSalaryConfig(
+  supervisorCode: string,
+  configData: any[][],
+  supervisor: Awaited<ReturnType<typeof getAllSupervisors>>[number] | undefined
+): {
+  method: string;
+  fixedAmount?: number;
+  type1Ranges?: { minHours: number; maxHours: number; ratePerOrder: number }[] | null;
+  type2BasePercentage?: number;
+  type2SupervisorPercentage?: number;
+} {
+  for (let i = 1; i < configData.length; i++) {
+    const row = configData[i];
+    if (!rowMatchesSupervisorCode(row[0], supervisorCode)) continue;
+    const method = row[1]?.toString().trim() || 'fixed';
+    let type1Ranges = null;
+    if (row[3]) {
+      try {
+        type1Ranges = JSON.parse(row[3].toString());
+      } catch {
+        type1Ranges = null;
+      }
+    }
+    return {
+      method,
+      fixedAmount: parseFloat(row[2]?.toString() || '0'),
+      type1Ranges,
+      type2BasePercentage: row[4] ? parseFloat(row[4].toString()) : 11,
+      type2SupervisorPercentage: row[5] ? parseFloat(row[5].toString()) : 60,
+    };
+  }
+
+  const st = supervisor?.salaryType;
+  if (st === 'fixed') {
+    return {
+      method: 'fixed',
+      fixedAmount: Number(supervisor?.salaryAmount) || 0,
+    };
+  }
+  if (st === 'commission_type2') {
+    return {
+      method: 'commission_type2',
+      type2BasePercentage: 11,
+      type2SupervisorPercentage: 60,
+    };
+  }
+  if (st === 'commission_type1') {
+    return { method: 'commission_type1', type1Ranges: DEFAULT_TYPE1_RANGES };
+  }
+  return { method: 'commission_type1', type1Ranges: DEFAULT_TYPE1_RANGES };
+}
 
 const SHEET_SUPERVISOR_RECEIPTS = 'قبض_المشرفين';
 const SHEET_ADMIN_DEDUCTIONS = 'خصومات_الإدارة';
@@ -87,7 +166,7 @@ async function getSupervisorReceiptsInRange(
 
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
-      if (!row?.[0] || row[0].toString().trim() !== supervisorCode) continue;
+      if (!row?.[0] || !rowMatchesSupervisorCode(row[0], supervisorCode)) continue;
 
       let inRange = false;
       let dateStr = '';
@@ -142,7 +221,7 @@ async function getAdminDeductionsInRange(
 
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
-      if (!row?.[0] || row[0].toString().trim() !== supervisorCode) continue;
+      if (!row?.[0] || !rowMatchesSupervisorCode(row[0], supervisorCode)) continue;
 
       let inRange = false;
       let dateStr = '';
@@ -209,8 +288,7 @@ async function getSupervisorDeductionsDetails(supervisorCode: string, startDate:
       const row = deductionsData[i];
       if (!row || !row[0]) continue;
       
-      const rowSupervisorCode = row[0].toString().trim();
-      if (rowSupervisorCode !== supervisorCode) continue;
+      if (!rowMatchesSupervisorCode(row[0], supervisorCode)) continue;
       
       // Column structure: [0] supervisorCode, [1] month or date, [2] reason, [3] amount
       let inRange = false;
@@ -289,8 +367,7 @@ async function getSupervisorAdvancesDetails(supervisorCode: string, startDate: D
       const row = advancesData[i];
       if (!row || !row[0]) continue;
       
-      const rowSupervisorCode = row[0].toString().trim();
-      if (rowSupervisorCode !== supervisorCode) continue;
+      if (!rowMatchesSupervisorCode(row[0], supervisorCode)) continue;
       
       // Column structure: [0] supervisorCode, [1] month or date, [2] amount
       let inRange = false;
@@ -363,8 +440,7 @@ async function getSecurityInquiriesCost(supervisorCode: string, startDate: Date,
       // Column B (index 1) contains supervisor code
       if (!row || !row[1]) continue;
       
-      const rowSupervisorCode = row[1].toString().trim();
-      if (rowSupervisorCode !== supervisorCode) continue;
+      if (!rowMatchesSupervisorCode(row[1], supervisorCode)) continue;
       
       // Check date if available (Column A - index 0)
       let inRange = false;
@@ -496,8 +572,7 @@ async function getEquipmentCostDetails(supervisorCode: string, startDate: Date, 
       const row = equipmentData[i];
       if (!row || !row[0]) continue;
       
-      const rowSupervisorCode = row[0].toString().trim();
-      if (rowSupervisorCode !== supervisorCode) continue;
+      if (!rowMatchesSupervisorCode(row[0], supervisorCode)) continue;
       
       // Check if equipment is in date range (Column B - الشهر)
       let inRange = false;
@@ -606,7 +681,7 @@ async function getBonus(supervisorCode: string, month: number, year: number) {
     const targetsData = await getSheetData('الأهداف');
 
     for (let i = 1; i < targetsData.length; i++) {
-      if (targetsData[i][0] === supervisorCode && targetsData[i][1] == month) {
+      if (rowMatchesSupervisorCode(targetsData[i][0], supervisorCode) && targetsData[i][1] == month) {
         return Number(targetsData[i][4]) || 0;
       }
     }
@@ -631,9 +706,8 @@ export async function calculateSupervisorSalary(
   let year: number;
 
   if (typeof startDateOrMonth === 'string' && typeof endDateOrYear === 'string') {
-    // Date range mode
-    startDate = new Date(startDateOrMonth);
-    endDate = new Date(endDateOrYear);
+    startDate = parseSalaryPeriodDate(startDateOrMonth, 'start');
+    endDate = parseSalaryPeriodDate(endDateOrYear, 'end');
     month = startDate.getMonth() + 1;
     year = startDate.getFullYear();
   } else if (typeof startDateOrMonth === 'number' && typeof endDateOrYear === 'number') {
@@ -657,7 +731,7 @@ export async function calculateSupervisorSalary(
       getSheetData('إعدادات_الرواتب', false),
     ]);
 
-    const supervisor = supervisors.find((s) => s.code === supervisorCode);
+    const supervisor = supervisors.find((s) => rowMatchesSupervisorCode(s.code, supervisorCode));
 
     const agg = await aggregateSupervisorDailyPerformance(supervisorCode, startDate, endDate, {
       useCache: false,
@@ -692,29 +766,12 @@ export async function calculateSupervisorSalary(
     }
     riderPerformance.sort((a, b) => a.code.localeCompare(b.code));
 
-    let salaryConfig: any = null;
+    let salaryConfig: ReturnType<typeof resolveSalaryConfig>;
     try {
-      for (let i = 1; i < configData.length; i++) {
-        if (configData[i][0]?.toString().trim() === supervisorCode) {
-          salaryConfig = {
-            method: configData[i][1]?.toString().trim() || 'fixed',
-            fixedAmount: parseFloat(configData[i][2]?.toString() || '0'),
-            type1Ranges: configData[i][3] ? JSON.parse(configData[i][3].toString()) : null,
-            type2BasePercentage: parseFloat(configData[i][4]?.toString() || '11'),
-            type2SupervisorPercentage: parseFloat(configData[i][5]?.toString() || '60'),
-          };
-          break;
-        }
-      }
+      salaryConfig = resolveSalaryConfig(supervisorCode, configData, supervisor);
     } catch {
-      console.warn('Could not parse salary config from Sheets, using supervisor data');
-    }
-
-    if (!salaryConfig) {
-      salaryConfig = {
-        method: supervisor?.salaryType === 'fixed' ? 'fixed' : 'commission_type1',
-        fixedAmount: supervisor?.salaryAmount || 0,
-      };
+      console.warn('Could not parse salary config from Sheets, using supervisor profile');
+      salaryConfig = resolveSalaryConfig(supervisorCode, [], supervisor);
     }
 
     let baseSalary = 0;
@@ -748,10 +805,7 @@ export async function calculateSupervisorSalary(
     } else if (salaryConfig.method === 'commission_type1') {
       salaryMethod = 'commission_type1';
       commissionType = 'type1';
-      const ranges = salaryConfig.type1Ranges || [
-        { minHours: 0, maxHours: 500, ratePerOrder: 1.0 },
-        { minHours: 501, maxHours: 999999, ratePerOrder: 1.25 },
-      ];
+      const ranges = salaryConfig.type1Ranges || DEFAULT_TYPE1_RANGES;
       commission = 0;
       const sortedDates = [...agg.byDate.keys()].sort();
       for (const dateStr of sortedDates) {
@@ -881,7 +935,13 @@ export async function calculateSupervisorSalary(
         startDate: startDate.toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
       },
-      periodTotals: { totalOrders, totalHours },
+      periodTotals: {
+        totalOrders,
+        totalHours,
+        activeAssignedCount: agg.activeAssignedCount,
+        terminatedRidersIncluded: agg.terminatedOnlyCount,
+        ridersWithDataInPeriod: agg.attributedRiderCount,
+      },
       salaryMethod,
       baseAmount: baseSalary + commission,
       commission: showCommissionBlock
