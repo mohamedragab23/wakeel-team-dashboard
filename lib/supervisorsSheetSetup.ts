@@ -1,15 +1,15 @@
 import { getSheetData, updateSheetRow } from '@/lib/googleSheets';
-import { parseSupervisorOrgRole, type SupervisorOrgRole } from '@/lib/orgHierarchy';
+import {
+  orgRoleToSheetLabel,
+  parseSupervisorOrgRole,
+  type SupervisorOrgRole,
+} from '@/lib/orgHierarchy';
 import {
   isSupervisorsProbablyHeaderRow,
   resolveSupervisorsSheetLayout,
 } from '@/lib/supervisorsSheetParser';
 
-export function orgRoleToSheetLabel(role: SupervisorOrgRole | undefined): string {
-  if (role === 'zone_manager') return 'مدير زون';
-  if (role === 'regional_manager') return 'مدير منطقة';
-  return '';
-}
+export { orgRoleToSheetLabel };
 
 export function sheetLabelToOrgRole(raw: string): SupervisorOrgRole {
   return parseSupervisorOrgRole(raw);
@@ -31,28 +31,19 @@ export async function ensureSupervisorsOrgColumns(): Promise<void> {
   const hasOrg = h.some((x) => x.includes('منصب'));
   const hasParent = h.some((x) => x.includes('مباشر') || (x.includes('كود') && x.includes('مدير')));
 
-  if (!hasOrg && columns.orgRole >= row.length) {
-    while (row.length < columns.orgRole) row.push('');
-    if (!row[columns.orgRole]) {
+  if (!hasOrg) {
+    while (row.length <= columns.orgRole) row.push('');
+    if (!String(row[columns.orgRole] ?? '').trim()) {
       row[columns.orgRole] = 'المنصب التنظيمي';
       changed = true;
     }
   }
-  if (!hasParent && columns.parentCode >= row.length) {
-    while (row.length < columns.parentCode) row.push('');
-    if (!row[columns.parentCode]) {
+  if (!hasParent) {
+    while (row.length <= columns.parentCode) row.push('');
+    if (!String(row[columns.parentCode] ?? '').trim()) {
       row[columns.parentCode] = 'كود المدير المباشر';
       changed = true;
     }
-  }
-
-  if (!hasOrg) {
-    row.push('المنصب التنظيمي');
-    changed = true;
-  }
-  if (!hasParent) {
-    row.push('كود المدير المباشر');
-    changed = true;
   }
 
   if (changed) {

@@ -22,6 +22,13 @@ export function parseSupervisorOrgRole(raw: string | undefined | null): Supervis
   return 'supervisor';
 }
 
+/** قيمة عمود المنصب في شيت المشرفين (عربي). */
+export function orgRoleToSheetLabel(role: SupervisorOrgRole | undefined): string {
+  if (role === 'zone_manager') return 'مدير زون';
+  if (role === 'regional_manager') return 'مدير منطقة';
+  return '';
+}
+
 export function buildSupervisorCodeIndex(sups: Supervisor[]): {
   byExact: Map<string, Supervisor>;
   byNorm: Map<string, string>;

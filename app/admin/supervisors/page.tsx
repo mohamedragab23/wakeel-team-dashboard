@@ -55,17 +55,16 @@ export default function AdminSupervisorsPage() {
 
   const queryClient = useQueryClient();
 
-  const { data: supervisors = [], isLoading, refetch } = useQuery({
+  const { data: supervisorsPayload, isLoading, refetch } = useQuery({
     queryKey: ['admin', 'supervisors'],
     queryFn: async () => {
       const token = localStorage.getItem('token');
       if (!token) {
         throw new Error('غير مصرح - يرجى تسجيل الدخول');
       }
-      // Add timestamp to force fresh fetch
       const res = await fetch(`/api/admin/supervisors?refresh=true&_t=${Date.now()}`, {
         headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store', // Don't cache the request
+        cache: 'no-store',
       });
       if (res.status === 401) {
         localStorage.removeItem('token');
@@ -73,14 +72,22 @@ export default function AdminSupervisorsPage() {
         throw new Error('انتهت الجلسة أو لا تملك صلاحية الأدمن. يرجى تسجيل الدخول مرة أخرى.');
       }
       const data = await res.json();
-      console.log('[AdminSupervisorsPage] Fetched supervisors:', data.data?.length || 0);
-      return data.success ? data.data : [];
+      if (!data.success) {
+        throw new Error(data.error || 'فشل تحميل المشرفين');
+      }
+      return {
+        list: (data.data || []) as Supervisor[],
+        managers: (data.managerOptions || data.data || []) as Supervisor[],
+      };
     },
     staleTime: 0, // Always fetch fresh data
     gcTime: 0, // Don't cache
     refetchOnMount: true, // Always refetch on mount
-    refetchOnWindowFocus: false, // Don't refetch on window focus
+    refetchOnWindowFocus: false,
   });
+
+  const supervisors = supervisorsPayload?.list ?? [];
+  const hierarchyManagers = supervisorsPayload?.managers ?? supervisors;
 
   const addMutation = useMutation({
     mutationFn: async (supervisor: Supervisor) => {
@@ -115,7 +122,7 @@ export default function AdminSupervisorsPage() {
       await new Promise(resolve => setTimeout(resolve, 500));
       // Force refetch to get the new supervisor
       const freshData = await refetch();
-      console.log('[AdminSupervisorsPage] Refetched supervisors:', freshData.data?.length || 0);
+      console.log('[AdminSupervisorsPage] Refetched supervisors:', freshData.data?.list?.length || 0);
       setShowAddModal(false);
       setSelectedZones([]);
       setFormData({
@@ -155,11 +162,15 @@ export default function AdminSupervisorsPage() {
         localStorage.removeItem('user');
         throw new Error('غير مصرح. يرجى تسجيل الدخول كأدمن.');
       }
-      return res.json();
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'فشل تحديث المشرف');
+      }
+      return data;
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['admin', 'supervisors'] });
-      await refetch(); // Force refetch
+      await refetch();
       setEditingSupervisor(null);
       setSelectedZones([]);
       setFormData({
@@ -240,7 +251,7 @@ export default function AdminSupervisorsPage() {
     setShowAddModal(true);
   };
 
-  const parentManagerOptions = supervisors.filter((s: Supervisor) => {
+  const parentManagerOptions = hierarchyManagers.filter((s: Supervisor) => {
     const role = s.orgRole ?? 'supervisor';
     const mine = formData.orgRole ?? 'supervisor';
     if (mine === 'supervisor') return role === 'zone_manager' || role === 'regional_manager';

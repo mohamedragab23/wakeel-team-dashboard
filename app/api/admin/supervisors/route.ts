@@ -2,7 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { getAllSupervisors, addSupervisor, updateSupervisor, deleteSupervisor } from '@/lib/adminService';
 import { assertAdminApiAccess, assertAdminSupervisorsReadAccess } from '@/lib/adminFeatureAccess';
-import { filterSupervisorsForAdminDataScope } from '@/lib/adminZoneScope';
+import {
+  assertLimitedAdminSupervisorZoneAccess,
+  filterSupervisorsForAdminDataScope,
+} from '@/lib/adminZoneScope';
+import {
+  normalizeSupervisorCode,
+  parseLinkedSupervisorRootCodes,
+} from '@/lib/orgHierarchy';
+import {
+  adminScopeHasSupervisorCode,
+  getSupervisorCodesInAdminDataScope,
+} from '@/lib/adminZoneScope';
 import { redactSupervisorRowForViewer } from '@/lib/adminSalaryRedaction';
 import { ensureSupervisorsOrgColumns } from '@/lib/supervisorsSheetSetup';
 
@@ -34,14 +45,45 @@ export async function GET(request: NextRequest) {
       cache.clear(CACHE_KEYS.sheetData('المشرفين'));
     }
 
-    // Always use fresh data (no cache) to ensure we get the latest supervisors
-    let supervisors = await getAllSupervisors(false); // Always fetch fresh data
-    supervisors = await filterSupervisorsForAdminDataScope(decoded, supervisors);
-    supervisors = supervisors.map((s) => redactSupervisorRowForViewer(decoded, s));
-    console.log(`[GET /api/admin/supervisors] Returning ${supervisors.length} supervisors`);
-    console.log(`[GET /api/admin/supervisors] Supervisor codes:`, supervisors.map(s => s.code));
+    const allSupervisors = await getAllSupervisors(false);
+    const managerOptions = allSupervisors
+      .filter((s) => {
+        const r = s.orgRole ?? 'supervisor';
+        return r === 'zone_manager' || r === 'regional_manager';
+      })
+      .map((s) => redactSupervisorRowForViewer(decoded, s));
 
-    return NextResponse.json({ success: true, data: supervisors });
+    let supervisors = await filterSupervisorsForAdminDataScope(decoded, allSupervisors);
+    supervisors = supervisors.map((s) => redactSupervisorRowForViewer(decoded, s));
+
+    const allowed = await getSupervisorCodesInAdminDataScope(decoded);
+    let pickerManagers = managerOptions;
+    if (allowed) {
+      pickerManagers = managerOptions.filter((m) =>
+        adminScopeHasSupervisorCode(allowed, String(m.code ?? ''))
+      );
+      for (const r of parseLinkedSupervisorRootCodes(String(decoded.linkedSupervisorCode ?? ''))) {
+        const found = managerOptions.find(
+          (m) => normalizeSupervisorCode(m.code) === normalizeSupervisorCode(r)
+        );
+        if (
+          found &&
+          !pickerManagers.some(
+            (m) => normalizeSupervisorCode(m.code) === normalizeSupervisorCode(found.code)
+          )
+        ) {
+          pickerManagers.push(found);
+        }
+      }
+    }
+
+    console.log(`[GET /api/admin/supervisors] Returning ${supervisors.length} supervisors`);
+
+    return NextResponse.json({
+      success: true,
+      data: supervisors,
+      managerOptions: pickerManagers,
+    });
   } catch (error: any) {
     console.error(`[GET /api/admin/supervisors] Error:`, error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -108,10 +150,16 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'كود المشرف مطلوب' }, { status: 400 });
     }
 
+    const scopeDenied = await assertLimitedAdminSupervisorZoneAccess(decoded, code);
+    if (scopeDenied) return scopeDenied;
+
     await ensureSupervisorsOrgColumns();
     const result = await updateSupervisor(code, updates);
 
     if (result.success) {
+      const { cache, CACHE_KEYS } = await import('@/lib/cache');
+      cache.clear('admin:supervisors');
+      cache.clear(CACHE_KEYS.sheetData('المشرفين'));
       return NextResponse.json(result);
     } else {
       return NextResponse.json(result, { status: 400 });

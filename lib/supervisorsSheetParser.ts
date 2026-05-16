@@ -3,7 +3,11 @@
  * يدعم التخطيط الطويل (هدف في I، منصب في J، مدير في K) والتخطيط المختصر (منصب في I، مدير في J بدون عمود هدف منفصل).
  */
 
-import { parseSupervisorOrgRole, type SupervisorOrgRole } from '@/lib/orgHierarchy';
+import {
+  orgRoleToSheetLabel,
+  parseSupervisorOrgRole,
+  type SupervisorOrgRole,
+} from '@/lib/orgHierarchy';
 
 function normCell(v: unknown): string {
   return String(v ?? '').trim();
@@ -111,10 +115,36 @@ function inferFromHeader(headerRow: any[]): SupervisorsSheetColumnMap {
   ]);
 
   const safe = (n: number, fb: number) => (n >= 0 ? n : fb);
+  const headerLen = headerRow.length;
+  const wideByWidth = headerLen >= 11;
 
   let targetCol = target >= 0 ? target : null;
-  let orgCol = orgRole >= 0 ? orgRole : safe(orgRole, 8);
-  let parentCol = parentCode >= 0 ? parentCode : safe(parentCode, 9);
+  let orgCol = orgRole >= 0 ? orgRole : -1;
+  let parentCol = parentCode >= 0 ? parentCode : -1;
+
+  /** تخطيط 11 عموداً: I هدف، J منصب، K مدير — عند غياب عناوين واضحة */
+  if (orgCol < 0 && parentCol < 0 && wideByWidth) {
+    targetCol = targetCol ?? 8;
+    orgCol = 9;
+    parentCol = 10;
+  } else {
+    if (orgCol < 0) orgCol = wideByWidth ? 9 : 8;
+    if (parentCol < 0) parentCol = orgCol + 1;
+    if (wideByWidth && orgCol === 8 && parentCol === 9) {
+      targetCol = targetCol ?? 8;
+      orgCol = 9;
+      parentCol = 10;
+    }
+  }
+
+  if (orgRole >= 0 && parentCode < 0) {
+    parentCol = orgRole + 1;
+    if (wideByWidth && orgRole === 8 && parentCol === 9) {
+      targetCol = targetCol ?? 8;
+      orgCol = 9;
+      parentCol = 10;
+    }
+  }
 
   /** لا تخلط عمود الهدف مع عمود المنصب */
   if (targetCol !== null && targetCol === orgCol) targetCol = null;
@@ -282,7 +312,7 @@ export function supervisorToRowCells(
   );
   set(map.commissionFormula, sup.commissionFormula ?? '');
   if (map.target != null) set(map.target, sup.target != null ? String(sup.target) : '');
-  set(map.orgRole, sup.orgRole && sup.orgRole !== 'supervisor' ? String(sup.orgRole) : '');
+  set(map.orgRole, orgRoleToSheetLabel(sup.orgRole));
   set(map.parentCode, sup.parentCode ?? '');
   return row;
 }

@@ -1,6 +1,11 @@
 import { getSheetData, appendToSheet, updateSheetRange, deleteSheetRow } from './googleSheets';
 import { cache, CACHE_KEYS } from './cache';
-import { type SupervisorOrgRole } from '@/lib/orgHierarchy';
+import {
+  buildSupervisorCodeIndex,
+  normalizeSupervisorCode,
+  resolveSupervisorCodeInSheet,
+  type SupervisorOrgRole,
+} from '@/lib/orgHierarchy';
 import {
   resolveSupervisorsSheetLayout,
   parseSupervisorRowFromSheet,
@@ -107,8 +112,29 @@ export async function addSupervisor(supervisor: Supervisor): Promise<{ success: 
     console.log(`[AddSupervisor] Code is unique, proceeding to add to sheet`);
 
     const matrix = await getSheetData('المشرفين', false);
-    const { columns } = resolveSupervisorsSheetLayout(matrix);
-    const row = supervisorToRowCells([], columns, supervisor);
+    const { dataStartIndex, columns } = resolveSupervisorsSheetLayout(matrix);
+    const allInSheet: Supervisor[] = [];
+    for (let i = dataStartIndex; i < matrix.length; i++) {
+      const parsed = parseSupervisorRowFromSheet(matrix[i] || [], columns);
+      if (parsed) allInSheet.push(parsed as Supervisor);
+    }
+    const index = buildSupervisorCodeIndex(allInSheet);
+    const toWrite = { ...supervisor };
+    const parentRaw = String(supervisor.parentCode ?? '').trim();
+    if (parentRaw) {
+      const resolved = resolveSupervisorCodeInSheet(parentRaw, index);
+      if (!resolved) {
+        return {
+          success: false,
+          error: `كود المدير المباشر "${parentRaw}" غير موجود في شيت المشرفين`,
+        };
+      }
+      toWrite.parentCode = resolved;
+    } else {
+      toWrite.parentCode = '';
+    }
+
+    const row = supervisorToRowCells([], columns, toWrite);
 
     console.log(`[AddSupervisor] Row data:`, row);
 
@@ -168,22 +194,50 @@ export async function addSupervisor(supervisor: Supervisor): Promise<{ success: 
 /**
  * Update supervisor
  */
+function pickSupervisorPatch(updates: Partial<Supervisor>): Partial<Supervisor> {
+  const patch: Partial<Supervisor> = {};
+  const keys: (keyof Supervisor)[] = [
+    'code',
+    'name',
+    'region',
+    'email',
+    'password',
+    'salaryType',
+    'salaryAmount',
+    'commissionFormula',
+    'target',
+    'orgRole',
+    'parentCode',
+  ];
+  for (const k of keys) {
+    if (k in updates && updates[k] !== undefined) {
+      (patch as Record<string, unknown>)[k] = updates[k];
+    }
+  }
+  return patch;
+}
+
 export async function updateSupervisor(
   code: string,
   updates: Partial<Supervisor>
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const data = await getSheetData('المشرفين');
+    const data = await getSheetData('المشرفين', false);
     const { dataStartIndex, columns } = resolveSupervisorsSheetLayout(data);
+    const codeNorm = normalizeSupervisorCode(code);
     let rowIndex = -1;
     let dataIdx = -1;
 
+    const allInSheet: Supervisor[] = [];
     for (let i = dataStartIndex; i < data.length; i++) {
-      const c = data[i]?.[columns.code]?.toString().trim();
-      if (c === code) {
+      const row = data[i] || [];
+      const parsed = parseSupervisorRowFromSheet(row, columns);
+      if (!parsed) continue;
+      allInSheet.push(parsed as Supervisor);
+      const c = String(parsed.code ?? '').trim();
+      if (normalizeSupervisorCode(c) === codeNorm) {
         dataIdx = i;
         rowIndex = i + 1;
-        break;
       }
     }
 
@@ -197,26 +251,45 @@ export async function updateSupervisor(
       return { success: false, error: 'المشرف غير موجود' };
     }
 
+    const patch = pickSupervisorPatch(updates);
     const merged: Supervisor = {
       ...current,
-      ...updates,
-      code: (updates.code || current.code).toString().trim(),
+      ...patch,
+      code: (patch.code || current.code).toString().trim(),
     } as Supervisor;
+
+    const index = buildSupervisorCodeIndex(allInSheet);
+    if ('parentCode' in patch) {
+      const parentRaw = String(patch.parentCode ?? '').trim();
+      if (!parentRaw) {
+        merged.parentCode = '';
+      } else {
+        const resolved = resolveSupervisorCodeInSheet(parentRaw, index);
+        if (!resolved) {
+          return {
+            success: false,
+            error: `كود المدير المباشر "${parentRaw}" غير موجود في شيت المشرفين`,
+          };
+        }
+        merged.parentCode = resolved;
+      }
+    }
 
     const updatedRow = supervisorToRowCells(row, columns, merged);
     const range = sheetRangeForSupervisorDataRow(rowIndex, columns);
 
-    console.log(`[UpdateSupervisor] Updating supervisor "${code}" at row ${rowIndex} range ${range}`);
+    console.log(
+      `[UpdateSupervisor] Updating "${merged.code}" row ${rowIndex} range ${range} parent=${merged.parentCode ?? ''} orgRole=${merged.orgRole ?? 'supervisor'}`
+    );
 
     const success = await updateSheetRange('المشرفين', range, [updatedRow]);
 
     if (success) {
-      // Clear cache and notify supervisors
       const { invalidateSupervisorCaches } = await import('./realtimeSync');
-      const { cache } = await import('./cache');
-      invalidateSupervisorCaches(code);
+      invalidateSupervisorCaches(merged.code);
       cache.clear('admin:supervisors');
-      console.log(`[UpdateSupervisor] Successfully updated supervisor "${code}" and cleared cache`);
+      cache.clear(CACHE_KEYS.sheetData('المشرفين'));
+      console.log(`[UpdateSupervisor] Successfully updated supervisor "${merged.code}"`);
       return { success: true };
     }
 
