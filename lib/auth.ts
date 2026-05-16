@@ -1,6 +1,7 @@
 import { getSheetData } from './googleSheets';
 import { parseAdminsSheetDataMatrix, ADMIN_SHEET_TAB_CANDIDATES } from './adminsSheetParser';
 import { jwtAdminOrgRoleFromSheet } from './adminFeatureAccess';
+import { normalizeSupervisorCodeForMatch } from './dataFilter';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -46,7 +47,7 @@ export async function authenticateSupervisor(code: string, password: string): Pr
       const supervisorEmail = row[3] ? row[3].toString().trim() : '';
       const supervisorPassword = row[4] ? row[4].toString().trim() : '';
 
-      if (supervisorCode === code) {
+      if (normalizeSupervisorCodeForMatch(supervisorCode) === normalizeSupervisorCodeForMatch(code)) {
         if (supervisorPassword === password) {
           const token = jwt.sign(
             {

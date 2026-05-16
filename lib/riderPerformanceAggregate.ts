@@ -3,6 +3,8 @@
  * including "work days" (days with hours > 0 and no absence).
  */
 
+import { normalizeRiderCodeForPerformance } from '@/lib/dataFilter';
+
 export type PerformanceRecord = {
   date: string;
   riderCode: string;
@@ -58,7 +60,7 @@ export function computeWorkDaysByRider(
   const dayKey = (code: string, date: string) => `${code}###${date}`;
 
   for (const rec of performanceData) {
-    const code = (rec.riderCode ?? '').toString().trim();
+    const code = normalizeRiderCodeForPerformance(rec.riderCode);
     const date = (rec.date ?? '').toString().trim();
     if (!code || !date) continue;
     const k = dayKey(code, date);
@@ -70,8 +72,8 @@ export function computeWorkDaysByRider(
 
   const counts = new Map<string, number>();
   for (const c of riderCodes) {
-    const trimmed = (c ?? '').toString().trim();
-    if (trimmed) counts.set(trimmed, 0);
+    const norm = normalizeRiderCodeForPerformance(c);
+    if (norm) counts.set(norm, 0);
   }
 
   for (const [k, agg] of dayMap) {
@@ -118,10 +120,11 @@ export function aggregateRidersInDateRange(
   const riderDataMap = new Map<string, RiderAggInternal>();
 
   seeds.forEach((rider) => {
-    const code = (rider.code ?? '').toString().trim();
-    if (!code) return;
-    riderDataMap.set(code, {
-      code,
+    const displayCode = (rider.code ?? '').toString().trim();
+    const norm = normalizeRiderCodeForPerformance(displayCode);
+    if (!norm) return;
+    riderDataMap.set(norm, {
+      code: displayCode,
       name: rider.name ?? '',
       region: rider.region,
       supervisorCode: rider.supervisorCode,
@@ -141,7 +144,7 @@ export function aggregateRidersInDateRange(
   const workDaysMap = computeWorkDaysByRider(performanceData, codes);
 
   performanceData.forEach((record) => {
-    const rc = (record.riderCode ?? '').toString().trim();
+    const rc = normalizeRiderCodeForPerformance(record.riderCode);
     const riderData = riderDataMap.get(rc);
     if (!riderData) return;
 
@@ -165,7 +168,7 @@ export function aggregateRidersInDateRange(
   });
 
   const result: AggregatedRiderRow[] = [];
-  riderDataMap.forEach((r, code) => {
+  riderDataMap.forEach((r, normCode) => {
     result.push({
       code: r.code,
       name: r.name,
@@ -178,7 +181,7 @@ export function aggregateRidersInDateRange(
       orders: r.orders,
       debt: r.debt,
       date: dateLabel,
-      workDays: workDaysMap.get(code) ?? 0,
+      workDays: workDaysMap.get(normCode) ?? 0,
       // Display 1/0 for absence to match performance uploads that use numeric flags.
       // Keep the underlying detection tolerant (isAbsentDay handles نعم/لا/1/0).
       absence: r.absenceCount > 0 ? '1' : '0',
