@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import ExcelUpload from '@/components/ExcelUpload';
+import PerformanceSyncPanel from '@/components/admin/PerformanceSyncPanel';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 export default function AdminPerformancePage() {
@@ -34,6 +35,8 @@ export default function AdminPerformancePage() {
             رفع بيانات الأداء اليومية للمناديب من ملف Excel
           </p>
         </div>
+
+        <PerformanceSyncPanel />
 
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 mb-6 min-w-0 overflow-hidden text-[#1e1e2f]">
           <h3 className="text-blue-800 font-semibold mb-2 break-words">📋 تنسيق الملف المطلوب:</h3>

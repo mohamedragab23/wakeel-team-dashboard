@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/rooster-sync",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/performance-sync",
+      "schedule": "0 10 * * *"
     }
   ]
 }
