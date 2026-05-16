@@ -13,7 +13,7 @@ import { ZONE_OPTIONS, parseAdminAllowedZonesList } from '@/lib/zones';
 import {
   LIMITED_PRESET_REGIONAL_MANAGER,
   LIMITED_PRESET_ZONE_MANAGER,
-} from '@/lib/orgDashboardSync';
+} from '@/lib/adminOrgPresets';
 
 export default function AdminPermissionsPage() {
   const queryClient = useQueryClient();

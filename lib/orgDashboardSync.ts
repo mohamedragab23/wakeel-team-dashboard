@@ -115,10 +115,3 @@ export async function syncLinkedSupervisorRowsFromAdmin(
 
   return { created, updated, skipped };
 }
-
-/** قوالب صلاحيات جاهزة لمدير زون / مدير منطقة */
-export const LIMITED_PRESET_ZONE_MANAGER =
-  'limited:dashboard,supervisors,riders,supervisor_performance,salaries,shifts,termination_requests,assignment_requests,debts';
-
-export const LIMITED_PRESET_REGIONAL_MANAGER =
-  'limited:dashboard,supervisors,riders,supervisor_performance,salaries,shifts,termination_requests,assignment_requests,debts,equipment_limits,equipment_requests';
