@@ -29,6 +29,8 @@ debug.log
 .env*.local
 .env
 .env.local
+.env.vercel.*
+.env.local.bak
 .env.production
 
 # vercel

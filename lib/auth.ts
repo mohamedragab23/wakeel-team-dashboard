@@ -122,7 +122,7 @@ export async function authenticateAdmin(code: string, password: string): Promise
         error:
           'إعدادات Google Sheets ناقصة على السيرفر. المتغيرات المفقودة: ' +
           missing.join('؛ ') +
-          '. قم بإضافتها في Vercel Environment Variables ثم أعد النشر.',
+          '. محلياً: أضفها في `.env.local` (أو شغّل `npm run env:pull`). على Vercel: Environment Variables ثم أعد النشر.',
       };
     }
 

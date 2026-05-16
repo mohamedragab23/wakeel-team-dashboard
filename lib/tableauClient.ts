@@ -52,10 +52,18 @@ export async function tableauSignIn(cfg: TableauConfig): Promise<SignInResult> {
     }),
   });
   const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`Tableau sign-in failed (${res.status}): ${text.slice(0, 500)}`);
+  if (!res.ok || text.trimStart().startsWith('<')) {
+    const hint = text.trimStart().startsWith('<')
+      ? 'الاستجابة HTML (غالباً Cloudflare Access) — جرّب من شبكة الشركة/VPN أو اطلب استثناء IP للسيرفر.'
+      : '';
+    throw new Error(`Tableau sign-in failed (${res.status}): ${text.slice(0, 300)}${hint ? ` — ${hint}` : ''}`);
   }
-  const json = JSON.parse(text);
+  let json: { credentials?: { token?: string; site?: { id?: string } } };
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`Tableau sign-in: invalid JSON response — ${text.slice(0, 200)}`);
+  }
   const token = json?.credentials?.token;
   const siteId = json?.credentials?.site?.id;
   if (!token || !siteId) throw new Error('Tableau sign-in: missing token or site id');

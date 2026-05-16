@@ -8,7 +8,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "ensure-equipment-sheets": "npx --yes tsx scripts/ensure-equipment-sheets.ts"
+    "ensure-equipment-sheets": "npx --yes tsx scripts/ensure-equipment-sheets.ts",
+    "test:tableau": "npx --yes tsx scripts/test-tableau-local.ts",
+    "env:pull": "npx --yes vercel@latest env pull .env.vercel.prod --environment=production --yes && node scripts/merge-env-local.mjs"
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",
