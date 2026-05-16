@@ -11,7 +11,13 @@ import {
   isLimitedAdminZoneScopeActive,
   parseLimitedFeatures,
 } from '@/lib/adminFeatureAccess';
-import { buildDescendantSupervisorCodesMulti, parseLinkedSupervisorRootCodes } from '@/lib/orgHierarchy';
+import {
+  buildDescendantSupervisorCodesMulti,
+  normalizeSupervisorCode,
+  parseLinkedSupervisorRootCodes,
+  resolveSupervisorCodeInSheet,
+  buildSupervisorCodeIndex,
+} from '@/lib/orgHierarchy';
 
 export type AdminDataScopeJwt = {
   role?: string;
@@ -32,8 +38,10 @@ export function filterSupervisorsForZoneScopedAdmin<T extends { region?: string 
 }
 
 /**
- * تصفية حسب نطاق الأدمن المحدود: تقاطع (زونات JWT) ∩ (أحفاد كود الشيت المربوط) إن وُجد.
- * يرجع null إذا لم يُطبَّق تقييد (أدمن كامل الصلاحيات، أو أدمن محدود بلا زون ولا ربط — السلوك السابق).
+ * تصفية حسب نطاق الأدمن المحدود.
+ * عند وجود ربط شجرة (linkedSupervisorCode): الشجرة هي مصدر الحقيقة — لا يُستبعد مشرف
+ * لأن عمود زونه مختلف عن مدير الزون (كان يسبب «عدم ربط كامل»).
+ * الزونات تُستخدم وحدها فقط إن لم يُربط جذر شجرة.
  */
 export async function getSupervisorCodesInAdminDataScope(
   decoded: AdminDataScopeJwt
@@ -42,6 +50,7 @@ export async function getSupervisorCodesInAdminDataScope(
   if (parseLimitedFeatures(decoded.permissions) === null) return null;
 
   const sups = await getAllSupervisors(false);
+  const index = buildSupervisorCodeIndex(sups);
 
   const byZoneList = parseAdminAllowedZonesList(decoded.dataZone);
   const zoneFiltered =
@@ -54,20 +63,33 @@ export async function getSupervisorCodesInAdminDataScope(
         )
       : null;
 
-  const roots = parseLinkedSupervisorRootCodes(String(decoded.linkedSupervisorCode ?? ''));
+  const rootsRaw = parseLinkedSupervisorRootCodes(String(decoded.linkedSupervisorCode ?? ''));
+  const roots = rootsRaw
+    .map((r) => resolveSupervisorCodeInSheet(r, index))
+    .filter((r): r is string => Boolean(r));
+
   let treeFiltered: Set<string> | null = null;
   if (roots.length > 0) {
     const tree = buildDescendantSupervisorCodesMulti(sups, roots);
-    /** إن كان الرابط غير صالح (لا يطابق أي صف في المشرفين) لا تُطبَّق شجرة فارغة — يُعتمد على الزون فقط */
     treeFiltered = tree.size > 0 ? tree : null;
   }
 
   if (!zoneFiltered && !treeFiltered) return null;
 
-  if (zoneFiltered && treeFiltered) {
-    return new Set([...zoneFiltered].filter((c) => treeFiltered.has(c)));
+  if (treeFiltered) return treeFiltered;
+  return zoneFiltered;
+}
+
+/** هل الكود ضمن نطاق الأدمن (بعد التطبيع)؟ */
+export function adminScopeHasSupervisorCode(allowed: Set<string> | null, code: string): boolean {
+  if (!allowed) return true;
+  const c = String(code ?? '').trim();
+  if (allowed.has(c)) return true;
+  const n = normalizeSupervisorCode(c);
+  for (const a of allowed) {
+    if (normalizeSupervisorCode(a) === n) return true;
   }
-  return zoneFiltered ?? treeFiltered;
+  return false;
 }
 
 /** @deprecated استخدم getSupervisorCodesInAdminDataScope — الاسم القديم للتوافق. */
@@ -88,7 +110,7 @@ export async function assertLimitedAdminSupervisorZoneAccess(
   }
   const allowed = await getSupervisorCodesInAdminDataScope(decoded);
   if (!allowed) return null;
-  if (!allowed.has(code)) {
+  if (!adminScopeHasSupervisorCode(allowed, code)) {
     return NextResponse.json(
       { success: false, error: 'لا تملك صلاحية على مشرفين خارج النطاق المحدد لك' },
       { status: 403 }
@@ -104,7 +126,7 @@ export async function filterSupervisorsForAdminDataScope<T extends { code?: stri
   if (!isLimitedAdminDataScopeActive(decoded)) return list;
   const allowed = await getSupervisorCodesInAdminDataScope(decoded);
   if (!allowed) return list;
-  return list.filter((s) => allowed.has(String(s.code ?? '').trim()));
+  return list.filter((s) => adminScopeHasSupervisorCode(allowed, String(s.code ?? '').trim()));
 }
 
 /** صفوف فيها supervisorCode — تقييد حسب نطاق الأدمن المحدود. */
@@ -114,5 +136,5 @@ export async function filterRowsBySupervisorInZoneScope<
   if (decoded.role !== 'admin') return rows;
   const allowed = await getSupervisorCodesInAdminDataScope(decoded);
   if (!allowed) return rows;
-  return rows.filter((r) => allowed.has(String(r.supervisorCode ?? '').trim()));
+  return rows.filter((r) => adminScopeHasSupervisorCode(allowed, String(r.supervisorCode ?? '').trim()));
 }

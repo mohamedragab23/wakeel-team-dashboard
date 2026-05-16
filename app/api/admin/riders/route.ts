@@ -6,7 +6,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
-import { assertLimitedAdminSupervisorZoneAccess, getSupervisorCodesInZoneScope } from '@/lib/adminZoneScope';
+import {
+  adminScopeHasSupervisorCode,
+  assertLimitedAdminSupervisorZoneAccess,
+  getSupervisorCodesInZoneScope,
+} from '@/lib/adminZoneScope';
 import { getAllRiders, addRider, updateRider, deleteRider } from '@/lib/adminService';
 
 export const dynamic = 'force-dynamic';
@@ -34,7 +38,9 @@ export async function GET(request: NextRequest) {
     let riders = await getAllRiders(refresh);
     const allowed = await getSupervisorCodesInZoneScope(decoded);
     if (allowed) {
-      riders = riders.filter((r) => allowed.has(String(r.supervisorCode ?? '').trim()));
+      riders = riders.filter((r) =>
+        adminScopeHasSupervisorCode(allowed, String(r.supervisorCode ?? '').trim())
+      );
     }
 
     return NextResponse.json({
@@ -129,7 +135,7 @@ export async function PUT(request: NextRequest) {
     const curSup = String(existing.supervisorCode ?? '').trim();
     const allowed = await getSupervisorCodesInZoneScope(decoded);
     if (allowed) {
-      if (!curSup || !allowed.has(curSup)) {
+      if (!curSup || !adminScopeHasSupervisorCode(allowed, curSup)) {
         return NextResponse.json(
           { success: false, error: 'لا تملك صلاحية على مندوبين خارج الزونات المحددة لك' },
           { status: 403 }
@@ -194,7 +200,7 @@ export async function DELETE(request: NextRequest) {
     const curSup = String(existing.supervisorCode ?? '').trim();
     const allowedDel = await getSupervisorCodesInZoneScope(decoded);
     if (allowedDel) {
-      if (!curSup || !allowedDel.has(curSup)) {
+      if (!curSup || !adminScopeHasSupervisorCode(allowedDel, curSup)) {
         return NextResponse.json(
           { success: false, error: 'لا تملك صلاحية على مندوبين خارج الزونات المحددة لك' },
           { status: 403 }

@@ -69,6 +69,7 @@ export default function AdminPermissionsPage() {
   const [linkedSupervisorCodes, setLinkedSupervisorCodes] = useState<Set<string>>(new Set());
   const [useAdminCodeAsLink, setUseAdminCodeAsLink] = useState(false);
   const [autoCreateSupervisorRows, setAutoCreateSupervisorRows] = useState(true);
+  const [syncZoneManagersToRegional, setSyncZoneManagersToRegional] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newAdmin, setNewAdmin] = useState({ code: '', name: '', password: '' });
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -124,7 +125,7 @@ export default function AdminPermissionsPage() {
     queryKey: ['admin-supervisors-picker'],
     queryFn: async () => {
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/supervisors', {
+      const res = await fetch('/api/admin/supervisors?refresh=true', {
         headers: { Authorization: `Bearer ${token}` },
       });
       const j = await res.json();
@@ -132,6 +133,21 @@ export default function AdminPermissionsPage() {
       return j.data as SupervisorPickerRow[];
     },
     enabled: !!canGrant,
+  });
+
+  const { data: hierarchyAudit } = useQuery({
+    queryKey: ['admin-hierarchy-audit'],
+    queryFn: async () => {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/admin/hierarchy-audit', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'فشل تدقيق الهرمية');
+      return j.data as { issueCount: number; issues: Array<{ code: string; name: string; detail: string }> };
+    },
+    enabled: !!canGrant,
+    staleTime: 60_000,
   });
 
   const selected = data?.admins?.find((a) => a.code === selectedCode);
@@ -195,23 +211,37 @@ export default function AdminPermissionsPage() {
           linkedSupervisorCode: Array.from(linkedSupervisorCodes).join('|'),
           useAdminCodeAsLink,
           autoCreateSupervisorRows,
+          syncZoneManagersToRegional,
+          regionalManagerSupervisorCode: adminPositionSheet.includes('منطقة')
+            ? (showCreateForm ? newAdmin.code : selectedCode).trim()
+            : '',
         }),
       });
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'فشل الحفظ');
       return j;
     },
-    onSuccess: (j: { sync?: { created?: string[]; updated?: string[] } }) => {
-      const extra =
-        j.sync?.created?.length || j.sync?.updated?.length
-          ? ` — صفوف المشرفين: أُنشئ ${j.sync?.created?.length ?? 0}، حُدّث ${j.sync?.updated?.length ?? 0}.`
-          : '';
+    onSuccess: (j: {
+      sync?: {
+        created?: string[];
+        updated?: string[];
+        zoneManagersLinked?: string[];
+      };
+    }) => {
+      const parts: string[] = [];
+      if (j.sync?.created?.length) parts.push(`أُنشئ ${j.sync.created.length} صف`);
+      if (j.sync?.updated?.length) parts.push(`حُدّث ${j.sync.updated.length} صف`);
+      if (j.sync?.zoneManagersLinked?.length) {
+        parts.push(`رُبط ${j.sync.zoneManagersLinked.length} مدير زون بمدير المنطقة`);
+      }
+      const extra = parts.length ? ` — ${parts.join('، ')}.` : '';
       setMsg({
         type: 'ok',
         text: `تم الحفظ.${extra} يجب على المستخدم تسجيل الخروج ثم الدخول مجدداً.`,
       });
       queryClient.invalidateQueries({ queryKey: ['admin-permissions-list'] });
       queryClient.invalidateQueries({ queryKey: ['admin-supervisors-picker'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-hierarchy-audit'] });
     },
     onError: (e: any) => {
       setMsg({ type: 'err', text: e?.message || 'فشل الحفظ' });
@@ -235,21 +265,29 @@ export default function AdminPermissionsPage() {
           linkedSupervisorCode: Array.from(linkedSupervisorCodes).join('|'),
           useAdminCodeAsLink,
           autoCreateSupervisorRows,
+          syncZoneManagersToRegional,
+          regionalManagerSupervisorCode: adminPositionSheet.includes('منطقة') ? newAdmin.code.trim() : '',
         }),
       });
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'فشل الإنشاء');
       return j;
     },
-    onSuccess: (j: { sync?: { created?: string[] } }) => {
+    onSuccess: (j: { sync?: { created?: string[]; zoneManagersLinked?: string[] } }) => {
+      const parts: string[] = [];
+      if (j.sync?.created?.length) parts.push(`أُنشئ ${j.sync.created.length} صف في المشرفين`);
+      if (j.sync?.zoneManagersLinked?.length) {
+        parts.push(`رُبط ${j.sync.zoneManagersLinked.length} مدير زون بمدير المنطقة`);
+      }
       setMsg({
         type: 'ok',
-        text: `تم إنشاء حساب الأدمن.${j.sync?.created?.length ? ` أُنشئ ${j.sync.created.length} صف في المشرفين.` : ''}`,
+        text: `تم إنشاء حساب الأدمن.${parts.length ? ` ${parts.join('، ')}.` : ''}`,
       });
       setShowCreateForm(false);
       setNewAdmin({ code: '', name: '', password: '' });
       queryClient.invalidateQueries({ queryKey: ['admin-permissions-list'] });
       queryClient.invalidateQueries({ queryKey: ['admin-supervisors-picker'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-hierarchy-audit'] });
     },
     onError: (e: any) => setMsg({ type: 'err', text: e?.message || 'فشل الإنشاء' }),
   });
@@ -314,6 +352,29 @@ export default function AdminPermissionsPage() {
             {(error as Error).message}
           </div>
         )}
+
+        {hierarchyAudit && hierarchyAudit.issueCount > 0 ? (
+          <div className="rounded-lg border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            <p className="font-medium mb-1">
+              تدقيق الهرمية: {hierarchyAudit.issueCount} مشكلة في شيت المشرفين
+            </p>
+            <ul className="text-xs space-y-0.5 max-h-28 overflow-y-auto list-disc list-inside">
+              {hierarchyAudit.issues.slice(0, 12).map((i) => (
+                <li key={i.code}>
+                  {i.code} — {i.detail}
+                </li>
+              ))}
+            </ul>
+            {hierarchyAudit.issueCount > 12 ? (
+              <p className="text-xs mt-1 opacity-70">… و{hierarchyAudit.issueCount - 12} أخرى</p>
+            ) : null}
+            <a href="/admin/supervisors" className="inline-block mt-2 text-cyan-300 underline text-xs">
+              إصلاح من إدارة المشرفين
+            </a>
+          </div>
+        ) : hierarchyAudit ? (
+          <p className="text-xs text-emerald-300/90">تدقيق الهرمية: لا توجد مشاكل ظاهرة في الربط حسب الشيت.</p>
+        ) : null}
 
         {isLoading ? (
           <p className="text-[rgba(234,240,255,0.7)]">جاري التحميل…</p>
@@ -664,6 +725,16 @@ export default function AdminPermissionsPage() {
                       />
                       إنشاء/تحديث صفوف المشرفين المربوطة تلقائياً عند الحفظ
                     </label>
+                    {isRegionalPosition ? (
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={syncZoneManagersToRegional}
+                          onChange={(e) => setSyncZoneManagersToRegional(e.target.checked)}
+                        />
+                        ربط مديري الزون المحددين بمدير المنطقة في الشيت (parentCode)
+                      </label>
+                    ) : null}
                     <div>
                       <label className="block text-sm mb-1">
                         {isRegionalPosition

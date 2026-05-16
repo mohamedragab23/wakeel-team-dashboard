@@ -11,7 +11,7 @@ import {
 } from '@/lib/adminFeatureAccess';
 import {
   ensureAdminsOrgColumns,
-  syncLinkedSupervisorRowsFromAdmin,
+  syncAdminHierarchyAfterSave,
 } from '@/lib/orgDashboardSync';
 
 export const dynamic = 'force-dynamic';
@@ -164,14 +164,25 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'فشل حفظ التعديل' }, { status: 500 });
     }
 
-    let syncResult = { created: [] as string[], updated: [] as string[], skipped: [] as string[] };
-    if (linkedSupervisorCode && autoCreateSupervisorRows) {
-      syncResult = await syncLinkedSupervisorRowsFromAdmin({
+    let syncResult = {
+      created: [] as string[],
+      updated: [] as string[],
+      skipped: [] as string[],
+      zoneManagersLinked: [] as string[],
+      zoneManagersSkipped: [] as string[],
+    };
+    if (linkedSupervisorCode) {
+      const isRegional = adminPosition.includes('منطقة');
+      syncResult = await syncAdminHierarchyAfterSave({
         linkedSupervisorCode,
         adminPosition,
         displayName: target.name,
         supervisorPassword: target.password,
-        autoCreateMissing: true,
+        autoCreateMissing: autoCreateSupervisorRows,
+        regionalManagerSupervisorCode: isRegional
+          ? String(body?.regionalManagerSupervisorCode ?? targetCode).trim()
+          : undefined,
+        syncZoneManagersToRegional: body?.syncZoneManagersToRegional !== false,
       });
     }
 
@@ -263,14 +274,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'فشل إضافة الأدمن' }, { status: 500 });
     }
 
-    let syncResult = { created: [] as string[], updated: [] as string[], skipped: [] as string[] };
-    if (linkedSupervisorCode && autoCreateSupervisorRows) {
-      syncResult = await syncLinkedSupervisorRowsFromAdmin({
+    let syncResult = {
+      created: [] as string[],
+      updated: [] as string[],
+      skipped: [] as string[],
+      zoneManagersLinked: [] as string[],
+      zoneManagersSkipped: [] as string[],
+    };
+    if (linkedSupervisorCode) {
+      const isRegional = adminPosition.includes('منطقة');
+      syncResult = await syncAdminHierarchyAfterSave({
         linkedSupervisorCode,
         adminPosition,
         displayName: name,
         supervisorPassword: password,
-        autoCreateMissing: true,
+        autoCreateMissing: autoCreateSupervisorRows,
+        regionalManagerSupervisorCode: isRegional
+          ? String(body?.regionalManagerSupervisorCode ?? code).trim()
+          : undefined,
+        syncZoneManagersToRegional: body?.syncZoneManagersToRegional !== false,
       });
     }
 

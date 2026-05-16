@@ -9,7 +9,7 @@ import { getAllSupervisors } from '@/lib/adminService';
 import { getSupervisorRiders } from '@/lib/dataService';
 import { aggregateSupervisorDailyPerformance } from '@/lib/dataFilter';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
-import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
+import { adminScopeHasSupervisorCode, getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,7 +65,9 @@ export async function GET(request: NextRequest) {
     let supervisors = await getAllSupervisors(false);
     const allowed = await getSupervisorCodesInAdminDataScope(decoded);
     if (allowed) {
-      supervisors = supervisors.filter((s) => allowed.has(String(s.code ?? '').trim()));
+      supervisors = supervisors.filter((s) =>
+        adminScopeHasSupervisorCode(allowed, String(s.code ?? '').trim())
+      );
     }
 
     const results: Array<{

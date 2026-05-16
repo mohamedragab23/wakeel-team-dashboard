@@ -4,7 +4,7 @@ import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getAllRiders } from '@/lib/adminService';
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { aggregateRidersInDateRange, type RiderSeed } from '@/lib/riderPerformanceAggregate';
-import { getSupervisorCodesInZoneScope } from '@/lib/adminZoneScope';
+import { adminScopeHasSupervisorCode, getSupervisorCodesInZoneScope } from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,7 +43,9 @@ export async function GET(request: NextRequest) {
 
     const allowed = await getSupervisorCodesInZoneScope(decoded);
     const ridersScoped = allowed
-      ? allRiders.filter((r) => allowed.has(String(r.supervisorCode ?? '').trim()))
+      ? allRiders.filter((r) =>
+          adminScopeHasSupervisorCode(allowed, String(r.supervisorCode ?? '').trim())
+        )
       : allRiders;
     const allowedRiderCodes = new Set(
       ridersScoped.map((r) => String(r.code ?? '').trim()).filter(Boolean)

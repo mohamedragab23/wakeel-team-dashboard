@@ -2,7 +2,12 @@ import type { AdminColumnMap } from '@/lib/adminsSheetParser';
 import { parseAdminsSheetDataMatrix } from '@/lib/adminsSheetParser';
 import { addSupervisor, getAllSupervisors, updateSupervisor, type Supervisor } from '@/lib/adminService';
 import { updateSheetRow } from '@/lib/googleSheets';
-import { parseLinkedSupervisorRootCodes, type SupervisorOrgRole } from '@/lib/orgHierarchy';
+import {
+  parseLinkedSupervisorRootCodes,
+  resolveSupervisorCodeInSheet,
+  buildSupervisorCodeIndex,
+  type SupervisorOrgRole,
+} from '@/lib/orgHierarchy';
 import {
   ensureSupervisorsOrgColumns,
   orgRoleToSheetLabel,
@@ -59,6 +64,10 @@ export type SyncLinkedSupervisorsInput = {
   email?: string;
   /** إن وُجدت أكواد غير موجودة — إنشاء صفوف */
   autoCreateMissing?: boolean;
+  /** كود صف مدير المنطقة في «المشرفين» — يُربط به مديرو الزون عند حفظ مدير المنطقة */
+  regionalManagerSupervisorCode?: string;
+  /** ربط parentCode لمديري الزون المحددين بمدير المنطقة */
+  syncZoneManagersToRegional?: boolean;
 };
 
 /**
@@ -114,4 +123,97 @@ export async function syncLinkedSupervisorRowsFromAdmin(
   }
 
   return { created, updated, skipped };
+}
+
+/**
+ * عند حفظ مدير المنطقة: ربط parentCode لكل مدير زون في القائمة بكود مدير المنطقة في الشيت.
+ */
+export async function syncZoneManagersUnderRegional(
+  regionalSupervisorCode: string,
+  zoneManagerCodes: string[]
+): Promise<{ linked: string[]; skipped: string[] }> {
+  const linked: string[] = [];
+  const skipped: string[] = [];
+  const regional = String(regionalSupervisorCode ?? '').trim();
+  if (!regional || zoneManagerCodes.length === 0) return { linked, skipped: zoneManagerCodes };
+
+  await ensureSupervisorsOrgColumns();
+  const existing = await getAllSupervisors(false);
+  const index = buildSupervisorCodeIndex(existing);
+  const regionalResolved = resolveSupervisorCodeInSheet(regional, index);
+  if (!regionalResolved) {
+    return { linked, skipped: zoneManagerCodes };
+  }
+
+  const regionalRow = existing.find((s) => String(s.code ?? '').trim() === regionalResolved);
+  const regionalRole = regionalRow?.orgRole ?? 'supervisor';
+  if (regionalRole !== 'regional_manager') {
+    await updateSupervisor(regionalResolved, { orgRole: 'regional_manager' });
+  }
+
+  for (const raw of zoneManagerCodes) {
+    const zm = resolveSupervisorCodeInSheet(raw, index);
+    if (!zm) {
+      skipped.push(raw);
+      continue;
+    }
+    const row = existing.find((s) => String(s.code ?? '').trim() === zm);
+    if (!row) {
+      skipped.push(zm);
+      continue;
+    }
+    if (row.orgRole === 'regional_manager') {
+      skipped.push(zm);
+      continue;
+    }
+    if (row.orgRole === 'supervisor') {
+      await updateSupervisor(zm, { orgRole: 'zone_manager' });
+    }
+    const curParent = String(row.parentCode ?? '').trim();
+    const parentResolved = curParent
+      ? resolveSupervisorCodeInSheet(curParent, index)
+      : null;
+    if (parentResolved === regionalResolved) {
+      linked.push(zm);
+      continue;
+    }
+    const res = await updateSupervisor(zm, {
+      orgRole: 'zone_manager',
+      parentCode: regionalResolved,
+    });
+    if (res.success) linked.push(zm);
+    else skipped.push(zm);
+  }
+
+  return { linked, skipped };
+}
+
+/** بعد حفظ أدمن: إنشاء الصفوف + ربط مديري الزون بمدير المنطقة إن لزم. */
+export async function syncAdminHierarchyAfterSave(input: SyncLinkedSupervisorsInput): Promise<{
+  created: string[];
+  updated: string[];
+  skipped: string[];
+  zoneManagersLinked: string[];
+  zoneManagersSkipped: string[];
+}> {
+  const base = await syncLinkedSupervisorRowsFromAdmin(input);
+  let zoneManagersLinked: string[] = [];
+  let zoneManagersSkipped: string[] = [];
+
+  const isRegional = String(input.adminPosition ?? '').includes('منطقة');
+  if (
+    isRegional &&
+    input.syncZoneManagersToRegional !== false &&
+    String(input.regionalManagerSupervisorCode ?? '').trim()
+  ) {
+    const zmAll = parseLinkedSupervisorRootCodes(input.linkedSupervisorCode);
+    const linkResult = await syncZoneManagersUnderRegional(
+      String(input.regionalManagerSupervisorCode).trim(),
+      zmAll
+    );
+    zoneManagersLinked = linkResult.linked;
+    zoneManagersSkipped = linkResult.skipped;
+  }
+
+  return { ...base, zoneManagersLinked, zoneManagersSkipped };
 }
