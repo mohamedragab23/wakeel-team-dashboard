@@ -2,8 +2,7 @@
 
 import { useState } from 'react';
 import Layout from '@/components/Layout';
-import ExcelUpload from '@/components/ExcelUpload';
-import PerformanceSyncPanel from '@/components/admin/PerformanceSyncPanel';
+import PerformanceManualImport from '@/components/admin/PerformanceManualImport';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 export default function AdminPerformancePage() {
@@ -32,29 +31,10 @@ export default function AdminPerformancePage() {
         <div className="min-w-0">
           <h1 className="text-2xl sm:text-3xl font-semibold text-[#EAF0FF] mb-2 break-words">رفع بيانات الأداء</h1>
           <p className="text-[rgba(234,240,255,0.70)] text-sm sm:text-base break-words">
-            رفع بيانات الأداء اليومية للمناديب من ملف Excel
+            صدّر من Tableau (Crosstab Excel) + ملف COD — النظام يصفّي ويدمج ويحفظ الأداء النهائي
           </p>
         </div>
 
-        <PerformanceSyncPanel />
-
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 mb-6 min-w-0 overflow-hidden text-[#1e1e2f]">
-          <h3 className="text-blue-800 font-semibold mb-2 break-words">📋 تنسيق الملف المطلوب:</h3>
-          <div className="text-sm text-blue-700 space-y-1">
-            <p>الأعمدة المطلوبة (بالترتيب):</p>
-            <ul className="list-disc list-inside mr-4 space-y-1">
-              <li>التاريخ (Date)</li>
-              <li>كود المندوب (Rider Code)</li>
-              <li>ساعات العمل (Hours)</li>
-              <li>البريك (Break)</li>
-              <li>التأخير (Delay)</li>
-              <li>الغياب (Absence) - نعم/لا</li>
-              <li>الطلبات (Orders)</li>
-              <li>معدل القبول (Acceptance Rate) - مثال: 95%</li>
-              <li>المحفظة/المديونية (Debt)</li>
-            </ul>
-          </div>
-        </div>
 
         {/* Date Selection for Performance Data */}
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 mb-6">
@@ -133,23 +113,7 @@ export default function AdminPerformancePage() {
           </div>
         </div>
 
-        <ExcelUpload
-          type="performance"
-          performanceDate={performanceDate}
-          onSuccess={(result) => {
-            console.log('Performance upload success:', result);
-          }}
-          onError={(error) => {
-            console.error('Performance upload error:', error);
-          }}
-        />
-        
-        {/* Debug: Show current performanceDate value */}
-        {process.env.NODE_ENV === 'development' && (
-          <div className="text-xs text-gray-500 mt-2">
-            Debug: performanceDate = "{performanceDate}" (length: {performanceDate.length})
-          </div>
-        )}
+        <PerformanceManualImport date={performanceDate} />
 
         {/* Clear All Performance Data Button */}
         <div className="bg-red-50 border border-red-200 rounded-xl shadow-sm p-6 mb-6">
