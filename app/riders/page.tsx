@@ -20,6 +20,7 @@ import {
   RIDER_NUM_FILTER_KEYS,
   type RiderNumFilterKey,
 } from '@/lib/ridersTableFilter';
+import { collectRiderColumnValues } from '@/lib/ridersTableColumnValues';
 
 interface RiderData {
   code: string;
@@ -96,6 +97,11 @@ export default function RidersPage() {
     normalizedSearchCode.length === 0
       ? riders
       : riders.filter((r) => (r.code || '').toString().trim().toLowerCase().includes(normalizedSearchCode));
+
+  const riderValueOptions = useMemo(() => {
+    const cols = ['code', 'name', 'date', 'workDays', 'hours', 'break', 'delay', 'orders', 'acceptance', 'debt', 'absence'] as const;
+    return Object.fromEntries(cols.map((c) => [c, collectRiderColumnValues(visibleRiders, c)])) as Record<(typeof cols)[number], string[]>;
+  }, [visibleRiders]);
 
   const columnFilteredRiders = useMemo(
     () => applyRiderTableFilters(visibleRiders, filters, sort),
@@ -403,9 +409,10 @@ export default function RidersPage() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">الكود</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>الكود</span>
                       <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.code}
                         isOpen={openMenu === 'code'}
                         onOpen={() => setOpenMenu('code')}
                         onClose={() => setOpenMenu(null)}
@@ -427,9 +434,10 @@ export default function RidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 min-w-[200px] align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">الاسم</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>الاسم</span>
                       <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.name}
                         isOpen={openMenu === 'name'}
                         onOpen={() => setOpenMenu('name')}
                         onClose={() => setOpenMenu(null)}
@@ -451,9 +459,10 @@ export default function RidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">التاريخ</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>التاريخ</span>
                       <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.date}
                         isOpen={openMenu === 'date'}
                         onOpen={() => setOpenMenu('date')}
                         onClose={() => setOpenMenu(null)}
@@ -475,9 +484,10 @@ export default function RidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 whitespace-nowrap align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">عدد أيام العمل</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>عدد أيام العمل</span>
                       <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.workDays}
                         isOpen={openMenu === 'workDays'}
                         onOpen={() => setOpenMenu('workDays')}
                         onClose={() => setOpenMenu(null)}
@@ -499,9 +509,10 @@ export default function RidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">ساعات العمل</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>ساعات العمل</span>
                       <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.hours}
                         isOpen={openMenu === 'hours'}
                         onOpen={() => setOpenMenu('hours')}
                         onClose={() => setOpenMenu(null)}
@@ -523,9 +534,10 @@ export default function RidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">البريك</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>البريك</span>
                       <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.break}
                         isOpen={openMenu === 'break'}
                         onOpen={() => setOpenMenu('break')}
                         onClose={() => setOpenMenu(null)}
@@ -547,9 +559,10 @@ export default function RidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">التأخير</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>التأخير</span>
                       <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.delay}
                         isOpen={openMenu === 'delay'}
                         onOpen={() => setOpenMenu('delay')}
                         onClose={() => setOpenMenu(null)}
@@ -571,9 +584,10 @@ export default function RidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">الغياب</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>الغياب</span>
                       <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.absence}
                         isOpen={openMenu === 'absence'}
                         onOpen={() => setOpenMenu('absence')}
                         onClose={() => setOpenMenu(null)}
@@ -595,9 +609,10 @@ export default function RidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">الطلبات</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>الطلبات</span>
                       <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.orders}
                         isOpen={openMenu === 'orders'}
                         onOpen={() => setOpenMenu('orders')}
                         onClose={() => setOpenMenu(null)}
@@ -619,9 +634,10 @@ export default function RidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">نسبة القبول</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>نسبة القبول</span>
                       <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.acceptance}
                         isOpen={openMenu === 'acceptance'}
                         onOpen={() => setOpenMenu('acceptance')}
                         onClose={() => setOpenMenu(null)}
@@ -643,9 +659,10 @@ export default function RidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">المديونية</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>المديونية</span>
                       <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.debt}
                         isOpen={openMenu === 'debt'}
                         onOpen={() => setOpenMenu('debt')}
                         onClose={() => setOpenMenu(null)}

@@ -20,6 +20,7 @@ import {
   type AdminPerfNumKey,
   type AdminPerfSort,
 } from '@/lib/adminRidersPerformanceTableFilter';
+import { collectAdminPerfColumnValues } from '@/lib/adminRidersPerfColumnValues';
 
 interface Rider {
   code: string;
@@ -180,6 +181,28 @@ export default function AdminRidersPage() {
     () => applyAdminPerfFilters(perfRows, perfFilters, perfSort),
     [perfRows, perfFilters, perfSort]
   );
+
+  const perfValueOptions = useMemo(() => {
+    const cols = [
+      'code',
+      'name',
+      'supervisor',
+      'region',
+      'date',
+      'workDays',
+      'hours',
+      'break',
+      'delay',
+      'absence',
+      'orders',
+      'acceptance',
+      'debt',
+    ] as const;
+    return Object.fromEntries(cols.map((c) => [c, collectAdminPerfColumnValues(perfRows, c)])) as Record<
+      (typeof cols)[number],
+      string[]
+    >;
+  }, [perfRows]);
 
   const addMutation = useMutation({
     mutationFn: async (rider: Rider) => {
@@ -345,9 +368,10 @@ export default function AdminRidersPage() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">الكود</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>الكود</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.code}
                         isOpen={perfOpenMenu === 'code'}
                         onOpen={() => setPerfOpenMenu('code')}
                         onClose={() => setPerfOpenMenu(null)}
@@ -369,9 +393,10 @@ export default function AdminRidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 min-w-[160px] align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">الاسم</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>الاسم</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.name}
                         isOpen={perfOpenMenu === 'name'}
                         onOpen={() => setPerfOpenMenu('name')}
                         onClose={() => setPerfOpenMenu(null)}
@@ -393,9 +418,10 @@ export default function AdminRidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 min-w-[140px] align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">المشرف</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>المشرف</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.supervisor}
                         isOpen={perfOpenMenu === 'supervisor'}
                         onOpen={() => setPerfOpenMenu('supervisor')}
                         onClose={() => setPerfOpenMenu(null)}
@@ -417,9 +443,10 @@ export default function AdminRidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">المنطقة</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>المنطقة</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.region}
                         isOpen={perfOpenMenu === 'region'}
                         onOpen={() => setPerfOpenMenu('region')}
                         onClose={() => setPerfOpenMenu(null)}
@@ -441,9 +468,10 @@ export default function AdminRidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">الفترة</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>الفترة</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.date}
                         isOpen={perfOpenMenu === 'date'}
                         onOpen={() => setPerfOpenMenu('date')}
                         onClose={() => setPerfOpenMenu(null)}
@@ -465,9 +493,10 @@ export default function AdminRidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 whitespace-nowrap align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">أيام العمل</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>أيام العمل</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.workDays}
                         isOpen={perfOpenMenu === 'workDays'}
                         onOpen={() => setPerfOpenMenu('workDays')}
                         onClose={() => setPerfOpenMenu(null)}
@@ -489,9 +518,10 @@ export default function AdminRidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">ساعات</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>ساعات</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.hours}
                         isOpen={perfOpenMenu === 'hours'}
                         onOpen={() => setPerfOpenMenu('hours')}
                         onClose={() => setPerfOpenMenu(null)}
@@ -513,9 +543,10 @@ export default function AdminRidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">بريك</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>بريك</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.break}
                         isOpen={perfOpenMenu === 'break'}
                         onOpen={() => setPerfOpenMenu('break')}
                         onClose={() => setPerfOpenMenu(null)}
@@ -537,9 +568,10 @@ export default function AdminRidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">تأخير</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>تأخير</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.delay}
                         isOpen={perfOpenMenu === 'delay'}
                         onOpen={() => setPerfOpenMenu('delay')}
                         onClose={() => setPerfOpenMenu(null)}
@@ -561,9 +593,10 @@ export default function AdminRidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">غياب</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>غياب</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.absence}
                         isOpen={perfOpenMenu === 'absence'}
                         onOpen={() => setPerfOpenMenu('absence')}
                         onClose={() => setPerfOpenMenu(null)}
@@ -585,9 +618,10 @@ export default function AdminRidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">طلبات</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>طلبات</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.orders}
                         isOpen={perfOpenMenu === 'orders'}
                         onOpen={() => setPerfOpenMenu('orders')}
                         onClose={() => setPerfOpenMenu(null)}
@@ -609,9 +643,10 @@ export default function AdminRidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">قبول %</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>قبول %</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.acceptance}
                         isOpen={perfOpenMenu === 'acceptance'}
                         onOpen={() => setPerfOpenMenu('acceptance')}
                         onClose={() => setPerfOpenMenu(null)}
@@ -633,9 +668,10 @@ export default function AdminRidersPage() {
                     </div>
                   </th>
                   <th className="text-right py-3 px-3 font-semibold text-gray-700 align-bottom">
-                    <div className="flex items-end justify-end gap-1.5">
-                      <span className="pb-0.5">مديونية</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span>مديونية</span>
                       <RidersExcelColumnMenu
+                        valueOptions={perfValueOptions.debt}
                         isOpen={perfOpenMenu === 'debt'}
                         onOpen={() => setPerfOpenMenu('debt')}
                         onClose={() => setPerfOpenMenu(null)}
