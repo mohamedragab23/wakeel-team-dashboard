@@ -8,6 +8,7 @@ import {
   getYesterdayCairoIso,
 } from '@/lib/performanceSyncService';
 import { listSyncQueueEntries } from '@/lib/performanceSyncQueue';
+import { isCloudflareAccessConfigured } from '@/lib/cloudflareAccess';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -35,6 +36,7 @@ export async function GET(request: NextRequest) {
         recent,
         suggestedDate: getYesterdayCairoIso(),
         tableauConfigured: !!(process.env.TABLEAU_PAT_NAME && process.env.TABLEAU_PAT_SECRET),
+        cloudflareAccessConfigured: isCloudflareAccessConfigured(),
       },
     });
   } catch (error: unknown) {

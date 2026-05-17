@@ -31,6 +31,7 @@ export default function PerformanceSyncPanel() {
         pending: PendingEntry[];
         suggestedDate: string;
         tableauConfigured: boolean;
+        cloudflareAccessConfigured: boolean;
       };
     },
   });
@@ -97,6 +98,14 @@ export default function PerformanceSyncPanel() {
         </p>
         {!data?.tableauConfigured && !isLoading && (
           <p className="text-amber-200 text-sm mt-2">متغيرات Tableau غير مضبوطة على السيرفر.</p>
+        )}
+        {data?.tableauConfigured && !data?.cloudflareAccessConfigured && !isLoading && (
+          <p className="text-amber-200 text-sm mt-2">
+            Tableau محمي بـ Cloudflare Access — السحب من Vercel يحتاج{' '}
+            <code className="text-xs">CLOUDFLARE_ACCESS_CLIENT_ID</code> و{' '}
+            <code className="text-xs">CLOUDFLARE_ACCESS_CLIENT_SECRET</code> (Service Token من IT). حتى ذلك: صدّر
+            Excel من Tableau وارفعه يدوياً أدناه.
+          </p>
         )}
       </div>
       {msg && (

@@ -3,7 +3,11 @@
  * @see https://help.tableau.com/current/api/rest_api/en-us/REST/rest_api_ref.htm
  */
 
+import { cloudflareAccessHintIfHtml, getCloudflareAccessHeaders, isCloudflareAccessConfigured } from '@/lib/cloudflareAccess';
+
 const API_VERSION = process.env.TABLEAU_API_VERSION?.trim() || '3.21';
+
+export { isCloudflareAccessConfigured };
 
 export type TableauConfig = {
   serverUrl: string;
@@ -39,10 +43,14 @@ function apiBase(serverUrl: string): string {
   return `${serverUrl}/api/${API_VERSION}`;
 }
 
+function tableauFetchHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return { ...getCloudflareAccessHeaders(), ...extra };
+}
+
 export async function tableauSignIn(cfg: TableauConfig): Promise<SignInResult> {
   const res = await fetch(`${apiBase(cfg.serverUrl)}/auth/signin`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: tableauFetchHeaders({ 'Content-Type': 'application/json', Accept: 'application/json' }),
     body: JSON.stringify({
       credentials: {
         personalAccessTokenName: cfg.patName,
@@ -52,11 +60,10 @@ export async function tableauSignIn(cfg: TableauConfig): Promise<SignInResult> {
     }),
   });
   const text = await res.text();
-  if (!res.ok || text.trimStart().startsWith('<')) {
-    const hint = text.trimStart().startsWith('<')
-      ? 'الاستجابة HTML (غالباً Cloudflare Access) — جرّب من شبكة الشركة/VPN أو اطلب استثناء IP للسيرفر.'
-      : '';
-    throw new Error(`Tableau sign-in failed (${res.status}): ${text.slice(0, 300)}${hint ? ` — ${hint}` : ''}`);
+  const isHtml = text.trimStart().startsWith('<');
+  if (!res.ok || isHtml) {
+    const hint = isHtml ? cloudflareAccessHintIfHtml(true) : '';
+    throw new Error(`Tableau sign-in failed (${res.status}): ${text.slice(0, 200)}${hint}`);
   }
   let json: { credentials?: { token?: string; site?: { id?: string } } };
   try {
@@ -74,7 +81,7 @@ export async function tableauSignOut(cfg: TableauConfig, token: string): Promise
   try {
     await fetch(`${apiBase(cfg.serverUrl)}/auth/signout`, {
       method: 'POST',
-      headers: { 'X-Tableau-Auth': token },
+      headers: tableauFetchHeaders({ 'X-Tableau-Auth': token }),
     });
   } catch {
     /* best-effort */
@@ -83,7 +90,7 @@ export async function tableauSignOut(cfg: TableauConfig, token: string): Promise
 
 async function tableauGetJson<T>(cfg: TableauConfig, token: string, path: string): Promise<T> {
   const res = await fetch(`${apiBase(cfg.serverUrl)}${path}`, {
-    headers: { 'X-Tableau-Auth': token, Accept: 'application/json' },
+    headers: tableauFetchHeaders({ 'X-Tableau-Auth': token, Accept: 'application/json' }),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`Tableau GET ${path} (${res.status}): ${text.slice(0, 400)}`);
@@ -147,7 +154,7 @@ export async function downloadViewCrosstab(
   const path = `/sites/${siteId}/views/${viewId}/crosstab/${fmt}${qs ? `?${qs}` : ''}`;
 
   const res = await fetch(`${apiBase(cfg.serverUrl)}${path}`, {
-    headers: { 'X-Tableau-Auth': token, Accept: '*/*' },
+    headers: tableauFetchHeaders({ 'X-Tableau-Auth': token, Accept: '*/*' }),
   });
   if (!res.ok) {
     const errText = await res.text();
