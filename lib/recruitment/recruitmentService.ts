@@ -598,14 +598,25 @@ export async function getRecruitmentStats(): Promise<RecruitmentStats> {
   };
 }
 
-export async function resetRecruitmentManagerData(managerCode: string): Promise<{
+function normCode(v: unknown): string {
+  return String(v ?? '')
+    .replace(/^\uFEFF/, '')
+    .trim()
+    .toLowerCase();
+}
+
+export async function resetRecruitmentManagerData(options: {
+  managerCode?: string;
+  clearAll?: boolean;
+}): Promise<{
   candidatesDeleted: number;
   outreachDeleted: number;
   activityDeleted: number;
   notificationsDeleted: number;
 }> {
-  const code = String(managerCode || '').trim();
-  if (!code) throw new Error('كود مسؤول التعيينات مطلوب');
+  const clearAll = Boolean(options.clearAll);
+  const code = normCode(options.managerCode);
+  if (!clearAll && !code) throw new Error('كود مسؤول التعيينات مطلوب');
 
   let candidatesDeleted = 0;
   let outreachDeleted = 0;
@@ -614,7 +625,8 @@ export async function resetRecruitmentManagerData(managerCode: string): Promise<
 
   const candidates = await loadAllCandidates(false);
   const candidateRows = candidates
-    .filter((c) => c.createdBy === code && !!c.sheetRow)
+    .filter((c) => clearAll || normCode(c.createdBy) === code)
+    .filter((c) => !!c.sheetRow)
     .map((c) => c.sheetRow as number)
     .sort((a, b) => b - a);
   for (const row of candidateRows) {
@@ -624,7 +636,8 @@ export async function resetRecruitmentManagerData(managerCode: string): Promise<
 
   const leads = await listOutreachLeads();
   const outreachRows = leads
-    .filter((l) => l.createdBy === code && !!l.sheetRow)
+    .filter((l) => clearAll || normCode(l.createdBy) === code)
+    .filter((l) => !!l.sheetRow)
     .map((l) => l.sheetRow as number)
     .sort((a, b) => b - a);
   for (const row of outreachRows) {
@@ -635,8 +648,8 @@ export async function resetRecruitmentManagerData(managerCode: string): Promise<
   const activity = await getSheetData(SHEET_ACTIVITY_LOG, false);
   for (let i = activity.length - 1; i >= 1; i--) {
     const row = activity[i] || [];
-    const changedBy = String(row[4] ?? '').trim();
-    if (changedBy === code) {
+    const changedBy = normCode(row[4]);
+    if (clearAll || changedBy === code) {
       const ok = await deleteSheetRow(SHEET_ACTIVITY_LOG, i + 1);
       if (ok) activityDeleted++;
     }
@@ -645,8 +658,8 @@ export async function resetRecruitmentManagerData(managerCode: string): Promise<
   const notifications = await getSheetData(SHEET_NOTIFICATIONS, false);
   for (let i = notifications.length - 1; i >= 1; i--) {
     const row = notifications[i] || [];
-    const targetUserCode = String(row[2] ?? '').trim();
-    if (targetUserCode === code) {
+    const targetUserCode = normCode(row[2]);
+    if (clearAll || targetUserCode === code) {
       const ok = await deleteSheetRow(SHEET_NOTIFICATIONS, i + 1);
       if (ok) notificationsDeleted++;
     }

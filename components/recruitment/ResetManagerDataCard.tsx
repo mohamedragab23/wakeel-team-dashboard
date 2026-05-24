@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Card from '@/components/ui-v2/Card';
 import Button from '@/components/ui-v2/Button';
 import Toast, { type ToastMessage } from '@/components/ui-v2/Toast';
@@ -10,8 +10,10 @@ const inputClass =
   'w-full rounded-lg bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.12)] px-3 py-2 text-sm text-[#EAF0FF]';
 
 export default function ResetManagerDataCard() {
+  const queryClient = useQueryClient();
   const [isAdmin, setIsAdmin] = useState(false);
   const [managerCode, setManagerCode] = useState('');
+  const [clearAll, setClearAll] = useState(false);
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<string>('');
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -47,13 +49,15 @@ export default function ResetManagerDataCard() {
   if (!isAdmin) return null;
 
   const resetData = async () => {
-    if (!managerCode.trim()) {
+    if (!clearAll && !managerCode.trim()) {
       setToast({ type: 'warning', text: 'اختر مسؤول التعيينات أولاً' });
       return;
     }
     const selected = managers.find((m) => m.code === managerCode);
     const ok = window.confirm(
-      `سيتم حذف كل بيانات مسؤول التعيينات ${selected?.name || managerCode} بشكل دائم من التعيينات. هل أنت متأكد؟`
+      clearAll
+        ? 'سيتم حذف كل داتا التعيينات بالكامل (جميع المرشحين وسجلات النشاط والإشعارات). هل أنت متأكد؟'
+        : `سيتم حذف كل بيانات مسؤول التعيينات ${selected?.name || managerCode} بشكل دائم من التعيينات. هل أنت متأكد؟`
     );
     if (!ok) return;
 
@@ -67,7 +71,7 @@ export default function ResetManagerDataCard() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ managerCode }),
+        body: JSON.stringify({ managerCode, clearAll }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل تصفير البيانات');
@@ -80,7 +84,11 @@ export default function ResetManagerDataCard() {
       setSummary(
         `تم الحذف: ${data.candidatesDeleted} مرشح، ${data.outreachDeleted} من داتا العروض، ${data.activityDeleted} سجل نشاط، ${data.notificationsDeleted} إشعار`
       );
-      setToast({ type: 'success', text: 'تم تصفير بيانات مسؤول التعيينات بنجاح' });
+      await queryClient.invalidateQueries({ queryKey: ['recruitment'] });
+      setToast({
+        type: 'success',
+        text: clearAll ? 'تم مسح كل داتا التعيينات بنجاح' : 'تم تصفير بيانات مسؤول التعيينات بنجاح',
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'حدث خطأ';
       setToast({ type: 'error', text: msg });
@@ -100,7 +108,12 @@ export default function ResetManagerDataCard() {
       <div className="grid md:grid-cols-[1fr_auto] gap-2 items-end">
         <label className="block">
           <span className="text-xs text-[rgba(234,240,255,0.65)] mb-1 block">اختر مسؤول التعيينات</span>
-          <select className={inputClass} value={managerCode} onChange={(e) => setManagerCode(e.target.value)}>
+          <select
+            className={inputClass}
+            value={managerCode}
+            onChange={(e) => setManagerCode(e.target.value)}
+            disabled={clearAll}
+          >
             <option value="">— اختر —</option>
             {managers.map((m) => (
               <option key={m.code} value={m.code}>
@@ -109,10 +122,18 @@ export default function ResetManagerDataCard() {
             ))}
           </select>
         </label>
-        <Button variant="secondary" onClick={resetData} disabled={loading || !managerCode}>
+        <Button variant="secondary" onClick={resetData} disabled={loading || (!clearAll && !managerCode)}>
           {loading ? 'جاري التصفير...' : 'تصفير بيانات المسؤول'}
         </Button>
       </div>
+      <label className="flex items-center gap-2 text-xs text-[rgba(234,240,255,0.75)]">
+        <input
+          type="checkbox"
+          checked={clearAll}
+          onChange={(e) => setClearAll(e.target.checked)}
+        />
+        مسح كل داتا التعيينات بالكامل (بدء من جديد)
+      </label>
       {summary ? <p className="text-xs text-[rgba(234,240,255,0.8)]">{summary}</p> : null}
       <Toast message={toast} />
     </Card>

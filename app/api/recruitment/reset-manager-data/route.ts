@@ -19,15 +19,16 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+    const clearAll = Boolean(body.clearAll);
     const managerCode = String(body.managerCode ?? '').trim();
-    if (!managerCode) {
+    if (!clearAll && !managerCode) {
       return NextResponse.json(
         { success: false, error: 'اكتب كود مسؤول التعيينات أولاً' },
         { status: 400 }
       );
     }
 
-    const result = await resetRecruitmentManagerData(managerCode);
+    const result = await resetRecruitmentManagerData({ managerCode, clearAll });
     return NextResponse.json({ success: true, data: result });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'حدث خطأ';
