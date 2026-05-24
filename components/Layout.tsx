@@ -16,9 +16,8 @@ import RecruitmentNotificationBell from '@/components/recruitment/RecruitmentNot
 const RECRUITMENT_MENU = [
   { href: '/recruitment', label: 'لوحة التعيين', icon: '📊' },
   { href: '/recruitment/candidates', label: 'جميع المتقدمين', icon: '👥' },
-  { href: '/recruitment/outreach', label: 'داتا العروض', icon: '📞' },
-  { href: '/recruitment/archive', label: 'المرشحون القدماء', icon: '📁' },
-  { href: '/recruitment/bulk-import', label: 'إضافة جماعية', icon: '📥' },
+  { href: '/recruitment/archive', label: 'إعادة التفعيل', icon: '📁' },
+  { href: '/recruitment/bulk-import', label: 'الرفع المجمع', icon: '📥' },
 ];
 
 interface User {

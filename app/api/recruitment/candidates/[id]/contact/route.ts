@@ -25,6 +25,21 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
     if (!status || !CONTACT_STATUS_VALUES.includes(status)) {
       return NextResponse.json({ success: false, error: 'حالة التواصل غير صالحة' }, { status: 400 });
     }
+    if ((status === 'تم التواصل' || status === 'تم الرد') && !String(body.contactReply ?? '').trim()) {
+      return NextResponse.json({ success: false, error: 'رد المرشح بعد التواصل مطلوب' }, { status: 400 });
+    }
+    if ((status === 'تم التواصل' || status === 'تم الرد') && body.hiringDecision === 'قيد المراجعة') {
+      return NextResponse.json(
+        { success: false, error: 'حدد هل المرشح هيشتغل أو لن يشتغل' },
+        { status: 400 }
+      );
+    }
+    if (body.hiringDecision === 'لن يشتغل' && !String(body.notHiredReason ?? '').trim()) {
+      return NextResponse.json({ success: false, error: 'سبب عدم التشغيل مطلوب' }, { status: 400 });
+    }
+    if (body.hiringDecision === 'هيشتغل' && !String(body.lecturePlannedDate ?? '').trim()) {
+      return NextResponse.json({ success: false, error: 'تاريخ المحاضرة مطلوب' }, { status: 400 });
+    }
 
     const actor = actorFromJwt(decoded);
     const updated = await logContact(
@@ -33,6 +48,10 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
         contactStatus: status,
         contactDate: body.contactDate,
         assignedManager: body.assignedManager || actor.name,
+        contactReply: body.contactReply,
+        hiringDecision: body.hiringDecision,
+        notHiredReason: body.notHiredReason,
+        lecturePlannedDate: body.lecturePlannedDate,
         notes: body.notes,
       },
       actor

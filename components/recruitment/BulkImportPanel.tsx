@@ -45,8 +45,14 @@ function sheetRowsToCandidates(rows: Record<string, unknown>[]): CandidateInput[
   });
 }
 
-export default function BulkImportPanel() {
-  const [isLegacy, setIsLegacy] = useState(false);
+type Props = {
+  isLegacy: boolean;
+  title: string;
+  description: string;
+  onImported?: () => void;
+};
+
+export default function BulkImportPanel({ isLegacy, title, description, onImported }: Props) {
   const [text, setText] = useState('');
   const [result, setResult] = useState<{ created: number; errors: string[] } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -69,6 +75,7 @@ export default function BulkImportPanel() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل الاستيراد');
       setResult(data.data);
+      onImported?.();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'خطأ');
     } finally {
@@ -100,21 +107,8 @@ export default function BulkImportPanel() {
   return (
     <Card className="p-6 space-y-6">
       <div>
-        <h2 className="text-lg font-bold mb-2">نوع المرشحين</h2>
-        <div className="flex gap-4">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="radio"
-              checked={!isLegacy}
-              onChange={() => setIsLegacy(false)}
-            />
-            مرشحين جدد
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="radio" checked={isLegacy} onChange={() => setIsLegacy(true)} />
-            مرشحين قدامى (من نظام سابق)
-          </label>
-        </div>
+        <h2 className="text-lg font-bold mb-1">{title}</h2>
+        <p className="text-sm text-[rgba(234,240,255,0.65)]">{description}</p>
       </div>
 
       <div>

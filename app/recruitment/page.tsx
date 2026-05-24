@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import RecruitmentStatsCards from '@/components/recruitment/RecruitmentStatsCards';
+import ResetManagerDataCard from '@/components/recruitment/ResetManagerDataCard';
 import Card from '@/components/ui-v2/Card';
 import Link from 'next/link';
 import type { RecruitmentStats } from '@/lib/recruitment/types';
@@ -30,6 +31,7 @@ export default function RecruitmentDashboardPage() {
 
   return (
     <div className="space-y-6">
+      <ResetManagerDataCard />
       {isLoading ? (
         <p>جاري تحميل الإحصائيات...</p>
       ) : (
@@ -38,9 +40,8 @@ export default function RecruitmentDashboardPage() {
 
       <div className="grid md:grid-cols-3 gap-4">
         <QuickLink href="/recruitment/candidates" title="جميع المتقدمين" desc="جدول المرشحين النشطين" />
-        <QuickLink href="/recruitment/outreach" title="داتا العروض للمشرف" desc="رفع الداتا ثم تحويل المقبولين" />
-        <QuickLink href="/recruitment/archive" title="الأرشيف" desc="مرشحون مرفوضون أو غير مكتملين" />
-        <QuickLink href="/recruitment/bulk-import" title="إضافة جماعية" desc="استيراد Excel أو CSV" />
+        <QuickLink href="/recruitment/archive" title="إعادة التفعيل" desc="مرشحون قدامى/مؤرشفون قابلون للعودة" />
+        <QuickLink href="/recruitment/bulk-import" title="الرفع المجمع" desc="رفع منفصل للتعيين الجديد وإعادة التفعيل" />
       </div>
     </div>
   );

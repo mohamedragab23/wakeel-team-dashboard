@@ -6,9 +6,8 @@ import { usePathname } from 'next/navigation';
 const LINKS = [
   { href: '/recruitment', label: 'لوحة التعيين' },
   { href: '/recruitment/candidates', label: 'جميع المتقدمين' },
-  { href: '/recruitment/outreach', label: 'داتا العروض للمشرف' },
-  { href: '/recruitment/archive', label: 'المرشحون القدماء' },
-  { href: '/recruitment/bulk-import', label: 'إضافة جماعية' },
+  { href: '/recruitment/archive', label: 'إعادة التفعيل' },
+  { href: '/recruitment/bulk-import', label: 'الرفع المجمع' },
 ];
 
 export default function RecruitmentSubNav() {

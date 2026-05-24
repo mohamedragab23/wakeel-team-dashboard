@@ -19,7 +19,9 @@ import type {
 import {
   CANDIDATE_HEADERS,
   OFFICE_MANAGER_ASSIGNMENT_OPTION,
+  SHEET_ACTIVITY_LOG,
   SHEET_CANDIDATES,
+  SHEET_NOTIFICATIONS,
   SHEET_OUTREACH_LEADS,
   OUTREACH_LEAD_HEADERS,
   defaultCandidateFields,
@@ -486,18 +488,38 @@ export async function logContact(
     contactStatus: Candidate['contactStatus'];
     contactDate?: string;
     assignedManager?: string;
+    contactReply?: string;
+    hiringDecision?: Candidate['hiringDecision'];
+    notHiredReason?: string;
+    lecturePlannedDate?: string;
     notes?: string;
   },
   actor: { code: string; name: string }
 ): Promise<Candidate | null> {
   const today = new Date().toISOString().slice(0, 10);
+  const existing = await getCandidateById(id);
+  if (!existing) return null;
+  const notesParts: string[] = [];
+  if (payload.contactReply?.trim()) {
+    notesParts.push(`رد التواصل: ${payload.contactReply.trim()}`);
+  }
+  if (payload.notes?.trim()) {
+    notesParts.push(payload.notes.trim());
+  }
+  const mergedNotes = notesParts.length
+    ? [existing.notes?.trim(), ...notesParts].filter(Boolean).join(' | ')
+    : undefined;
+
   return updateCandidate(
     id,
     {
       contactStatus: payload.contactStatus,
       contactDate: payload.contactDate || today,
       assignedManager: payload.assignedManager || actor.name,
-      ...(payload.notes != null ? { notes: payload.notes } : {}),
+      ...(payload.hiringDecision != null ? { hiringDecision: payload.hiringDecision } : {}),
+      ...(payload.notHiredReason != null ? { notHiredReason: payload.notHiredReason } : {}),
+      ...(payload.lecturePlannedDate != null ? { lecturePlannedDate: payload.lecturePlannedDate } : {}),
+      ...(mergedNotes != null ? { notes: mergedNotes } : {}),
     },
     actor
   );
@@ -574,6 +596,63 @@ export async function getRecruitmentStats(): Promise<RecruitmentStats> {
     equipmentReceived,
     totalActive: active.length,
   };
+}
+
+export async function resetRecruitmentManagerData(managerCode: string): Promise<{
+  candidatesDeleted: number;
+  outreachDeleted: number;
+  activityDeleted: number;
+  notificationsDeleted: number;
+}> {
+  const code = String(managerCode || '').trim();
+  if (!code) throw new Error('كود مسؤول التعيينات مطلوب');
+
+  let candidatesDeleted = 0;
+  let outreachDeleted = 0;
+  let activityDeleted = 0;
+  let notificationsDeleted = 0;
+
+  const candidates = await loadAllCandidates(false);
+  const candidateRows = candidates
+    .filter((c) => c.createdBy === code && !!c.sheetRow)
+    .map((c) => c.sheetRow as number)
+    .sort((a, b) => b - a);
+  for (const row of candidateRows) {
+    const ok = await deleteSheetRow(SHEET_CANDIDATES, row);
+    if (ok) candidatesDeleted++;
+  }
+
+  const leads = await listOutreachLeads();
+  const outreachRows = leads
+    .filter((l) => l.createdBy === code && !!l.sheetRow)
+    .map((l) => l.sheetRow as number)
+    .sort((a, b) => b - a);
+  for (const row of outreachRows) {
+    const ok = await deleteSheetRow(SHEET_OUTREACH_LEADS, row);
+    if (ok) outreachDeleted++;
+  }
+
+  const activity = await getSheetData(SHEET_ACTIVITY_LOG, false);
+  for (let i = activity.length - 1; i >= 1; i--) {
+    const row = activity[i] || [];
+    const changedBy = String(row[4] ?? '').trim();
+    if (changedBy === code) {
+      const ok = await deleteSheetRow(SHEET_ACTIVITY_LOG, i + 1);
+      if (ok) activityDeleted++;
+    }
+  }
+
+  const notifications = await getSheetData(SHEET_NOTIFICATIONS, false);
+  for (let i = notifications.length - 1; i >= 1; i--) {
+    const row = notifications[i] || [];
+    const targetUserCode = String(row[2] ?? '').trim();
+    if (targetUserCode === code) {
+      const ok = await deleteSheetRow(SHEET_NOTIFICATIONS, i + 1);
+      if (ok) notificationsDeleted++;
+    }
+  }
+
+  return { candidatesDeleted, outreachDeleted, activityDeleted, notificationsDeleted };
 }
 
 export async function ensureAllRecruitmentSheets(): Promise<string[]> {

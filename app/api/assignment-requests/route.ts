@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { getSheetData, appendToSheet, updateSheetRow, ensureSheetExists } from '@/lib/googleSheets';
-import { updateRider, addRider } from '@/lib/adminService';
+import { updateRider, addRider, getAllSupervisors } from '@/lib/adminService';
 import { isAllowedZone, ZONE_OPTIONS } from '@/lib/zones';
 import { assertLimitedAdminSupervisorZoneAccess, filterRowsBySupervisorInZoneScope } from '@/lib/adminZoneScope';
 
@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Create a new assignment request (supervisor only)
+// Create a new assignment request (supervisor / recruitment manager / admin)
 export async function POST(request: NextRequest) {
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
@@ -109,12 +109,36 @@ export async function POST(request: NextRequest) {
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'supervisor') {
-      return NextResponse.json({ success: false, error: 'غير مصرح - المشرفين فقط' }, { status: 401 });
+    if (
+      !decoded ||
+      !['supervisor', 'recruitment_manager', 'admin'].includes(String(decoded.role || ''))
+    ) {
+      return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
     const body = await request.json();
     const { riderCode, riderName, zone } = body;
+
+    let requestSupervisorCode = '';
+    let requestSupervisorName = '';
+    if (decoded.role === 'supervisor') {
+      requestSupervisorCode = decoded.code?.toString().trim() || '';
+      requestSupervisorName = decoded.name?.toString().trim() || '';
+    } else {
+      requestSupervisorCode = String(body.supervisorCode || '').trim();
+      if (!requestSupervisorCode) {
+        return NextResponse.json(
+          { success: false, error: 'اختيار المشرف مطلوب عند إنشاء الطلب بواسطة الإدارة/مسؤول التعيينات' },
+          { status: 400 }
+        );
+      }
+      const supervisors = await getAllSupervisors(false);
+      const targetSupervisor = supervisors.find((s) => s.code?.toString().trim() === requestSupervisorCode);
+      if (!targetSupervisor) {
+        return NextResponse.json({ success: false, error: 'المشرف المحدد غير موجود' }, { status: 400 });
+      }
+      requestSupervisorName = targetSupervisor.name || requestSupervisorCode;
+    }
 
     if (!riderCode || !riderName || !zone) {
       return NextResponse.json(
@@ -177,7 +201,7 @@ export async function POST(request: NextRequest) {
     // Check if there's already a pending request for this rider by this supervisor
     try {
       const requestsData = await getSheetData('طلبات_التعيين', false);
-      const supervisorCodeTrimmed = decoded.code?.toString().trim();
+      const supervisorCodeTrimmed = requestSupervisorCode;
       const riderCodeTrimmed = riderCode?.toString().trim();
       
       for (let i = 1; i < requestsData.length; i++) {
@@ -204,8 +228,8 @@ export async function POST(request: NextRequest) {
     // Create the request in Google Sheets
     const requestDate = new Date().toISOString().split('T')[0];
     const requestData = [
-      decoded.code?.toString().trim() || '', // Supervisor Code
-      decoded.name?.toString().trim() || '', // Supervisor Name
+      requestSupervisorCode, // Supervisor Code
+      requestSupervisorName, // Supervisor Name
       riderCode?.toString().trim() || '', // Rider Code
       riderName?.toString().trim() || '', // Rider Name
       zone?.toString().trim() || '', // Zone
@@ -232,7 +256,7 @@ export async function POST(request: NextRequest) {
       success: true,
       message: 'تم إرسال طلب التعيين بنجاح',
       data: {
-        supervisorCode: decoded.code,
+        supervisorCode: requestSupervisorCode,
         riderCode: riderCode?.toString().trim(),
         riderName: riderName?.toString().trim(),
         zone: zone?.toString().trim(),

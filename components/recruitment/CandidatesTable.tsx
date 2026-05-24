@@ -42,6 +42,7 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
   const [contactCandidate, setContactCandidate] = useState<Candidate | null>(null);
   const [activityCandidate, setActivityCandidate] = useState<Candidate | null>(null);
   const [wizardCandidate, setWizardCandidate] = useState<Candidate | null>(null);
+  const [userRole, setUserRole] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [rowAssignDraft, setRowAssignDraft] = useState<Record<string, string>>({});
   const [assigningId, setAssigningId] = useState<string | null>(null);
@@ -50,8 +51,10 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
   useEffect(() => {
     try {
       const u = JSON.parse(localStorage.getItem('user') || '{}');
+      setUserRole(String(u.role ?? ''));
       setIsAdmin(u.role === 'admin');
     } catch {
+      setUserRole('');
       setIsAdmin(false);
     }
   }, []);
@@ -226,47 +229,6 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
     }
     showToast('error', json.error || failMessage);
     return false;
-  };
-
-  const confirmLecture = async (candidate: Candidate) => {
-    const today = new Date().toISOString().slice(0, 10);
-    await quickUpdateCandidate(
-      candidate.id,
-      { lectureAttendance: 'حضر', lectureConfirmed: 'مؤكد', lectureDate: today },
-      'فشل تأكيد الحضور'
-    );
-  };
-
-  const confirmActivation = async (candidate: Candidate) => {
-    const today = new Date().toISOString().slice(0, 10);
-    await quickUpdateCandidate(
-      candidate.id,
-      {
-        activationStatus: 'مفعل - تم القبول',
-        activationConfirmed: 'مؤكد',
-        activationDate: today,
-      },
-      'فشل تأكيد التفعيل'
-    );
-  };
-
-  const markNotReceived = async (candidate: Candidate) => {
-    const reason = window.prompt('اكتب سبب عدم استلام المعدات:', candidate.equipmentNotReceivedReason || '');
-    if (reason == null) return;
-    const expectedDate = window.prompt(
-      'اكتب تاريخ الاستلام المتوقع (YYYY-MM-DD):',
-      candidate.equipmentExpectedDate || ''
-    );
-    if (expectedDate == null) return;
-    await quickUpdateCandidate(
-      candidate.id,
-      {
-        equipmentStatus: 'لم يستلم',
-        equipmentNotReceivedReason: reason.trim(),
-        equipmentExpectedDate: expectedDate.trim(),
-      },
-      'فشل تحديث حالة المعدات'
-    );
   };
 
   const quickAssignFinalSupervisor = async (candidate: Candidate) => {
@@ -535,15 +497,58 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
                   </td>
                   {mode === 'archive' && <td className="p-3">{c.previousEndDate || '—'}</td>}
                   <td className="p-3">
+                    {(() => {
+                      const today = new Date().toISOString().slice(0, 10);
+                      const lectureDone = c.lectureConfirmed === 'مؤكد' || c.lectureAttendance === 'حضر';
+                      const waitingForLectureDate =
+                        c.hiringDecision === 'هيشتغل' &&
+                        !!c.lecturePlannedDate &&
+                        c.lecturePlannedDate > today &&
+                        !lectureDone;
+                      if (!waitingForLectureDate) return null;
+                      return (
+                        <div className="mb-2">
+                          <span
+                            className="inline-flex items-center px-2 py-1 rounded-full text-xs border bg-amber-500/15 text-amber-300 border-amber-500/35"
+                            title={`بانتظار تاريخ المحاضرة: ${c.lecturePlannedDate}`}
+                          >
+                            بانتظار موعد المحاضرة ({c.lecturePlannedDate})
+                          </span>
+                        </div>
+                      );
+                    })()}
                     <div className="flex flex-wrap gap-1">
                       {mode === 'active' && (
                         <>
-                          <ActionBtn onClick={() => setWizardCandidate(c)}>متابعة</ActionBtn>
-                          <ActionBtn onClick={() => confirmLecture(c)}>تأكيد حضور</ActionBtn>
-                          <ActionBtn onClick={() => confirmActivation(c)}>تأكيد تفعيل</ActionBtn>
-                          <ActionBtn onClick={() => markNotReceived(c)}>لم يستلم</ActionBtn>
-                          <ActionBtn onClick={() => setContactCandidate(c)}>تواصل</ActionBtn>
-                          <ActionBtn onClick={() => setEditCandidate(c)}>تعديل</ActionBtn>
+                          {(() => {
+                            const canOperate = userRole === 'admin' || userRole === 'recruitment_manager' || userRole === '';
+                            const today = new Date().toISOString().slice(0, 10);
+                            const lectureDone = c.lectureConfirmed === 'مؤكد' || c.lectureAttendance === 'حضر';
+                            const waitingForLectureDate =
+                              c.hiringDecision === 'هيشتغل' &&
+                              !!c.lecturePlannedDate &&
+                              c.lecturePlannedDate > today &&
+                              !lectureDone;
+                            return (
+                              <>
+                          <ActionBtn
+                            onClick={() => setWizardCandidate(c)}
+                            disabled={waitingForLectureDate}
+                            title={
+                              waitingForLectureDate
+                                ? `المتابعة متاحة بدءًا من ${c.lecturePlannedDate}`
+                                : 'فتح متابعة المرشح'
+                            }
+                          >
+                            متابعة
+                          </ActionBtn>
+                          <ActionBtn onClick={() => setContactCandidate(c)} title="تسجيل نتيجة التواصل" disabled={!canOperate}>
+                            تم التواصل
+                          </ActionBtn>
+                              </>
+                            );
+                          })()}
+                          {isAdmin && <ActionBtn onClick={() => setEditCandidate(c)}>تعديل</ActionBtn>}
                         </>
                       )}
                       {mode === 'archive' && (
