@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { RECRUITMENT_MANAGER_PERMISSION } from '@/lib/authConstants';
 import { appendToSheet, getSheetData, updateSheetRow } from '@/lib/googleSheets';
 import { ADMIN_SHEET_TAB_CANDIDATES, parseAdminsSheetDataMatrix } from '@/lib/adminsSheetParser';
 import {
@@ -74,6 +75,7 @@ function normalizePermissionsInput(v: unknown): string {
   const s = String(v ?? '').trim();
   if (!s) return '';
   const low = s.toLowerCase();
+  if (low === RECRUITMENT_MANAGER_PERMISSION) return RECRUITMENT_MANAGER_PERMISSION;
   if (low === 'all' || low === '*') return 'all';
   if (!low.startsWith(LIMITED_PREFIX)) {
     throw new Error('صيغة الصلاحيات يجب أن تكون فارغة (وصول كامل) أو all أو limited:ميزة1,ميزة2');

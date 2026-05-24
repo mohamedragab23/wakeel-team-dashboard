@@ -5,7 +5,21 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { v2CssVars } from '@/theme/tokens';
-import { filterAdminMenuForPermissions, isGrantingAdmin } from '@/lib/adminFeatureAccess';
+import {
+  adminCanAccessRecruitment,
+  filterAdminMenuForPermissions,
+  isGrantingAdmin,
+} from '@/lib/adminFeatureAccess';
+import { hasRecruitmentAccess } from '@/lib/recruitment/recruitmentAuth';
+import RecruitmentNotificationBell from '@/components/recruitment/RecruitmentNotificationBell';
+
+const RECRUITMENT_MENU = [
+  { href: '/recruitment', label: 'لوحة التعيين', icon: '📊' },
+  { href: '/recruitment/candidates', label: 'جميع المتقدمين', icon: '👥' },
+  { href: '/recruitment/outreach', label: 'داتا العروض', icon: '📞' },
+  { href: '/recruitment/archive', label: 'المرشحون القدماء', icon: '📁' },
+  { href: '/recruitment/bulk-import', label: 'إضافة جماعية', icon: '📥' },
+];
 
 interface User {
   name?: string;
@@ -38,11 +52,24 @@ export default function Layout({ children }: LayoutProps) {
         const parsedUser = JSON.parse(userStr) as User;
         setUser(parsedUser);
 
-        // Guard admin routes: if user isn't admin, force re-login.
+        // Guard admin routes: admins only
         if (pathname?.startsWith('/admin') && parsedUser?.role !== 'admin') {
           localStorage.removeItem('token');
           localStorage.removeItem('user');
           router.push('/');
+          return;
+        }
+        // مسؤول التعيينات: لا يصل لصفحات الأدمن
+        if (parsedUser?.role === 'recruitment_manager' && pathname?.startsWith('/admin')) {
+          router.push('/recruitment');
+          return;
+        }
+        // قسم التعيين: أدمن (بصلاحية) أو مسؤول تعيينات فقط
+        if (
+          pathname?.startsWith('/recruitment') &&
+          !hasRecruitmentAccess(parsedUser as { role?: string; permissions?: string })
+        ) {
+          router.push(parsedUser?.role === 'admin' ? '/admin/dashboard' : '/dashboard');
           return;
         }
       } catch (e) {
@@ -67,12 +94,21 @@ export default function Layout({ children }: LayoutProps) {
   };
 
   const getMenuItems = () => {
+    if (user?.role === 'recruitment_manager') {
+      return RECRUITMENT_MENU;
+    }
     if (user?.role === 'admin') {
-      const base = filterAdminMenuForPermissions(String(user?.permissions ?? '')).map((d) => ({
-        href: d.href,
-        label: d.label,
-        icon: d.icon,
-      }));
+      const perms = String(user?.permissions ?? '');
+      const base = filterAdminMenuForPermissions(perms)
+        .filter((d) => d.feature !== 'recruitment')
+        .map((d) => ({
+          href: d.href,
+          label: d.label,
+          icon: d.icon,
+        }));
+      if (adminCanAccessRecruitment(perms)) {
+        base.push(...RECRUITMENT_MENU);
+      }
       if (isGrantingAdmin(user)) {
         base.push({ href: '/admin/admin-permissions', label: 'المستخدمون والهرمية', icon: '🔐' });
       }
@@ -86,6 +122,7 @@ export default function Layout({ children }: LayoutProps) {
         { href: '/equipment-return', label: 'استرجاع معدات', icon: '📥' },
         { href: '/deductions-upload', label: 'الاستقطاعات (Excel)', icon: '📑' },
         { href: '/termination-requests', label: 'الإقالات', icon: '🚫' },
+        { href: '/reactivation-requests', label: 'إعادة التفعيل', icon: '🔄' },
         { href: '/performance', label: 'الأداء', icon: '📈' },
         { href: '/salary', label: 'الراتب', icon: '💰' },
         { href: '/shifts', label: 'الشفتات', icon: '🕒' },
@@ -129,16 +166,26 @@ export default function Layout({ children }: LayoutProps) {
             <div className="p-6 border-b border-[rgba(255,255,255,0.10)]">
               <h2 className="text-2xl font-bold text-[#EAF0FF]">Wakeel Team</h2>
               <p className="text-sm text-[rgba(234,240,255,0.70)] mt-1">{user?.name || 'المستخدم'}</p>
+              {(user?.role === 'recruitment_manager' ||
+                (user?.role === 'admin' && adminCanAccessRecruitment(user?.permissions))) && (
+                <RecruitmentNotificationBell />
+              )}
             </div>
 
-            <nav className="flex-1 p-4 space-y-2">
-              {menuItems.map((item) => (
+            <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+              {menuItems.map((item) => {
+                const isActive =
+                  item.href === '/recruitment'
+                    ? pathname === '/recruitment'
+                    : pathname === item.href ||
+                      (pathname?.startsWith(`${item.href}/`) ?? false);
+                return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  prefetch={true} // Prefetch pages on hover for faster navigation
+                  prefetch={true}
                   className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                    pathname === item.href
+                    isActive
                       ? 'bg-gradient-to-l from-[color:var(--v2-accent-cyan)] to-[color:var(--v2-accent-purple)] text-black shadow-[var(--v2-shadow-glow)]'
                       : 'text-[rgba(234,240,255,0.80)] hover:bg-[rgba(255,255,255,0.06)]'
                   }`}
@@ -147,7 +194,8 @@ export default function Layout({ children }: LayoutProps) {
                   <span className="text-xl">{item.icon}</span>
                   <span className="font-medium">{item.label}</span>
                 </Link>
-              ))}
+              );
+              })}
             </nav>
 
             <div className="p-4 border-t border-[rgba(255,255,255,0.10)]">

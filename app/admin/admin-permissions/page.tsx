@@ -9,6 +9,7 @@ import {
   isGrantingAdmin,
   type AdminFeatureKey,
 } from '@/lib/adminFeatureAccess';
+import { RECRUITMENT_MANAGER_PERMISSION } from '@/lib/authConstants';
 import { ZONE_OPTIONS, parseAdminAllowedZonesList } from '@/lib/zones';
 import {
   LIMITED_PRESET_REGIONAL_MANAGER,
@@ -60,7 +61,7 @@ function listOperationalSupervisorsUnderRoots(
 export default function AdminPermissionsPage() {
   const queryClient = useQueryClient();
   const [selectedCode, setSelectedCode] = useState<string>('');
-  const [mode, setMode] = useState<'full' | 'limited'>('limited');
+  const [mode, setMode] = useState<'full' | 'limited' | 'recruitment_manager'>('limited');
   const [picked, setPicked] = useState<Set<AdminFeatureKey>>(new Set());
   const [pickedZones, setPickedZones] = useState<Set<string>>(new Set());
   /** منصب الأدمن المحدود في الشيت: مدير منطقة / مدير زون */
@@ -169,6 +170,9 @@ export default function AdminPermissionsPage() {
     if (!p || p.toLowerCase() === 'all' || p.includes('*')) {
       setMode('full');
       setPicked(new Set());
+    } else if (p.toLowerCase() === RECRUITMENT_MANAGER_PERMISSION) {
+      setMode('recruitment_manager');
+      setPicked(new Set());
     } else if (p.toLowerCase().startsWith('limited:')) {
       setMode('limited');
       const rest = p.slice('limited:'.length).trim();
@@ -191,6 +195,7 @@ export default function AdminPermissionsPage() {
 
   function buildPermissionsString(): string {
     if (mode === 'full') return '';
+    if (mode === 'recruitment_manager') return RECRUITMENT_MANAGER_PERMISSION;
     const keys = Array.from(picked);
     if (!keys.length) throw new Error('اختر ميزة واحدة على الأقل أو اختر وصول كامل');
     return `limited:${keys.join(',')}`;
@@ -281,7 +286,7 @@ export default function AdminPermissionsPage() {
       }
       setMsg({
         type: 'ok',
-        text: `تم إنشاء حساب الأدمن.${parts.length ? ` ${parts.join('، ')}.` : ''}`,
+        text: `تم إنشاء حساب المستخدم.${parts.length ? ` ${parts.join('، ')}.` : ''}`,
       });
       setShowCreateForm(false);
       setNewAdmin({ code: '', name: '', password: '' });
@@ -493,7 +498,28 @@ export default function AdminPermissionsPage() {
                     />
                     صلاحيات محددة فقط
                   </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="perm-mode"
+                      checked={mode === 'recruitment_manager'}
+                      onChange={() => {
+                        setMode('recruitment_manager');
+                        setPicked(new Set());
+                        setAdminPositionSheet('');
+                        setLinkedSupervisorCodes(new Set());
+                        setUseAdminCodeAsLink(false);
+                      }}
+                    />
+                    مسؤول التعيينات فقط
+                  </label>
                 </div>
+
+                {mode === 'recruitment_manager' && (
+                  <p className="text-xs rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-cyan-100">
+                    سيتم حفظ الصلاحية كـ <strong>recruitment_manager</strong>، ويظهر لهذا المستخدم قسم التعيينات فقط.
+                  </p>
+                )}
 
                 {mode === 'limited' && (
                   <div className="flex flex-wrap gap-2">

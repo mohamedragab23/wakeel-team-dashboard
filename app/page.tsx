@@ -17,6 +17,8 @@ export default function Home() {
         const user = JSON.parse(userStr);
         if (user.role === 'admin') {
           router.push(getDefaultAdminHome(user.permissions));
+        } else if (user.role === 'recruitment_manager') {
+          router.push('/recruitment');
         } else {
           router.push('/dashboard');
         }

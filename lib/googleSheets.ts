@@ -252,54 +252,6 @@ export async function updateSheetRange(
       updatedCells: response.data.updatedCells,
     });
     
-    // For supervisor sheet, ensure proper formatting and column alignment
-    if (sheetName === 'المشرفين') {
-      try {
-        // Parse the range to get row number
-        const rangeMatch = range.match(/A(\d+):/);
-        if (rangeMatch) {
-          const rowNumber = parseInt(rangeMatch[1]);
-          
-          // Get sheet metadata to find sheet ID
-          const spreadsheet = await sheets.spreadsheets.get({
-            spreadsheetId: getMainSpreadsheetId(),
-          });
-          
-          const sheet = spreadsheet.data.sheets?.find((s: any) => s.properties?.title === sheetName);
-          const sheetId = sheet?.properties?.sheetId;
-          
-          if (sheetId !== undefined) {
-            // Use batchUpdate to preserve formatting and ensure proper column structure
-            await sheets.spreadsheets.batchUpdate({
-              spreadsheetId: getMainSpreadsheetId(),
-              requestBody: {
-                requests: [
-                  {
-                    // Clear any extra cells beyond column I (index 8)
-                    updateCells: {
-                      range: {
-                        sheetId: sheetId,
-                        startRowIndex: rowNumber - 1,
-                        endRowIndex: rowNumber,
-                        startColumnIndex: 9, // Column J (index 9) onwards
-                        endColumnIndex: 26, // Column Z (index 26)
-                      },
-                      fields: 'userEnteredValue',
-                    },
-                  },
-                ],
-              },
-            });
-            
-            console.log(`[UpdateSheetRange] Cleared extra cells in row ${rowNumber} for sheet ${sheetName}`);
-          }
-        }
-      } catch (formatError: any) {
-        // Don't fail the update if formatting fails
-        console.warn(`[UpdateSheetRange] Warning: Could not apply formatting:`, formatError.message);
-      }
-    }
-    
     // Clear cache after successful write - clear ALL related caches
     cache.clear(CACHE_KEYS.sheetData(sheetName));
     

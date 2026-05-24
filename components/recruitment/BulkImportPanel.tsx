@@ -1,0 +1,167 @@
+'use client';
+
+import { useState } from 'react';
+import * as XLSX from 'xlsx';
+import Papa from 'papaparse';
+import Button from '@/components/ui-v2/Button';
+import Card from '@/components/ui-v2/Card';
+import type { CandidateInput } from '@/lib/recruitment/types';
+
+const inputClass =
+  'w-full rounded-lg bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.12)] px-3 py-2 text-sm text-[#EAF0FF] font-mono';
+
+function parseTextLines(text: string): CandidateInput[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split(/[,;\t|]/).map((p) => p.trim());
+      return {
+        fullName: parts[0] || '',
+        phone: parts[1] || '',
+        jobAd: parts[2] || 'غير محدد',
+        appliedDate: parts[3] || '',
+      };
+    });
+}
+
+function sheetRowsToCandidates(rows: Record<string, unknown>[]): CandidateInput[] {
+  return rows.map((row) => {
+    const keys = Object.keys(row);
+    const find = (...names: string[]) => {
+      for (const n of names) {
+        const k = keys.find((key) => key.toLowerCase().includes(n.toLowerCase()));
+        if (k && row[k] != null) return String(row[k]).trim();
+      }
+      return '';
+    };
+    return {
+      fullName: find('اسم', 'name', 'full') || String(row[keys[0]] ?? ''),
+      phone: find('هاتف', 'phone', 'mobile') || String(row[keys[1]] ?? ''),
+      jobAd: find('إعلان', 'job', 'ad') || 'غير محدد',
+      appliedDate: find('تاريخ', 'date') || '',
+    };
+  });
+}
+
+export default function BulkImportPanel() {
+  const [isLegacy, setIsLegacy] = useState(false);
+  const [text, setText] = useState('');
+  const [result, setResult] = useState<{ created: number; errors: string[] } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const uploadRows = async (rows: CandidateInput[]) => {
+    setLoading(true);
+    setError('');
+    setResult(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/recruitment/candidates/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ rows, isLegacy }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'فشل الاستيراد');
+      setResult(data.data);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'خطأ');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onFile = async (file: File) => {
+    const buf = await file.arrayBuffer();
+    if (file.name.endsWith('.csv')) {
+      const text = new TextDecoder().decode(buf);
+      Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (r) => {
+          uploadRows(sheetRowsToCandidates(r.data as Record<string, unknown>[]));
+        },
+      });
+      return;
+    }
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+    uploadRows(sheetRowsToCandidates(json));
+  };
+
+  const onTextSubmit = () => uploadRows(parseTextLines(text));
+
+  return (
+    <Card className="p-6 space-y-6">
+      <div>
+        <h2 className="text-lg font-bold mb-2">نوع المرشحين</h2>
+        <div className="flex gap-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              checked={!isLegacy}
+              onChange={() => setIsLegacy(false)}
+            />
+            مرشحين جدد
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="radio" checked={isLegacy} onChange={() => setIsLegacy(true)} />
+            مرشحين قدامى (من نظام سابق)
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-lg font-bold mb-2">رفع ملف Excel أو CSV</h2>
+        <p className="text-sm text-[rgba(234,240,255,0.65)] mb-2">
+          الأعمدة المتوقعة: الاسم، الهاتف، الإعلان (اختياري)، تاريخ التقديم (اختياري)
+        </p>
+        <input
+          type="file"
+          accept=".xlsx,.xls,.csv"
+          className="text-sm"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onFile(f);
+          }}
+        />
+      </div>
+
+      <div>
+        <h2 className="text-lg font-bold mb-2">لصق نصي (سطر لكل مرشح)</h2>
+        <p className="text-sm text-[rgba(234,240,255,0.65)] mb-2">
+          الصيغة: الاسم، الهاتف، الإعلان، التاريخ — مفصولة بفاصلة أو tab
+        </p>
+        <textarea
+          className={inputClass + ' min-h-[120px]'}
+          placeholder="أحمد علي، 01001234567، سائق توصيل - القاهرة"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <Button className="mt-3" variant="primary" onClick={onTextSubmit} disabled={loading || !text.trim()}>
+          استيراد من النص
+        </Button>
+      </div>
+
+      {error && <p className="text-[#FB7185]">{error}</p>}
+      {result && (
+        <div className="p-4 rounded-lg bg-[rgba(0,245,255,0.08)] border border-[rgba(0,245,255,0.2)]">
+          <p className="font-medium">تم إنشاء {result.created} مرشح</p>
+          {result.errors.length > 0 && (
+            <ul className="mt-2 text-sm text-[#FB7185] list-disc list-inside">
+              {result.errors.slice(0, 10).map((e, i) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}

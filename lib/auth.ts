@@ -2,6 +2,7 @@ import { getSheetData } from './googleSheets';
 import { parseAdminsSheetDataMatrix, ADMIN_SHEET_TAB_CANDIDATES } from './adminsSheetParser';
 import { jwtAdminOrgRoleFromSheet } from './adminFeatureAccess';
 import { normalizeSupervisorCodeForMatch } from './dataFilter';
+import { RECRUITMENT_MANAGER_PERMISSION } from './authConstants';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -20,7 +21,7 @@ export interface AuthResult {
   adminOrgRole?: 'full' | 'regional' | 'zone';
   /** ربط بكود صف في شيت المشرفين لنطاق الشجرة */
   linkedSupervisorCode?: string;
-  role?: 'supervisor' | 'admin';
+  role?: 'supervisor' | 'admin' | 'recruitment_manager';
   token?: string;
 }
 
@@ -172,14 +173,20 @@ export async function authenticateAdmin(code: string, password: string): Promise
         .replace(/^\uFEFF/, '')
         .trim();
       const adminOrgRole = jwtAdminOrgRoleFromSheet(a.adminPositionRaw, permissionsNorm);
+
+      // مسؤول التعيينات: عمود الصلاحيات = recruitment_manager
+      const isRecruitmentManager =
+        permissionsNorm.toLowerCase() === RECRUITMENT_MANAGER_PERMISSION;
+      const jwtRole = isRecruitmentManager ? 'recruitment_manager' : 'admin';
+
       const token = jwt.sign(
         {
           code: a.code,
           name: a.name,
-          role: 'admin',
+          role: jwtRole,
           permissions: permissionsNorm,
           dataZone: dataZoneNorm,
-          adminOrgRole,
+          adminOrgRole: isRecruitmentManager ? 'full' : adminOrgRole,
           linkedSupervisorCode: linkedNorm,
         },
         JWT_SECRET,
@@ -192,9 +199,9 @@ export async function authenticateAdmin(code: string, password: string): Promise
         name: a.name,
         permissions: permissionsNorm,
         dataZone: dataZoneNorm,
-        adminOrgRole,
+        adminOrgRole: isRecruitmentManager ? 'full' : adminOrgRole,
         linkedSupervisorCode: linkedNorm,
-        role: 'admin',
+        role: jwtRole,
         token,
       };
     }

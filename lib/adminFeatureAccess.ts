@@ -21,7 +21,8 @@ export type AdminFeatureKey =
   | 'deductions_reconcile'
   | 'debug'
   | 'debts'
-  | 'shifts';
+  | 'shifts'
+  | 'recruitment';
 
 const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   main_inventory: 'main_inventory',
@@ -57,6 +58,7 @@ export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
   debug: 'تهيئة النظام والتحقق',
   debts: 'المديونية / الديون',
   shifts: 'الشفتات',
+  recruitment: 'إدارة المرشحين (التعيين)',
 };
 
 export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
@@ -77,6 +79,7 @@ export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
   'debug',
   'debts',
   'shifts',
+  'recruitment',
 ];
 
 export type AdminMenuDef = { href: string; label: string; icon: string; feature: AdminFeatureKey };
@@ -88,6 +91,7 @@ export function getAdminMenuDefs(): AdminMenuDef[] {
     { href: '/admin/riders', label: 'إدارة المناديب', icon: '👥', feature: 'riders' },
     { href: '/admin/termination-requests', label: 'طلبات الإقالة', icon: '🚫', feature: 'termination_requests' },
     { href: '/admin/assignment-requests', label: 'طلبات التعيين', icon: '➕', feature: 'assignment_requests' },
+    { href: '/admin/reactivation-requests', label: 'طلبات إعادة التفعيل', icon: '🔄', feature: 'assignment_requests' },
     { href: '/admin/performance', label: 'رفع بيانات الأداء', icon: '📈', feature: 'performance_upload' },
     { href: '/admin/supervisor-performance', label: 'أداء المشرفين', icon: '📊', feature: 'supervisor_performance' },
     { href: '/admin/salary-config', label: 'إعدادات الرواتب', icon: '⚙️', feature: 'salary_config' },
@@ -99,7 +103,13 @@ export function getAdminMenuDefs(): AdminMenuDef[] {
     { href: '/admin/deductions-reconcile', label: 'استقطاعات المدير (مقارنة)', icon: '🔎', feature: 'deductions_reconcile' },
     { href: '/admin/debug', label: 'تهيئة النظام والتحقق', icon: '🧹', feature: 'debug' },
     { href: '/shifts', label: 'الشفتات', icon: '🕒', feature: 'shifts' },
+    { href: '/recruitment', label: 'التعيينات', icon: '📋', feature: 'recruitment' },
   ];
+}
+
+/** هل يظهر قسم التعيين في القائمة؟ */
+export function adminCanAccessRecruitment(permissions: string | undefined | null): boolean {
+  return adminFeatureAllowed(permissions, 'recruitment');
 }
 
 /** Comma-separated feature keys after "limited:" */

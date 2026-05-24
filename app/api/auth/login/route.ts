@@ -14,8 +14,38 @@ export async function POST(request: NextRequest) {
     }
 
     let result;
-    if (role === 'admin') {
+    // مسؤول التعيينات يستخدم نفس شيت Admins مع صلاحية recruitment_manager
+    if (role === 'admin' || role === 'recruitment_manager') {
       result = await authenticateAdmin(code, password);
+      // إن اختار المستخدم «مسؤول تعيينات» لكن الحساب ليس recruitment_manager
+      if (
+        result.success &&
+        role === 'recruitment_manager' &&
+        result.role !== 'recruitment_manager'
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              'هذا الحساب ليس مسجلاً كمسؤول تعيينات. في شيت Admins ضع recruitment_manager في عمود الصلاحيات.',
+          },
+          { status: 401 }
+        );
+      }
+      // إن سجّل كأدمن لكن الحساب recruitment_manager فقط
+      if (
+        result.success &&
+        role === 'admin' &&
+        result.role === 'recruitment_manager'
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'هذا الحساب مخصص لمسؤول التعيينات. اختر نوع المستخدم «مسؤول التعيينات».',
+          },
+          { status: 401 }
+        );
+      }
     } else {
       result = await authenticateSupervisor(code, password);
     }

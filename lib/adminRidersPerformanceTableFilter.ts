@@ -1,4 +1,5 @@
 import type { AbsenceFilterState, NumFilterState, TextFilterState } from '@/components/RidersExcelColumnMenu';
+import { cellToFilterLabel } from '@/lib/tableColumnFilterValues';
 
 export type AdminPerfRow = {
   code: string;
@@ -53,7 +54,14 @@ function parseNum(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function applyValuePick(cell: string | number | null | undefined, f: { pickValues?: string[] | null }): boolean {
+  if (f.pickValues === null || f.pickValues === undefined) return true;
+  if (f.pickValues.length === 0) return false;
+  return f.pickValues.includes(cellToFilterLabel(cell));
+}
+
 export function applyTextFilter(cell: string, f: TextFilterState): boolean {
+  if (f.op === 'values') return applyValuePick(cell, f);
   if (f.op === 'none') return true;
   const c = (cell ?? '').toString().toLowerCase();
   const v = f.value.trim().toLowerCase();
@@ -74,6 +82,7 @@ export function applyTextFilter(cell: string, f: TextFilterState): boolean {
 }
 
 export function applyNumScalar(n: number, f: NumFilterState): boolean {
+  if (f.op === 'values') return applyValuePick(n, f);
   if (f.op === 'none' || f.op === 'top10' || f.op === 'bottom10') return true;
   const x = parseNum(f.value);
   const y = parseNum(f.value2);
@@ -102,6 +111,7 @@ export function applyNumScalar(n: number, f: NumFilterState): boolean {
 }
 
 export function applyAbsenceFilter(cell: string, f: AbsenceFilterState): boolean {
+  if (f.op === 'values') return applyValuePick(cell, f);
   if (f.op === 'none') return true;
   return (cell ?? '').toString().trim() === f.value;
 }

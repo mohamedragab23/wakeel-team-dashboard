@@ -9,7 +9,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<'supervisor' | 'admin'>('supervisor');
+  const [role, setRole] = useState<'supervisor' | 'admin' | 'recruitment_manager'>('supervisor');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -36,6 +36,8 @@ export default function LoginPage() {
         localStorage.setItem('user', JSON.stringify(data));
         if (data.role === 'admin') {
           router.push(getDefaultAdminHome(data.permissions));
+        } else if (data.role === 'recruitment_manager') {
+          router.push('/recruitment');
         } else {
           router.push('/dashboard');
         }
@@ -80,7 +82,9 @@ export default function LoginPage() {
                       type="radio"
                       value="supervisor"
                       checked={role === 'supervisor'}
-                      onChange={(e) => setRole(e.target.value as 'supervisor' | 'admin')}
+                      onChange={(e) =>
+                        setRole(e.target.value as 'supervisor' | 'admin' | 'recruitment_manager')
+                      }
                     />
                     <span>مشرف</span>
                   </label>
@@ -91,9 +95,24 @@ export default function LoginPage() {
                       type="radio"
                       value="admin"
                       checked={role === 'admin'}
-                      onChange={(e) => setRole(e.target.value as 'supervisor' | 'admin')}
+                      onChange={(e) =>
+                        setRole(e.target.value as 'supervisor' | 'admin' | 'recruitment_manager')
+                      }
                     />
                     <span>مدير</span>
+                  </label>
+                  <label htmlFor="role-recruitment">
+                    <input
+                      id="role-recruitment"
+                      name="role"
+                      type="radio"
+                      value="recruitment_manager"
+                      checked={role === 'recruitment_manager'}
+                      onChange={(e) =>
+                        setRole(e.target.value as 'supervisor' | 'admin' | 'recruitment_manager')
+                      }
+                    />
+                    <span>مسؤول التعيينات</span>
                   </label>
                 </div>
               </div>

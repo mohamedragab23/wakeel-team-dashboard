@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery } from '@tanstack/react-query';
+import RecruitmentAdminDashboardSection from '@/components/recruitment/RecruitmentAdminDashboardSection';
 
 interface Stats {
   totalSupervisors: number;
@@ -300,6 +301,8 @@ export default function AdminDashboardPage() {
             </ul>
           </div>
         )}
+
+        <RecruitmentAdminDashboardSection />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 text-[#1e1e2f]">
