@@ -48,14 +48,15 @@ function isAbsentDay(absenceRaw: unknown): boolean {
 }
 
 /**
- * Per (riderCode, calendar date): counts as one work day if total hours > 0
- * and no row that day is marked absent.
+ * Per (riderCode, calendar date): counts as one work day if total hours > 0.
+ * We intentionally do not exclude days marked absent because operational data
+ * can contain absence=1 and positive hours on the same day (split shifts).
  */
 export function computeWorkDaysByRider(
   performanceData: PerformanceRecord[],
   riderCodes: Iterable<string>
 ): Map<string, number> {
-  type DayAgg = { hours: number; anyAbsent: boolean };
+  type DayAgg = { hours: number };
   const dayMap = new Map<string, DayAgg>();
   const dayKey = (code: string, date: string) => `${code}###${date}`;
 
@@ -64,9 +65,8 @@ export function computeWorkDaysByRider(
     const date = (rec.date ?? '').toString().trim();
     if (!code || !date) continue;
     const k = dayKey(code, date);
-    const cur = dayMap.get(k) ?? { hours: 0, anyAbsent: false };
+    const cur = dayMap.get(k) ?? { hours: 0 };
     cur.hours += Number(rec.hours) || 0;
-    if (isAbsentDay(rec.absence)) cur.anyAbsent = true;
     dayMap.set(k, cur);
   }
 
@@ -81,7 +81,7 @@ export function computeWorkDaysByRider(
     if (sep < 0) continue;
     const code = k.slice(0, sep);
     if (!counts.has(code)) continue;
-    if (agg.hours > 0 && !agg.anyAbsent) {
+    if (agg.hours > 0) {
       counts.set(code, (counts.get(code) ?? 0) + 1);
     }
   }

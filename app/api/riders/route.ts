@@ -65,7 +65,9 @@ export async function GET(request: NextRequest) {
       console.log(`[Riders API] Viewer: ${decoded.role} ${decoded.code}, Riders list size: ${riders.length}`);
       console.log(`[Riders API] Rider codes: ${riders.map(r => r.code).join(', ')}`);
 
-      const performanceData = await getSupervisorPerformanceFiltered(performanceScope, startDate, endDate);
+      const performanceData = await getSupervisorPerformanceFiltered(performanceScope, startDate, endDate, {
+        useCache: false,
+      });
 
       console.log(`[Riders API] Performance data found: ${performanceData.length} records`);
       
@@ -114,7 +116,9 @@ export async function GET(request: NextRequest) {
       const endDate = new Date(selectedDate);
       endDate.setHours(23, 59, 59, 999);
 
-      const performanceData = await getSupervisorPerformanceFiltered(performanceScope, startDate, endDate);
+      const performanceData = await getSupervisorPerformanceFiltered(performanceScope, startDate, endDate, {
+        useCache: false,
+      });
 
       const seeds = riders.map((r) => ({
         code: r.code,

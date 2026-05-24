@@ -16,6 +16,9 @@ export function invalidateSupervisorCaches(supervisorCode?: string) {
   cache.clear(CACHE_KEYS.sheetData('المناديب'));
   cache.clear(CACHE_KEYS.sheetData('الديون'));
   cache.clear(CACHE_KEYS.sheetData('البيانات اليومية'));
+  for (const key of cache.keys()) {
+    if (key.startsWith('performance:')) cache.clear(key);
+  }
 
   // Clear specific supervisor caches if code provided
   if (supervisorCode) {
@@ -26,9 +29,6 @@ export function invalidateSupervisorCaches(supervisorCode?: string) {
       if (k.startsWith(dashPrefix)) cache.clear(k);
     }
     cache.clear(CACHE_KEYS.ridersData(c));
-    // Clear performance caches for common date ranges (we clear all to be safe)
-    // Performance data cache keys include date ranges, so we clear the sheet data cache
-    // which will force a refresh on next request
   }
 }
 

@@ -3,9 +3,13 @@ import { getSheetData } from './googleSheets';
 
 /** Match rider codes across "00123" vs "123" styles (same as performance filter). */
 export function normalizeRiderCodeForPerformance(code: any): string {
-  const s = (code ?? '').toString().trim();
-  if (!s) return '';
-  return s.replace(/^0+/, '') || '0';
+  const raw = String(code ?? '')
+    .replace(/\uFEFF/g, '')
+    .trim();
+  if (!raw) return '';
+  const cleaned = raw.replace(/^['’]+/, '').replace(/^"(.*)"$/, '$1').trim();
+  if (!cleaned) return '';
+  return cleaned.replace(/^0+/, '') || '0';
 }
 
 /** تطبيع كود المشرف لمطابقة شيت طلبات الإقالة مع كود الجلسة */
@@ -16,7 +20,7 @@ export function normalizeSupervisorCodeForMatch(code: any): string {
     .replace(/^0+(?=\d)/, '');
 }
 
-/** غياب في شيت البيانات اليومية — لا تُحسب الساعات كعمل فعلي */
+/** تحديد ما إذا كان الصف مُعلّم كغياب (لاستخدامه في عداد الغياب فقط). */
 export function isDailyRowMarkedAbsent(absenceRaw: unknown): boolean {
   const a = String(absenceRaw ?? '')
     .trim()
@@ -272,9 +276,9 @@ export async function aggregateSupervisorDailyPerformance(
     if (cutoff && normalizedRowDate.getTime() > cutoff.getTime()) continue;
 
     const absenceRaw = row[5]?.toString().trim() || 'لا';
-    const absent = isDailyRowMarkedAbsent(absenceRaw);
     const hoursRaw = parseFloat(row[2]?.toString() || '0') || 0;
-    const hours = absent ? 0 : hoursRaw;
+    // Keep actual worked hours even when absence flag exists.
+    const hours = hoursRaw;
     const orders = parseInt(row[6]?.toString() || '0') || 0;
     const dateStr = normalizedRowDate.toISOString().split('T')[0];
 
@@ -464,9 +468,11 @@ export async function getSupervisorDebtsFiltered(supervisorCode: string) {
 export async function getSupervisorPerformanceFiltered(
   supervisorCode: string | null,
   startDate?: Date,
-  endDate?: Date
+  endDate?: Date,
+  options?: { useCache?: boolean }
 ) {
   try {
+    const useCache = options?.useCache ?? true;
     const allRidersMode = supervisorCode === null;
 
     let riderCodesExact: Set<string> | null = null;
@@ -486,7 +492,7 @@ export async function getSupervisorPerformanceFiltered(
       }
     }
 
-    const allData = await getSheetData('البيانات اليومية');
+    const allData = await getSheetData('البيانات اليومية', useCache);
     /** دمج تكرار (نفس اليوم + نفس المندوب): آخر صف في الشيت يفوز */
     const mergedByDayRider = new Map<string, any>();
 
@@ -545,9 +551,9 @@ export async function getSupervisorPerformanceFiltered(
 
       const dateStr = normalizedRowDate.toISOString().split('T')[0];
       const absenceRaw = row[5]?.toString().trim() || 'لا';
-      const absent = isDailyRowMarkedAbsent(absenceRaw);
       const hoursRaw = parseFloat(row[2]?.toString() || '0') || 0;
-      const hours = absent ? 0 : hoursRaw;
+      // Keep actual worked hours even when absence flag exists.
+      const hours = hoursRaw;
 
       mergedByDayRider.set(dailyPerformanceRowKey(dateStr, riderCode), {
         date: dateStr,
