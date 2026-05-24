@@ -374,6 +374,10 @@ export async function createCandidate(
     { ...input, isLegacy: options?.isLegacy ?? input.isLegacy },
     createdBy
   );
+  if (options?.isLegacy) {
+    fields.pipelineStatus = 'archived';
+    fields.previousEndDate = fields.previousEndDate || new Date().toISOString().slice(0, 10);
+  }
   const candidate: Candidate = { id, ...fields };
 
   await appendToSheet(SHEET_CANDIDATES, [candidateToRow(candidate)], false);
@@ -467,6 +471,7 @@ export async function reactivateCandidate(
       contactDate: '',
       activationDate: '',
       previousEndDate: '',
+      isLegacy: false,
     },
     actor
   );

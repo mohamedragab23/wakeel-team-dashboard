@@ -8,12 +8,11 @@ import type { Candidate } from '@/lib/recruitment/types';
 
 export default function RecruitmentBulkImportPage() {
   const queryClient = useQueryClient();
-  const { data: activeCandidates = [] } = useQuery({
-    queryKey: ['recruitment', 'bulk-import-active-candidates'],
+  const { data: allCandidates = [] } = useQuery({
+    queryKey: ['recruitment', 'bulk-import-candidates-pool'],
     queryFn: async () => {
       const token = localStorage.getItem('token');
       const url = new URL('/api/recruitment/candidates', window.location.origin);
-      url.searchParams.set('pipelineStatus', 'active');
       const res = await fetch(url.toString(), {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -23,10 +22,10 @@ export default function RecruitmentBulkImportPage() {
   });
 
   const [newCandidates, legacyCandidates] = useMemo(() => {
-    const legacy = activeCandidates.filter((c) => c.isLegacy);
-    const fresh = activeCandidates.filter((c) => !c.isLegacy);
+    const legacy = allCandidates.filter((c) => c.isLegacy);
+    const fresh = allCandidates.filter((c) => !c.isLegacy && c.pipelineStatus === 'active');
     return [fresh, legacy];
-  }, [activeCandidates]);
+  }, [allCandidates]);
 
   return (
     <div className="space-y-6">

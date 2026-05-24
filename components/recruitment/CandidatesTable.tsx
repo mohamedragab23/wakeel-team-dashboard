@@ -25,7 +25,7 @@ const selectClass =
 
 export default function CandidatesTable({ mode }: { mode: Mode }) {
   const queryClient = useQueryClient();
-  const pipelineStatus = mode === 'archive' ? 'archived' : 'active';
+  const pipelineStatus = mode === 'archive' ? undefined : 'active';
 
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
@@ -85,12 +85,12 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
     appliedDateTo,
   ];
 
-  const { data: candidates = [], isLoading, refetch } = useQuery({
+  const { data: candidatesRaw = [], isLoading, refetch } = useQuery({
     queryKey,
     queryFn: async () => {
       const token = localStorage.getItem('token');
       const url = new URL('/api/recruitment/candidates', window.location.origin);
-      url.searchParams.set('pipelineStatus', pipelineStatus);
+      if (pipelineStatus) url.searchParams.set('pipelineStatus', pipelineStatus);
       if (debouncedQ) url.searchParams.set('q', debouncedQ);
       if (contactStatus) url.searchParams.set('contactStatus', contactStatus);
       if (lectureAttendance) url.searchParams.set('lectureAttendance', lectureAttendance);
@@ -110,6 +110,11 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
       return json.success ? (json.data as Candidate[]) : [];
     },
   });
+
+  const candidates = useMemo(() => {
+    if (mode !== 'archive') return candidatesRaw;
+    return candidatesRaw.filter((c) => c.pipelineStatus === 'archived' || c.isLegacy);
+  }, [candidatesRaw, mode]);
 
   const activeFiltersCount = useMemo(() => {
     const filters = [
@@ -165,14 +170,14 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
   const exportExcel = () => {
     const token = localStorage.getItem('token');
     const url = new URL('/api/recruitment/export', window.location.origin);
-    url.searchParams.set('pipelineStatus', pipelineStatus);
+    if (pipelineStatus) url.searchParams.set('pipelineStatus', pipelineStatus);
     if (debouncedQ) url.searchParams.set('q', debouncedQ);
     fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.blob())
       .then((blob) => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `candidates-${pipelineStatus}.xlsx`;
+        a.download = `candidates-${pipelineStatus || 'reactivation'}.xlsx`;
         a.click();
       });
   };
