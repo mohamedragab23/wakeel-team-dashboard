@@ -182,6 +182,8 @@ export type SupervisorDailyAggRecord = {
 export type SupervisorRiderAttribution = {
   riderCodesExact: Set<string>;
   riderCodesNormalized: Set<string>;
+  activeAssignedExact: Set<string>;
+  activeAssignedNormalized: Set<string>;
   inclusiveEndByRider: Map<string, Date>;
   terminatedCodes: Set<string>;
   riderNamesByCode: Map<string, string>;
@@ -201,8 +203,14 @@ export async function buildSupervisorRiderAttribution(
   const { codes: terminatedCodes, inclusiveEndByRider, riderNamesByCode } =
     await getApprovedTerminationAttributionForSupervisor(supTrim);
 
-  const riderCodesExact = new Set(riders.map((r) => (r.code ?? '').toString().trim()).filter(Boolean));
-  const riderCodesNormalized = new Set(riders.map((r) => normalizeRiderCodeForPerformance(r.code)));
+  const activeAssignedExact = new Set(
+    riders.map((r) => (r.code ?? '').toString().trim()).filter(Boolean)
+  );
+  const activeAssignedNormalized = new Set(
+    riders.map((r) => normalizeRiderCodeForPerformance(r.code))
+  );
+  const riderCodesExact = new Set(activeAssignedExact);
+  const riderCodesNormalized = new Set(activeAssignedNormalized);
   for (const code of terminatedCodes) {
     riderCodesExact.add(code);
     riderCodesNormalized.add(normalizeRiderCodeForPerformance(code));
@@ -211,6 +219,8 @@ export async function buildSupervisorRiderAttribution(
   return {
     riderCodesExact,
     riderCodesNormalized,
+    activeAssignedExact,
+    activeAssignedNormalized,
     inclusiveEndByRider,
     terminatedCodes,
     riderNamesByCode,
@@ -246,6 +256,8 @@ export async function aggregateSupervisorDailyPerformance(
   const {
     riderCodesExact,
     riderCodesNormalized,
+    activeAssignedExact,
+    activeAssignedNormalized,
     inclusiveEndByRider,
     terminatedCodes,
     riders,
@@ -301,9 +313,13 @@ export async function aggregateSupervisorDailyPerformance(
     if (normalizedRowDate.getTime() > normalizedEndDate.getTime()) continue;
     if (normalizedRowDate.getFullYear() < 2020 || normalizedRowDate.getFullYear() > 2030) continue;
 
-    const cutoff =
-      inclusiveEndByRider.get(riderCode) ?? inclusiveEndByRider.get(riderCodeNorm);
-    if (cutoff && normalizedRowDate.getTime() > cutoff.getTime()) continue;
+    const isCurrentlyAssigned =
+      activeAssignedExact.has(riderCode) || activeAssignedNormalized.has(riderCodeNorm);
+    if (!isCurrentlyAssigned) {
+      const cutoff =
+        inclusiveEndByRider.get(riderCode) ?? inclusiveEndByRider.get(riderCodeNorm);
+      if (cutoff && normalizedRowDate.getTime() > cutoff.getTime()) continue;
+    }
 
     const absenceRaw = row[5]?.toString().trim() || 'لا';
     const hoursRaw = parseFloat(row[2]?.toString() || '0') || 0;
@@ -507,6 +523,8 @@ export async function getSupervisorPerformanceFiltered(
 
     let riderCodesExact: Set<string> | null = null;
     let riderCodesNormalized: Set<string> | null = null;
+    let activeAssignedExact: Set<string> | null = null;
+    let activeAssignedNormalized: Set<string> | null = null;
 
     let inclusiveEndByRider: Map<string, Date> = new Map();
 
@@ -516,6 +534,8 @@ export async function getSupervisorPerformanceFiltered(
       inclusiveEndByRider = attr.inclusiveEndByRider;
       riderCodesExact = attr.riderCodesExact;
       riderCodesNormalized = attr.riderCodesNormalized;
+      activeAssignedExact = attr.activeAssignedExact;
+      activeAssignedNormalized = attr.activeAssignedNormalized;
 
       if (riderCodesExact.size === 0) {
         return [];
@@ -572,10 +592,15 @@ export async function getSupervisorPerformanceFiltered(
       }
 
       if (!allRidersMode) {
-        const cutoff =
-          inclusiveEndByRider.get(riderCode) ?? inclusiveEndByRider.get(riderCodeNorm);
-        if (cutoff && normalizedRowDate.getTime() > cutoff.getTime()) {
-          continue;
+        const isCurrentlyAssigned =
+          (activeAssignedExact?.has(riderCode) ?? false) ||
+          (activeAssignedNormalized?.has(riderCodeNorm) ?? false);
+        if (!isCurrentlyAssigned) {
+          const cutoff =
+            inclusiveEndByRider.get(riderCode) ?? inclusiveEndByRider.get(riderCodeNorm);
+          if (cutoff && normalizedRowDate.getTime() > cutoff.getTime()) {
+            continue;
+          }
         }
       }
 
