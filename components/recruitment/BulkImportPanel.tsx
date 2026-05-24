@@ -84,22 +84,44 @@ export default function BulkImportPanel({ isLegacy, title, description, onImport
   };
 
   const onFile = async (file: File) => {
-    const buf = await file.arrayBuffer();
-    if (file.name.endsWith('.csv')) {
-      const text = new TextDecoder().decode(buf);
-      Papa.parse(text, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (r) => {
-          uploadRows(sheetRowsToCandidates(r.data as Record<string, unknown>[]));
-        },
-      });
-      return;
+    setError('');
+    setResult(null);
+    try {
+      const buf = await file.arrayBuffer();
+      const lowerName = file.name.toLowerCase();
+      if (lowerName.endsWith('.csv')) {
+        const text = new TextDecoder().decode(buf);
+        Papa.parse(text, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (r) => {
+            const parsed = sheetRowsToCandidates(r.data as Record<string, unknown>[]);
+            if (!parsed.length) {
+              setError('الملف لا يحتوي على بيانات صالحة للاستيراد');
+              return;
+            }
+            uploadRows(parsed);
+          },
+        });
+        return;
+      }
+      const wb = XLSX.read(buf, { type: 'array' });
+      const firstSheet = wb.SheetNames[0];
+      if (!firstSheet) {
+        setError('لم يتم العثور على أي Sheet داخل الملف');
+        return;
+      }
+      const ws = wb.Sheets[firstSheet];
+      const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+      const parsed = sheetRowsToCandidates(json);
+      if (!parsed.length) {
+        setError('الملف لا يحتوي على بيانات صالحة للاستيراد');
+        return;
+      }
+      uploadRows(parsed);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? `فشل قراءة الملف: ${e.message}` : 'فشل قراءة الملف');
     }
-    const wb = XLSX.read(buf, { type: 'array' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
-    uploadRows(sheetRowsToCandidates(json));
   };
 
   const onTextSubmit = () => uploadRows(parseTextLines(text));
@@ -123,6 +145,7 @@ export default function BulkImportPanel({ isLegacy, title, description, onImport
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) onFile(f);
+            e.currentTarget.value = '';
           }}
         />
       </div>
