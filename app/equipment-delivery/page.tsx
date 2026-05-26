@@ -6,7 +6,7 @@ import Card from '@/components/ui-v2/Card';
 import Button from '@/components/ui-v2/Button';
 import { ZONE_OPTIONS } from '@/lib/zones';
 
-const MAX_DATA_URL = 48000;
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 export default function EquipmentDeliveryPage() {
   const [riderCode, setRiderCode] = useState('');
@@ -28,21 +28,14 @@ export default function EquipmentDeliveryPage() {
       setMessage({ type: 'err', text: 'الملف يجب أن يكون صورة' });
       return;
     }
-    if (file.size > 4 * 1024 * 1024) {
-      setMessage({ type: 'err', text: 'حجم الصورة كبير جداً (الحد الأقصى تقريباً 4 ميجا)' });
+    if (file.size > MAX_PHOTO_BYTES) {
+      setMessage({ type: 'err', text: 'حجم الصورة كبير جداً (الحد الأقصى 5 ميجا)' });
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
-      let s = String(reader.result || '');
-      if (s.length > MAX_DATA_URL) {
-        s = s.slice(0, MAX_DATA_URL);
-        setMessage({
-          type: 'err',
-          text: 'تم اقتصار بيانات الصورة لحدود Google Sheets. يُفضل صورة أصغر.',
-        });
-      }
-      setPhotoData(s);
+      setPhotoData(String(reader.result || ''));
+      setMessage({ type: 'ok', text: 'تم اختيار الصورة — سيتم رفعها وإنشاء رابط في الشيت عند الإرسال' });
     };
     reader.readAsDataURL(file);
   };
@@ -220,7 +213,11 @@ export default function EquipmentDeliveryPage() {
                 className="text-sm text-[#EAF0FF]"
                 onChange={(e) => onFile(e.target.files?.[0] || null)}
               />
-              {photoData && <p className="text-xs text-emerald-300 mt-1">تم تحميل الصورة كـ data URL للحفظ في الشيت</p>}
+              {photoData && (
+                <p className="text-xs text-emerald-300 mt-1">
+                  تم اختيار الصورة — سيظهر رابط معاينة في الشيت بعد الإرسال
+                </p>
+              )}
             </div>
 
             <Button type="submit" variant="primary" disabled={loading}>

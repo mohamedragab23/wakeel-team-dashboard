@@ -300,12 +300,21 @@ export default function AdminEquipmentRequestsPage() {
                       <td className="p-2">
                         {row.photoData ? (
                           <a
-                            href={row.photoData.startsWith('data:') ? row.photoData : `#`}
+                            href={
+                              row.photoData.startsWith('data:') || row.photoData.startsWith('http')
+                                ? row.photoData
+                                : '#'
+                            }
                             target="_blank"
                             rel="noreferrer"
                             className="text-cyan-300 underline text-xs"
                             onClick={(e) => {
-                              if (!row.photoData.startsWith('data:')) e.preventDefault();
+                              if (
+                                !row.photoData.startsWith('data:') &&
+                                !row.photoData.startsWith('http')
+                              ) {
+                                e.preventDefault();
+                              }
                             }}
                           >
                             معاينة

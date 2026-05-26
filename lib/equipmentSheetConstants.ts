@@ -1,6 +1,8 @@
 /** Google Sheets tab names (main spreadsheet) */
 export const SHEET_MAIN_INVENTORY = 'المخزون_الرئيسي';
 export const SHEET_EQUIPMENT_DELIVERY = 'تسليم_المعدات';
+/** تخزين أجزاء صور التسليم (نفس ملف الشيت — بدون Drive) */
+export const SHEET_EQUIPMENT_PHOTOS = 'مخزن_صور_المعدات';
 export const SHEET_EQUIPMENT_RETURN = 'استرجاع_المعدات';
 export const SHEET_DEDUCTIONS_IMPORT = 'الاستقطاعات';
 /** صف واحد لكل عملية رفع Excel استقطاعات (لإشعار المدير في اللوحة). */

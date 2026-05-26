@@ -10,6 +10,7 @@ import {
   SHEET_DEDUCTIONS_IMPORT,
   SHEET_DEDUCTIONS_UPLOAD_LOG,
   SHEET_EQUIPMENT_DELIVERY,
+  SHEET_EQUIPMENT_PHOTOS,
   SHEET_EQUIPMENT_RETURN,
 } from '@/lib/equipmentSheetConstants';
 import { ensureMainInventoryInitialized } from '@/lib/mainInventoryService';
@@ -60,6 +61,9 @@ export async function ensureAllEquipmentSheets(): Promise<{
 
   await ensureSheetExists(SHEET_EQUIPMENT_DELIVERY, [...DELIVERY_HEADERS]);
   ensured.push(SHEET_EQUIPMENT_DELIVERY);
+
+  await ensureSheetExists(SHEET_EQUIPMENT_PHOTOS, ['معرف_الصورة', 'رقم_الجزء', 'البيانات']);
+  ensured.push(SHEET_EQUIPMENT_PHOTOS);
 
   await ensureSheetExists(SHEET_EQUIPMENT_RETURN, [...RETURN_HEADERS]);
   ensured.push(SHEET_EQUIPMENT_RETURN);

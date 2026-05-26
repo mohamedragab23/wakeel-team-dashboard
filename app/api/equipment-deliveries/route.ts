@@ -12,6 +12,7 @@ import { assertSupervisorRider } from '@/lib/riderValidation';
 import { applyMainInventoryDelta } from '@/lib/mainInventoryService';
 import { isAllowedZone, ZONE_OPTIONS } from '@/lib/zones';
 import { assertLimitedAdminSupervisorZoneAccess, filterRowsBySupervisorInZoneScope } from '@/lib/adminZoneScope';
+import { saveEquipmentPhotoAndGetUrl } from '@/lib/equipmentPhotoStorage';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,8 +35,6 @@ const HEADERS = [
   'معالج_بواسطة',
   'سبب_الرفض',
 ];
-
-const MAX_PHOTO_LEN = 45000;
 
 function padRow(row: any[], len: number): any[] {
   const r = [...row];
@@ -176,9 +175,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: riderCheck.error }, { status: 400 });
     }
 
-    let photo = photoData ? String(photoData) : '';
-    if (photo.length > MAX_PHOTO_LEN) {
-      photo = photo.slice(0, MAX_PHOTO_LEN);
+    let photo = '';
+    if (photoData) {
+      try {
+        photo = await saveEquipmentPhotoAndGetUrl(String(photoData), {
+          supervisorCode: decoded.code?.toString().trim() || '',
+          riderCode: riderCode?.toString().trim() || '',
+        });
+      } catch (uploadErr: any) {
+        return NextResponse.json(
+          { success: false, error: uploadErr.message || 'فشل رفع الصورة' },
+          { status: 400 }
+        );
+      }
     }
 
     await ensureSheetExists(SHEET_EQUIPMENT_DELIVERY, HEADERS);
