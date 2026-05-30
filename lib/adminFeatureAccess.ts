@@ -38,6 +38,10 @@ const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   equipment_requests: 'equipment_requests',
   debts: 'debts',
   riders: 'riders',
+  assignment_requests: 'assignment_requests',
+  termination_requests: 'termination_requests',
+  recruitment: 'recruitment',
+  shifts: 'shifts',
 };
 
 export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
