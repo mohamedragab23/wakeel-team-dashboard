@@ -2,6 +2,7 @@
  * API مرشح واحد: تعديل وحذف
  */
 import { NextRequest, NextResponse } from 'next/server';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertRecruitmentApiAccess, actorFromJwt } from '@/lib/recruitment/recruitmentAuth';
 import {
@@ -74,7 +75,7 @@ function validateSequentialUpdate(existing: Candidate, patch: Partial<Candidate>
 
 export async function GET(request: NextRequest, ctx: RouteCtx) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
@@ -96,7 +97,7 @@ export async function GET(request: NextRequest, ctx: RouteCtx) {
 
 export async function PUT(request: NextRequest, ctx: RouteCtx) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
@@ -139,7 +140,7 @@ export async function PUT(request: NextRequest, ctx: RouteCtx) {
 
 export async function DELETE(request: NextRequest, ctx: RouteCtx) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { loadEquipmentPhoto } from '@/lib/equipmentPhotoStorage';
 import { verifyPhotoSignature } from '@/lib/photoAccess';
@@ -16,7 +17,7 @@ export async function GET(
     }
 
     const sig = request.nextUrl.searchParams.get('sig');
-    const token = request.headers.get('authorization')?.replace('Bearer ', '').trim();
+    const token = extractBearerToken(request);
     const authed = !!(token && verifyToken(token));
     const sigOk = verifyPhotoSignature(photoId, sig);
 

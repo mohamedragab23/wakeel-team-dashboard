@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { getAllSupervisors } from '@/lib/adminService';
 import { filterSupervisorsForAdminDataScope } from '@/lib/adminZoneScope';
@@ -8,7 +9,7 @@ export const dynamic = 'force-dynamic';
 /** Minimal name+region for UI filters (no passwords). */
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
     if (!token) return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
 
     const decoded = verifyToken(token);

@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getAllSupervisors } from '@/lib/adminService';
@@ -21,7 +22,7 @@ export const dynamic = 'force-dynamic';
 // GET - قائمة المشرفين مع حدود كل مشرف
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
 // POST - حفظ حدود خصم المعدات
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }

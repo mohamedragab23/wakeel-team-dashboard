@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { ensureAllEquipmentSheets } from '@/lib/ensureEquipmentSheets';
@@ -8,7 +9,7 @@ export const dynamic = 'force-dynamic';
 /** إنشاء/التحقق من تبويبات المعدات في ملف Google Sheets الرئيسي (مدير فقط). */
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }

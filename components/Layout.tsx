@@ -12,6 +12,7 @@ import {
 } from '@/lib/adminFeatureAccess';
 import { hasRecruitmentAccess } from '@/lib/recruitment/recruitmentAuth';
 import RecruitmentNotificationBell from '@/components/recruitment/RecruitmentNotificationBell';
+import { authFetch, clearClientSession } from '@/lib/authFetch';
 
 const RECRUITMENT_MENU = [
   { href: '/recruitment', label: 'لوحة التعيين', icon: '📊' },
@@ -38,57 +39,71 @@ export default function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const userStr = localStorage.getItem('user');
+    let cancelled = false;
 
-    if (!token) {
-      router.push('/');
-      return;
-    }
+    async function guardSession() {
+      const token = localStorage.getItem('token');
+      const userStr = localStorage.getItem('user');
 
-    if (userStr) {
+      if (!token) {
+        router.push('/');
+        return;
+      }
+
       try {
-        const parsedUser = JSON.parse(userStr) as User;
-        setUser(parsedUser);
-
-        // Guard admin routes: admins only
-        if (pathname?.startsWith('/admin') && parsedUser?.role !== 'admin') {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
+        const res = await authFetch('/api/auth/verify');
+        if (!res.ok) {
+          clearClientSession();
+          void fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
           router.push('/');
           return;
         }
-        // مسؤول التعيينات: لا يصل لصفحات الأدمن
-        if (parsedUser?.role === 'recruitment_manager' && pathname?.startsWith('/admin')) {
-          router.push('/recruitment');
-          return;
-        }
-        // قسم التعيين: أدمن (بصلاحية) أو مسؤول تعيينات فقط
-        if (
-          pathname?.startsWith('/recruitment') &&
-          !hasRecruitmentAccess(parsedUser as { role?: string; permissions?: string })
-        ) {
-          router.push(parsedUser?.role === 'admin' ? '/admin/dashboard' : '/dashboard');
-          return;
-        }
-      } catch (e) {
-        console.error('Error parsing user data');
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        router.push('/');
+      } catch {
+        // Network blip — keep local session; data fetches will surface errors.
       }
-    } else {
-      // If we have a token but no user payload, avoid ambiguous access.
-      if (pathname?.startsWith('/admin')) {
-        localStorage.removeItem('token');
+
+      if (cancelled) return;
+
+      if (userStr) {
+        try {
+          const parsedUser = JSON.parse(userStr) as User;
+          setUser(parsedUser);
+
+          if (pathname?.startsWith('/admin') && parsedUser?.role !== 'admin') {
+            clearClientSession();
+            router.push('/');
+            return;
+          }
+          if (parsedUser?.role === 'recruitment_manager' && pathname?.startsWith('/admin')) {
+            router.push('/recruitment');
+            return;
+          }
+          if (
+            pathname?.startsWith('/recruitment') &&
+            !hasRecruitmentAccess(parsedUser as { role?: string; permissions?: string })
+          ) {
+            router.push(parsedUser?.role === 'admin' ? '/admin/dashboard' : '/dashboard');
+            return;
+          }
+        } catch {
+          clearClientSession();
+          router.push('/');
+        }
+      } else if (pathname?.startsWith('/admin')) {
+        clearClientSession();
         router.push('/');
       }
     }
+
+    void guardSession();
+    return () => {
+      cancelled = true;
+    };
   }, [router, pathname]);
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    clearClientSession();
+    void fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
     router.push('/');
   };
 

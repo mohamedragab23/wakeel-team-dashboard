@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertRecruitmentApiAccess, actorFromJwt } from '@/lib/recruitment/recruitmentAuth';
 import { reactivateCandidate } from '@/lib/recruitment/recruitmentService';
@@ -10,7 +11,7 @@ type RouteCtx = { params: Promise<{ id: string }> | { id: string } };
 
 export async function POST(request: NextRequest, ctx: RouteCtx) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }

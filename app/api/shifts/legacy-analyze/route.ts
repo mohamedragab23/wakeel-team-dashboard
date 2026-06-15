@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { analyzeLegacyShifts } from '@/lib/shiftsLegacyAnalyze';
 import { getAllSupervisors } from '@/lib/adminService';
@@ -9,7 +10,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '').trim();
+    const token = extractBearerToken(request);
     if (!token) return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
 
     const decoded = verifyToken(token) as {

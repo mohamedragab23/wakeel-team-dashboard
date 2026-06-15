@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { getMainSpreadsheetId, getSheetsClientFor } from '@/lib/googleSheetsAuth';
 
@@ -16,7 +17,7 @@ function isAuthorized(request: NextRequest): boolean {
   const headerSecret = request.headers.get('x-cron-secret')?.trim();
   if (cronSecret && headerSecret === cronSecret) return true;
 
-  const token = request.headers.get('authorization')?.replace('Bearer ', '').trim();
+  const token = extractBearerToken(request);
   if (!token) return false;
   const decoded = verifyToken(token);
   return !!(decoded && decoded.role === 'admin');

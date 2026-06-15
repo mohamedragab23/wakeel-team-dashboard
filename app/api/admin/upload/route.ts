@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { readExcelFromBuffer } from '@/lib/excelProcessorServer';
 import { processRidersExcel, processPerformanceExcel } from '@/lib/excelProcessor';
 import { bulkAddRiders, getAllRiders } from '@/lib/adminService';
@@ -130,9 +131,7 @@ async function syncTerminationDebtsFromPerformanceRows(performanceRows: any[][])
 
 export async function POST(request: NextRequest) {
   try {
-    // Get token from header
-    const authHeader = request.headers.get('authorization');
-    const token = authHeader?.replace('Bearer ', '').trim();
+    const token = extractBearerToken(request);
 
     if (!token) {
       console.error('[Upload API] ❌ No token provided');

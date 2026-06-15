@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { getSheetData, appendToSheet, updateSheetRow, ensureSheetExists } from '@/lib/googleSheets';
 import { updateRider, addRider, getAllSupervisors } from '@/lib/adminService';
@@ -46,7 +47,7 @@ function parseAssignmentRow(row: any[]) {
 // Get all assignment requests (admin only) or requests for a supervisor
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
 
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
@@ -112,7 +113,7 @@ export async function GET(request: NextRequest) {
 // Create a new assignment request (supervisor / recruitment manager / admin)
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
 
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
@@ -287,7 +288,7 @@ export async function POST(request: NextRequest) {
 // Approve or reject an assignment request (admin only)
 export async function PUT(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
 
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });

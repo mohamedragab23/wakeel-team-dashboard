@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { getSheetData } from '@/lib/googleSheets';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    // Get token from header
-    const authHeader = request.headers.get('authorization');
-    console.log('[Performance Stats API] Authorization header:', authHeader ? 'Present' : 'Missing');
-    
-    const token = authHeader?.replace('Bearer ', '').trim();
+    const token = extractBearerToken(request);
 
     if (!token) {
       console.error('[Performance Stats API] ❌ No token provided');

@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getSheetData, updateSheetRange, ensureSheetExists } from '@/lib/googleSheets';
@@ -105,7 +106,7 @@ function saveLocalPricingIfPossible(pricing: EquipmentPricing): void {
 // GET - Fetch equipment pricing (Sheets first so Vercel and local stay in sync)
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
 
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
@@ -139,7 +140,7 @@ export async function GET(request: NextRequest) {
 // POST - Save equipment pricing (المدير يمكنه التعديل والتعديلات تظهر للمشرفين عبر نفس الملف)
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
 
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });

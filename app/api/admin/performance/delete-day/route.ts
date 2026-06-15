@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getSheetData } from '@/lib/googleSheets';
@@ -96,7 +97,7 @@ async function deleteRowsBatch(sheetName: string, rowNumbersDesc: number[]) {
 
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
     if (!token) return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
 
     const decoded = verifyToken(token);

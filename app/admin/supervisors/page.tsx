@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { usePageNotify } from '@/lib/usePageNotify';
+import { authFetch, clearClientSession } from '@/lib/authFetch';
 import {
   ZONE_OPTIONS,
   isAllowedZone,
@@ -60,17 +61,11 @@ export default function AdminSupervisorsPage() {
   const { data: supervisorsPayload, isLoading, refetch } = useQuery({
     queryKey: ['admin', 'supervisors'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('غير مصرح - يرجى تسجيل الدخول');
-      }
-      const res = await fetch(`/api/admin/supervisors?refresh=true&_t=${Date.now()}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await authFetch(`/api/admin/supervisors?refresh=true&_t=${Date.now()}`, {
         cache: 'no-store',
       });
       if (res.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+        clearClientSession();
         throw new Error('انتهت الجلسة أو لا تملك صلاحية الأدمن. يرجى تسجيل الدخول مرة أخرى.');
       }
       const data = await res.json();
