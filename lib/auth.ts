@@ -4,8 +4,9 @@ import { jwtAdminOrgRoleFromSheet } from './adminFeatureAccess';
 import { normalizeSupervisorCodeForMatch } from './dataFilter';
 import { RECRUITMENT_MANAGER_PERMISSION } from './authConstants';
 import jwt from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+import { getJwtSecret } from '@/lib/jwtConfig';
+import { verifyPassword } from '@/lib/passwordUtils';
+import { rehashSupervisorPasswordIfNeeded, rehashAdminPasswordIfNeeded } from '@/lib/passwordRehash';
 
 export interface AuthResult {
   success: boolean;
@@ -49,14 +50,15 @@ export async function authenticateSupervisor(code: string, password: string): Pr
       const supervisorPassword = row[4] ? row[4].toString().trim() : '';
 
       if (normalizeSupervisorCodeForMatch(supervisorCode) === normalizeSupervisorCodeForMatch(code)) {
-        if (supervisorPassword === password) {
+        if (await verifyPassword(supervisorPassword, password)) {
+          void rehashSupervisorPasswordIfNeeded(supervisorCode, password, supervisorPassword);
           const token = jwt.sign(
             {
               code: supervisorCode,
               name: supervisorName,
               role: 'supervisor',
             },
-            JWT_SECRET,
+            getJwtSecret(),
             { expiresIn: '7d' }
           );
 
@@ -157,12 +159,13 @@ export async function authenticateAdmin(code: string, password: string): Promise
 
     for (const a of parsedAdmins) {
       if (a.code !== code) continue;
-      if (a.password !== password) {
+      if (!(await verifyPassword(a.password, password))) {
         return {
           success: false,
           error: 'كلمة المرور غير صحيحة',
         };
       }
+      void rehashAdminPasswordIfNeeded(a.code, password, a.password);
       const permissionsNorm = String(a.permissions ?? '')
         .replace(/^\uFEFF/, '')
         .trim();
@@ -189,7 +192,7 @@ export async function authenticateAdmin(code: string, password: string): Promise
           adminOrgRole: isRecruitmentManager ? 'full' : adminOrgRole,
           linkedSupervisorCode: linkedNorm,
         },
-        JWT_SECRET,
+        getJwtSecret(),
         { expiresIn: '7d' }
       );
 
@@ -223,7 +226,7 @@ export async function authenticateAdmin(code: string, password: string): Promise
 // Verify JWT token
 export function verifyToken(token: string): any {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    return jwt.verify(token, getJwtSecret());
   } catch (error) {
     return null;
   }

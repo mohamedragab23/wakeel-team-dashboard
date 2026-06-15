@@ -10,8 +10,7 @@ function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET?.trim();
   if (!secret) return false;
   const headerSecret = req.headers.get('x-cron-secret')?.trim();
-  const querySecret = new URL(req.url).searchParams.get('secret')?.trim();
-  return headerSecret === secret || querySecret === secret;
+  return headerSecret === secret;
 }
 
 export async function GET(req: NextRequest) {

@@ -9,6 +9,7 @@ import {
 } from '@/lib/adminZoneScope';
 import { normalizeRiderCodeForPerformance } from '@/lib/dataFilter';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { invalidateRiderWorkflowCaches } from '@/lib/cacheInvalidation';
 
 export const dynamic = 'force-dynamic';
 
@@ -237,18 +238,6 @@ export async function PUT(request: NextRequest) {
     const approvalDate = new Date().toISOString().split('T')[0];
     const approvedBy = String(decoded.name ?? decoded.code ?? '').trim();
 
-    const updated = [...row];
-    if (parsed.hasZone) {
-      updated[5] = status;
-      updated[7] = approvalDate;
-      updated[8] = approvedBy;
-    } else {
-      updated[4] = status;
-      updated[6] = approvalDate;
-      updated[7] = approvedBy;
-    }
-    await updateSheetRow('طلبات_إعادة_التفعيل', requestId + 1, updated);
-
     if (action === 'approve') {
       const targetNorm = normalizeRiderCodeForPerformance(parsed.riderCode);
       const allRiders = await getAllRiders(false);
@@ -264,7 +253,10 @@ export async function PUT(request: NextRequest) {
           status: 'نشط',
         });
         if (!up.success) {
-          throw new Error(up.error || 'فشل إعادة تعيين المندوب');
+          return NextResponse.json(
+            { success: false, error: up.error || 'فشل إعادة تعيين المندوب — لم يتم تسجيل الموافقة' },
+            { status: 500 }
+          );
         }
       } else {
         const add = await addRider({
@@ -277,9 +269,36 @@ export async function PUT(request: NextRequest) {
           status: 'نشط',
         });
         if (!add.success) {
-          throw new Error(add.error || 'فشل إضافة المندوب');
+          return NextResponse.json(
+            { success: false, error: add.error || 'فشل إضافة المندوب — لم يتم تسجيل الموافقة' },
+            { status: 500 }
+          );
         }
       }
+    }
+
+    const updated = [...row];
+    if (parsed.hasZone) {
+      updated[5] = status;
+      updated[7] = approvalDate;
+      updated[8] = approvedBy;
+    } else {
+      updated[4] = status;
+      updated[6] = approvalDate;
+      updated[7] = approvedBy;
+    }
+    await updateSheetRow('طلبات_إعادة_التفعيل', requestId + 1, updated);
+
+    if (action === 'approve') {
+      await invalidateRiderWorkflowCaches({
+        newSupervisorCode: parsed.supervisorCode,
+        extraSheets: ['طلبات_إعادة_التفعيل'],
+      });
+    } else {
+      await invalidateRiderWorkflowCaches({
+        extraSheets: ['طلبات_إعادة_التفعيل'],
+        notify: false,
+      });
     }
 
     return NextResponse.json({

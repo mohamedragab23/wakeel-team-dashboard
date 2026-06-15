@@ -1,46 +1,9 @@
 import { getSupervisorRiders } from './dataService';
 import { getSheetData } from './googleSheets';
 
-/** Match rider codes across "00123" vs "123" styles (same as performance filter). */
-export function normalizeRiderCodeForPerformance(code: any): string {
-  const raw = String(code ?? '')
-    .replace(/\uFEFF/g, '')
-    .trim();
-  if (!raw) return '';
-  const cleaned = raw
-    .replace(/^['’`]+/, '')
-    .replace(/^"(.*)"$/, '$1')
-    .replace(/\s+/g, '')
-    .trim();
-  if (!cleaned) return '';
+import { normalizeRiderCodeForPerformance } from '@/lib/riderCodeUtils';
 
-  // Normalize Arabic-Indic digits to western digits (e.g. ١٢٣٤ -> 1234).
-  const westernDigits = cleaned
-    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
-    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
-
-  // Common Excel numeric artifacts for IDs:
-  // - "1195581.0"
-  // - "1,195,581"
-  // - "1.195581E+6"
-  const compactNumeric = westernDigits.replace(/,/g, '');
-  const decimalLike = compactNumeric.match(/^(\d+)\.0+$/);
-  if (decimalLike) {
-    return decimalLike[1].replace(/^0+/, '') || '0';
-  }
-  if (/^\d+(?:\.\d+)?e[+\-]?\d+$/i.test(compactNumeric)) {
-    const n = Number(compactNumeric);
-    if (Number.isFinite(n)) {
-      const asInt = Math.trunc(n).toString();
-      return asInt.replace(/^0+/, '') || '0';
-    }
-  }
-  if (/^\d+$/.test(compactNumeric)) {
-    return compactNumeric.replace(/^0+/, '') || '0';
-  }
-
-  return westernDigits.replace(/^0+/, '') || '0';
-}
+export { normalizeRiderCodeForPerformance };
 
 /** تطبيع كود المشرف لمطابقة شيت طلبات الإقالة مع كود الجلسة */
 export function normalizeSupervisorCodeForMatch(code: any): string {

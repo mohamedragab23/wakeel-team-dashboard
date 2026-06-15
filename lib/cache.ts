@@ -7,7 +7,7 @@ interface CacheEntry<T> {
 
 class Cache {
   private cache: Map<string, CacheEntry<any>> = new Map();
-  private defaultTTL = 15 * 60 * 1000; // 15 minutes default (optimized for mobile performance)
+  private defaultTTL = 3 * 60 * 1000; // 3 minutes — fresher data after writes
 
   set<T>(key: string, data: T, ttl: number = this.defaultTTL): void {
     this.cache.set(key, {

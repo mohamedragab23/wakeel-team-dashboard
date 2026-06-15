@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Layout from '@/components/Layout';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { usePageNotify } from '@/lib/usePageNotify';
 import { adminPermissionAllowed } from '@/lib/adminPermissions';
 
 type Tab = 'delivery' | 'return' | 'summary';
@@ -49,6 +50,7 @@ interface ReturnReq {
 }
 
 export default function AdminEquipmentRequestsPage() {
+  const notify = usePageNotify();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [authChecked, setAuthChecked] = useState(false);

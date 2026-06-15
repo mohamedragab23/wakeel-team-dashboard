@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { usePageNotify } from '@/lib/usePageNotify';
 
 interface SupervisorLimits {
   motorcycleBox: number;
@@ -20,6 +21,7 @@ interface SupervisorWithLimits {
 }
 
 export default function EquipmentLimitsPage() {
+  const notify = usePageNotify();
   const queryClient = useQueryClient();
   const [localLimits, setLocalLimits] = useState<Record<string, SupervisorLimits>>({});
 
@@ -62,7 +64,7 @@ export default function EquipmentLimitsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'equipment-limits'] });
-      alert('✅ تم حفظ حدود خصم المعدات بنجاح');
+      notify.success(' تم حفظ حدود خصم المعدات بنجاح');
     },
     onError: (e: Error) => {
       alert('❌ فشل الحفظ: ' + e.message);

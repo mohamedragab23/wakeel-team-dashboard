@@ -28,6 +28,9 @@ body {
     min-width: 0;
     max-width: 100%;
   }
+  .text-muted-dashboard {
+    color: rgba(234, 240, 255, 0.82);
+  }
 }
 
 body {

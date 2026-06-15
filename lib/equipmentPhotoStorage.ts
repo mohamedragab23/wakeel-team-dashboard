@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import { appendToSheet, ensureSheetExists, getSheetData } from './googleSheets';
 import { SHEET_EQUIPMENT_PHOTOS } from './equipmentSheetConstants';
+import { appendPhotoSignatureToUrl } from './photoAccess';
 
 const PHOTO_STORE_HEADERS = ['معرف_الصورة', 'رقم_الجزء', 'البيانات'];
 /** أقل من حد خلية Google Sheets (~50k) مع هامش */
@@ -73,8 +74,7 @@ async function ensurePhotoStoreSheet(): Promise<void> {
 }
 
 /**
- * يحفظ الصورة في تبويب مخفي داخل نفس ملف Google Sheets (أجزاء) ويرجع رابط HTTPS من التطبيق.
- * لا يحتاج Google Drive.
+ * حفظ صورة في شيت المعدات وإرجاع رابط API مع توقيع — لا يحتاج Google Drive.
  */
 export async function saveEquipmentPhotoAndGetUrl(
   photoData: string,
@@ -100,7 +100,10 @@ export async function saveEquipmentPhotoAndGetUrl(
 
   await appendToSheet(SHEET_EQUIPMENT_PHOTOS, rows, false);
 
-  return `${getAppBaseUrl()}/api/equipment-photos/${encodeURIComponent(photoId)}`;
+  return appendPhotoSignatureToUrl(
+    `${getAppBaseUrl()}/api/equipment-photos/${encodeURIComponent(photoId)}`,
+    photoId
+  );
 }
 
 export async function loadEquipmentPhoto(

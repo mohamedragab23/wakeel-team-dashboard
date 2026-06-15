@@ -18,7 +18,7 @@ export default function AdminDashboardPage() {
     activeRiders: 0,
   });
 
-  const { data: supervisorsData } = useQuery({
+  const { data: supervisorsData, isLoading: supervisorsLoading } = useQuery({
     queryKey: ['admin', 'supervisors'],
     queryFn: async () => {
       const token = localStorage.getItem('token');
@@ -34,7 +34,7 @@ export default function AdminDashboardPage() {
     refetchOnWindowFocus: false,
   });
 
-  const { data: ridersData } = useQuery({
+  const { data: ridersData, isLoading: ridersLoading } = useQuery({
     queryKey: ['admin', 'riders'],
     queryFn: async () => {
       const token = localStorage.getItem('token');
@@ -150,6 +150,8 @@ export default function AdminDashboardPage() {
     }
   }, [supervisorsData, ridersData]);
 
+  const statsLoading = supervisorsLoading || ridersLoading;
+
   const statCards = [
     {
       label: 'إجمالي المشرفين',
@@ -186,7 +188,11 @@ export default function AdminDashboardPage() {
                 <div className={`${stat.color} p-3 rounded-lg text-white text-2xl`}>{stat.icon}</div>
               </div>
               <h3 className="text-gray-600 text-sm mb-1">{stat.label}</h3>
-              <p className="text-2xl font-bold text-gray-800">{stat.value}</p>
+              {statsLoading ? (
+                <div className="h-8 w-16 bg-gray-200 rounded animate-pulse" />
+              ) : (
+                <p className="text-2xl font-bold text-gray-800">{stat.value}</p>
+              )}
             </div>
           ))}
         </div>

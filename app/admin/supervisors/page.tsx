@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Layout from '@/components/Layout';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { usePageNotify } from '@/lib/usePageNotify';
 import {
   ZONE_OPTIONS,
   isAllowedZone,
@@ -37,6 +38,7 @@ function orgRoleLabel(role?: SupervisorOrgRole): string {
 }
 
 export default function AdminSupervisorsPage() {
+  const notify = usePageNotify();
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingSupervisor, setEditingSupervisor] = useState<Supervisor | null>(null);
   /** زونات معتمدة (قائمة الشفتات)، تُحفظ في عمود المنطقة كقيم مفصولة بـ | */
@@ -80,8 +82,8 @@ export default function AdminSupervisorsPage() {
         managers: (data.managerOptions || data.data || []) as Supervisor[],
       };
     },
-    staleTime: 0, // Always fetch fresh data
-    gcTime: 0, // Don't cache
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000, // Don't cache
     refetchOnMount: true, // Always refetch on mount
     refetchOnWindowFocus: false,
   });
@@ -136,10 +138,10 @@ export default function AdminSupervisorsPage() {
         orgRole: 'supervisor',
         parentCode: '',
       });
-      alert('✅ تم إضافة المشرف بنجاح');
+      notify.success(' تم إضافة المشرف بنجاح');
     },
     onError: (error: any) => {
-      alert(`❌ خطأ: ${error.message || 'فشل إضافة المشرف'}`);
+      notify.error(` خطأ: ${error.message || 'فشل إضافة المشرف'}`);
     },
   });
 
@@ -184,10 +186,10 @@ export default function AdminSupervisorsPage() {
         orgRole: 'supervisor',
         parentCode: '',
       });
-      alert('✅ تم تحديث المشرف بنجاح');
+      notify.success(' تم تحديث المشرف بنجاح');
     },
     onError: (error: any) => {
-      alert(`❌ خطأ: ${error.message || 'فشل تحديث المشرف'}`);
+      notify.error(` خطأ: ${error.message || 'فشل تحديث المشرف'}`);
     },
   });
 
@@ -215,10 +217,10 @@ export default function AdminSupervisorsPage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['admin', 'supervisors'] });
       await refetch(); // Force refetch
-      alert('✅ تم حذف المشرف بنجاح');
+      notify.success(' تم حذف المشرف بنجاح');
     },
     onError: (error: any) => {
-      alert(`❌ خطأ: ${error.message || 'فشل حذف المشرف'}`);
+      notify.error(` خطأ: ${error.message || 'فشل حذف المشرف'}`);
     },
   });
 

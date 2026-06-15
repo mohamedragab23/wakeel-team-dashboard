@@ -244,9 +244,18 @@ export function filterCandidates(candidates: Candidate[], filters: CandidateFilt
   return out;
 }
 
-export async function listCandidates(filters: CandidateFilters = {}): Promise<Candidate[]> {
+export async function listCandidates(
+  filters: CandidateFilters = {},
+  options?: { limit?: number; offset?: number }
+): Promise<Candidate[]> {
   const all = await loadAllCandidates();
-  return filterCandidates(all, filters);
+  const filtered = filterCandidates(all, filters);
+  const offset = Math.max(0, options?.offset ?? 0);
+  const limit = options?.limit;
+  if (limit != null && limit > 0) {
+    return filtered.slice(offset, offset + limit);
+  }
+  return filtered;
 }
 
 export async function getCandidateById(id: string): Promise<Candidate | null> {

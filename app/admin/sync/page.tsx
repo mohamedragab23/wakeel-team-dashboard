@@ -2,9 +2,11 @@
 
 import { useState } from 'react';
 import Layout from '@/components/Layout';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query'
+import { usePageNotify } from '@/lib/usePageNotify';
 
 export default function SyncPage() {
+  const notify = usePageNotify();
   const [syncType, setSyncType] = useState<'riders' | 'performance' | 'debts' | 'all'>('all');
 
   const syncMutation = useMutation({
@@ -22,13 +24,13 @@ export default function SyncPage() {
     },
     onSuccess: (data) => {
       if (data.success) {
-        alert(`✅ تمت المزامنة بنجاح!\n${JSON.stringify(data, null, 2)}`);
+        notify.success(` تمت المزامنة بنجاح!\n${JSON.stringify(data, null, 2)}`);
       } else {
-        alert(`❌ فشلت المزامنة: ${data.error}`);
+        notify.error(` فشلت المزامنة: ${data.error}`);
       }
     },
     onError: (error: any) => {
-      alert(`❌ خطأ: ${error.message}`);
+      notify.error(` خطأ: ${error.message}`);
     },
   });
 

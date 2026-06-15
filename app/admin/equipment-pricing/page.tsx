@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { usePageNotify } from '@/lib/usePageNotify';
 
 interface EquipmentPricing {
   motorcycleBox: number;
@@ -21,6 +22,7 @@ const defaultPricing: EquipmentPricing = {
 };
 
 export default function EquipmentPricingPage() {
+  const notify = usePageNotify();
   const [pricing, setPricing] = useState<EquipmentPricing>(defaultPricing);
   const queryClient = useQueryClient();
 
@@ -60,7 +62,7 @@ export default function EquipmentPricingPage() {
     onSuccess: (data) => {
       if (data.success) {
         queryClient.invalidateQueries({ queryKey: ['equipment-pricing'] });
-        alert('✅ تم حفظ أسعار المعدات بنجاح');
+        notify.success(' تم حفظ أسعار المعدات بنجاح');
       } else {
         alert('❌ فشل حفظ الأسعار: ' + data.error);
       }

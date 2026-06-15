@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { usePageNotify } from '@/lib/usePageNotify';
 
 interface Supervisor {
   code: string;
@@ -31,6 +32,7 @@ const DEFAULT_TYPE1_RANGES = [
 ];
 
 export default function SalaryConfigPage() {
+  const notify = usePageNotify();
   const [selectedSupervisor, setSelectedSupervisor] = useState<string>('');
   const [salaryMethod, setSalaryMethod] = useState<'fixed' | 'commission_type1' | 'commission_type2'>('fixed');
   const [fixedSalary, setFixedSalary] = useState<number>(0);
@@ -120,7 +122,7 @@ export default function SalaryConfigPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['salary-config'] });
-      alert('✅ تم حفظ الإعدادات بنجاح');
+      notify.success(' تم حفظ الإعدادات بنجاح');
     },
     onError: (err: Error) => {
       alert(err.message || 'حدث خطأ أثناء الحفظ');

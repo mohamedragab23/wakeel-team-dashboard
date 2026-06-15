@@ -41,7 +41,11 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const filters = filtersFromSearchParams(searchParams);
-    const data = await listCandidates(filters);
+    const limitRaw = searchParams.get('limit');
+    const offsetRaw = searchParams.get('offset');
+    const limit = limitRaw ? Math.min(500, Math.max(1, parseInt(limitRaw, 10) || 0)) : undefined;
+    const offset = offsetRaw ? Math.max(0, parseInt(offsetRaw, 10) || 0) : undefined;
+    const data = await listCandidates(filters, { limit, offset });
     return NextResponse.json({ success: true, data });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'حدث خطأ';

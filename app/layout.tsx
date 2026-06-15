@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import ErrorBoundaryWrapper from '@/components/ErrorBoundaryWrapper';
 import QueryProvider from '@/lib/providers/QueryProvider';
+import { ToastProvider } from '@/lib/providers/ToastProvider';
 
 export const metadata: Metadata = {
   title: 'نظام إدارة المشرفين - Wakeel Team',
@@ -35,7 +36,9 @@ export default function RootLayout({
       </head>
       <body className="antialiased">
         <ErrorBoundaryWrapper>
-          <QueryProvider>{children}</QueryProvider>
+          <QueryProvider>
+            <ToastProvider>{children}</ToastProvider>
+          </QueryProvider>
         </ErrorBoundaryWrapper>
       </body>
     </html>

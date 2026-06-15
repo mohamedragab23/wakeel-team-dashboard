@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import PerformanceManualImport from '@/components/admin/PerformanceManualImport';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { usePageNotify } from '@/lib/usePageNotify';
 
 export default function AdminPerformancePage() {
+  const notify = usePageNotify();
   const [performanceDate, setPerformanceDate] = useState<string>('');
   const [clearing, setClearing] = useState(false);
   const [deletingDay, setDeletingDay] = useState(false);
@@ -88,7 +90,7 @@ export default function AdminPerformancePage() {
                     }
                   })();
                   if (res.ok && data.success) {
-                    alert(`✅ ${data.message || 'تم الحذف بنجاح'}`);
+                    notify.success(` ${data.message || 'تم الحذف بنجاح'}`);
                     queryClient.invalidateQueries({ queryKey: ['admin', 'performance-stats'] });
                     queryClient.invalidateQueries({ queryKey: ['performance'] });
                     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
@@ -98,7 +100,7 @@ export default function AdminPerformancePage() {
                     alert(`❌ ${data.error || `فشل حذف اليوم (HTTP ${res.status})`}`);
                   }
                 } catch (e: any) {
-                  alert(`❌ حدث خطأ: ${e?.message || 'خطأ غير معروف'}`);
+                  notify.error(` حدث خطأ: ${e?.message || 'خطأ غير معروف'}`);
                 } finally {
                   setDeletingDay(false);
                 }
@@ -145,7 +147,7 @@ export default function AdminPerformancePage() {
                 const data = await response.json();
 
                 if (data.success) {
-                  alert('✅ تم تصفير جميع بيانات الأداء بنجاح');
+                  notify.success(' تم تصفير جميع بيانات الأداء بنجاح');
                   
                   // Invalidate all queries to refresh data
                   queryClient.invalidateQueries({ queryKey: ['admin', 'performance-stats'] });
@@ -156,11 +158,11 @@ export default function AdminPerformancePage() {
                   // Refetch stats
                   queryClient.refetchQueries({ queryKey: ['admin', 'performance-stats'] });
                 } else {
-                  alert(`❌ فشل تصفير البيانات: ${data.error || 'خطأ غير معروف'}`);
+                  notify.error(` فشل تصفير البيانات: ${data.error || 'خطأ غير معروف'}`);
                 }
               } catch (error: any) {
                 console.error('Clear performance error:', error);
-                alert(`❌ حدث خطأ: ${error.message || 'خطأ غير معروف'}`);
+                notify.error(` حدث خطأ: ${error.message || 'خطأ غير معروف'}`);
               } finally {
                 setClearing(false);
               }

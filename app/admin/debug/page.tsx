@@ -3,9 +3,11 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Layout from '@/components/Layout';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query'
+import { usePageNotify } from '@/lib/usePageNotify';
 
 export default function AdminDebugPage() {
+  const notify = usePageNotify();
   const router = useRouter();
   const [adminOk, setAdminOk] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
@@ -60,7 +62,7 @@ export default function AdminDebugPage() {
   const runSystemReset = async () => {
     const token = localStorage.getItem('token');
     if (!token) {
-      alert('❌ لم يتم العثور على رمز الدخول. يرجى تسجيل الدخول مرة أخرى.');
+      notify.error(' لم يتم العثور على رمز الدخول. يرجى تسجيل الدخول مرة أخرى.');
       return;
     }
 
@@ -90,12 +92,12 @@ export default function AdminDebugPage() {
       setResetResult(data);
 
       if (data?.success) {
-        alert(`✅ ${data.message || 'تمت التهيئة بنجاح'}`);
+        notify.success(` ${data.message || 'تمت التهيئة بنجاح'}`);
       } else {
         alert(`⚠️ ${data?.error || data?.message || 'فشل/تمت جزئياً'}`);
       }
     } catch (e: any) {
-      alert(`❌ حدث خطأ أثناء التهيئة: ${e?.message || 'خطأ غير معروف'}`);
+      notify.error(` حدث خطأ أثناء التهيئة: ${e?.message || 'خطأ غير معروف'}`);
     } finally {
       setResetLoading(false);
     }

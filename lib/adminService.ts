@@ -12,6 +12,8 @@ import {
   supervisorToRowCells,
   sheetRangeForSupervisorDataRow,
 } from './supervisorsSheetParser';
+import { findRiderInSheet } from '@/lib/riderCodeUtils';
+import { invalidateRiderWorkflowCaches } from '@/lib/cacheInvalidation';
 
 export interface Supervisor {
   code: string;
@@ -428,25 +430,17 @@ export async function updateRider(
     const { getSheetData, updateSheetRange } = await import('./googleSheets');
     const ridersSheet = await getSheetData('المناديب', false);
 
-    // Trim riderCode for comparison
     const riderCodeTrimmed = riderCode?.toString().trim();
     console.log(`[UpdateRider] Looking for rider with code: "${riderCodeTrimmed}"`);
 
-    // Find rider row - ensure exact match with trimmed values
-    let rowIndex = -1;
-    for (let i = 1; i < ridersSheet.length; i++) {
-      const sheetRiderCode = ridersSheet[i][0]?.toString().trim();
-      if (sheetRiderCode === riderCodeTrimmed) {
-        rowIndex = i + 1; // Google Sheets is 1-indexed
-        console.log(`[UpdateRider] Found rider at row ${rowIndex}`);
-        break;
-      }
-    }
-
-    if (rowIndex === -1) {
+    const match = findRiderInSheet(ridersSheet, riderCodeTrimmed);
+    if (!match) {
       console.error(`[UpdateRider] Rider "${riderCodeTrimmed}" not found in sheet`);
       return { success: false, error: `المندوب "${riderCodeTrimmed}" غير موجود` };
     }
+
+    const rowIndex = match.sheetRowIndex;
+    console.log(`[UpdateRider] Found rider at row ${rowIndex} (code: ${match.actualCode})`);
 
     // Get current rider data
     const currentRow = ridersSheet[rowIndex - 1];
@@ -461,7 +455,7 @@ export async function updateRider(
     
     // Prepare updated row - use trimmed riderCode
     const updatedRow = [
-      riderCodeTrimmed, // code (column A) - use trimmed version
+      match.actualCode, // preserve sheet code (e.g. leading zeros)
       updates.name || currentRow[1] || '', // name
       updates.region !== undefined ? updates.region : (currentRow[2] || ''), // region
       newSupervisorCode, // supervisorCode
@@ -488,61 +482,12 @@ export async function updateRider(
       return { success: false, error: 'فشل تحديث المندوب في Google Sheets' };
     }
     
-    console.log(`[UpdateRider] Successfully updated rider "${riderCodeTrimmed}" in Google Sheets`);
+    console.log(`[UpdateRider] Successfully updated rider "${match.actualCode}" in Google Sheets`);
 
-    // Wait a moment for Google Sheets to propagate the change
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // Clear cache and notify supervisors
-    const { invalidateSupervisorCaches, notifySupervisorsOfChange } = await import('./realtimeSync');
-    const { cache, CACHE_KEYS } = await import('./cache');
-    
-    // Clear cache for old supervisor
-    if (oldSupervisorCode && oldSupervisorCode !== '') {
-      console.log(`[UpdateRider] Clearing cache for old supervisor "${oldSupervisorCode}"`);
-      invalidateSupervisorCaches(oldSupervisorCode);
-      cache.clear(CACHE_KEYS.supervisorRiders(oldSupervisorCode));
-      cache.clear(CACHE_KEYS.ridersData(oldSupervisorCode));
-    }
-    
-    // Clear cache for new supervisor (if different)
-    if (newSupervisorCode && newSupervisorCode !== '' && newSupervisorCode !== oldSupervisorCode) {
-      console.log(`[UpdateRider] Clearing cache for new supervisor "${newSupervisorCode}"`);
-      invalidateSupervisorCaches(newSupervisorCode);
-      cache.clear(CACHE_KEYS.supervisorRiders(newSupervisorCode));
-      cache.clear(CACHE_KEYS.ridersData(newSupervisorCode));
-    }
-    
-    // Clear all riders cache for admin
-    console.log(`[UpdateRider] Clearing all admin and sheet caches`);
-    cache.clear('admin:riders');
-    cache.clear(CACHE_KEYS.sheetData('المناديب'));
-    
-    // Clear ALL supervisor rider caches to be safe
-    const allCacheKeys = cache.keys();
-    for (const key of allCacheKeys) {
-      if (key.includes('supervisor-riders') || key.includes('riders-data') || key.includes('sheet:المناديب')) {
-        cache.clear(key);
-        console.log(`[UpdateRider] Cleared cache key: ${key}`);
-      }
-    }
-    
-    notifySupervisorsOfChange('riders');
-
-    // Verify the update by reading back the data
-    try {
-      const verifyData = await getSheetData('المناديب', false);
-      const verifyRow = verifyData[rowIndex - 1];
-      if (verifyRow && verifyRow[0]?.toString().trim() === riderCodeTrimmed) {
-        const verifySupervisorCode = verifyRow[3]?.toString().trim() || '';
-        console.log(`[UpdateRider] Verification: Rider "${riderCodeTrimmed}" now has supervisor code: "${verifySupervisorCode}"`);
-        if (verifySupervisorCode !== newSupervisorCode) {
-          console.error(`[UpdateRider] WARNING: Verification failed! Expected "${newSupervisorCode}", got "${verifySupervisorCode}"`);
-        }
-      }
-    } catch (verifyError) {
-      console.error(`[UpdateRider] Error verifying update:`, verifyError);
-    }
+    await invalidateRiderWorkflowCaches({
+      oldSupervisorCode,
+      newSupervisorCode,
+    });
 
     return { success: true };
   } catch (error: any) {
@@ -558,40 +503,22 @@ export async function deleteRider(riderCode: string, deleteCompletely: boolean =
     if (deleteCompletely) {
       // Delete the rider row completely from Google Sheets
       const { getSheetData, deleteSheetRow } = await import('./googleSheets');
-      const { cache, CACHE_KEYS } = await import('./cache');
-      
       const ridersData = await getSheetData('المناديب', false);
-      let rowIndex = -1;
       const riderCodeTrimmed = riderCode?.toString().trim();
-      let oldSupervisorCode = '';
-      
-      for (let i = 1; i < ridersData.length; i++) {
-        if (ridersData[i][0]?.toString().trim() === riderCodeTrimmed) {
-          rowIndex = i + 1; // Google Sheets is 1-indexed
-          oldSupervisorCode = ridersData[i][3]?.toString().trim() || '';
-          break;
-        }
-      }
+      const match = findRiderInSheet(ridersData, riderCodeTrimmed);
 
-      if (rowIndex === -1) {
+      if (!match) {
         return { success: false, error: 'المندوب غير موجود' };
       }
 
-      // Delete the row from Google Sheets
+      const rowIndex = match.sheetRowIndex;
+      const oldSupervisorCode = match.row[3]?.toString().trim() || '';
+
       const deleted = await deleteSheetRow('المناديب', rowIndex);
 
       if (deleted) {
-        // Clear all caches
-        if (oldSupervisorCode && oldSupervisorCode !== '') {
-          const { invalidateSupervisorCaches } = await import('./realtimeSync');
-          invalidateSupervisorCaches(oldSupervisorCode);
-          cache.clear(CACHE_KEYS.supervisorRiders(oldSupervisorCode));
-          cache.clear(CACHE_KEYS.ridersData(oldSupervisorCode));
-        }
-        cache.clear('admin:riders');
-        cache.clear(CACHE_KEYS.sheetData('المناديب'));
-        
-        console.log(`[DeleteRider] Successfully deleted rider "${riderCodeTrimmed}" completely`);
+        await invalidateRiderWorkflowCaches({ oldSupervisorCode });
+        console.log(`[DeleteRider] Successfully deleted rider "${match.actualCode}" completely`);
         return { success: true };
       }
 

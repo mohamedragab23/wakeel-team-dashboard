@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { extractBearerToken } from '@/lib/requestAuth';
 import { getSupervisorRiders } from '@/lib/dataService';
 import { appendToSheet, getSheetData, updateSheetRow, ensureSheetExists } from '@/lib/googleSheets';
 import { updateRider } from '@/lib/adminService';
@@ -14,8 +15,32 @@ import {
   assertLimitedAdminSupervisorZoneAccess,
   filterRowsBySupervisorInZoneScope,
 } from '@/lib/adminZoneScope';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { invalidateRiderWorkflowCaches } from '@/lib/cacheInvalidation';
+import { tryAcquireApprovalLock, releaseApprovalLock } from '@/lib/approvalLock';
+import { terminationPostSchema, terminationPutSchema } from '@/lib/validators/common';
+import { randomBytes } from 'crypto';
 
 export const dynamic = 'force-dynamic';
+
+const STABLE_ID_COL = 10;
+
+function makeStableRequestId(): string {
+  return `tr-${Date.now()}-${randomBytes(3).toString('hex')}`;
+}
+
+function findTerminationRowIndex(rows: any[][], requestId: string | number): number {
+  const asNum = parseInt(String(requestId), 10);
+  if (!isNaN(asNum) && asNum >= 1 && asNum < rows.length) {
+    return asNum;
+  }
+  const idStr = String(requestId).trim();
+  for (let i = 1; i < rows.length; i++) {
+    const stable = rows[i][STABLE_ID_COL]?.toString().trim();
+    if (stable && stable === idStr) return i;
+  }
+  return -1;
+}
 
 function safeNum(v: any): number {
   const n = typeof v === 'number' ? v : parseFloat((v ?? '').toString().replace(/[, ]+/g, '').trim());
@@ -126,7 +151,7 @@ async function buildLatestDebtMapForRiders(riderCodes: Set<string>): Promise<Map
 // Get all termination requests (admin only) or requests for a supervisor
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
 
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
@@ -137,6 +162,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
+    if (decoded.role === 'admin') {
+      const deny = assertAdminApiAccess(decoded, 'termination_requests');
+      if (deny) return deny;
+    } else if (decoded.role !== 'supervisor') {
+      return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status'); // 'pending', 'approved', 'rejected', or null for all
 
@@ -144,7 +176,7 @@ export async function GET(request: NextRequest) {
     let allRequests: any[] = [];
     let riderCodesForDebt = new Set<string>();
     try {
-      const requestsData = await getSheetData('طلبات_الإقالة');
+      const requestsData = await getSheetData('طلبات_الإقالة', false);
       // Skip header row
       for (let i = 1; i < requestsData.length; i++) {
         const row = requestsData[i];
@@ -152,7 +184,8 @@ export async function GET(request: NextRequest) {
           const riderCode = row[2]?.toString().trim() || '';
           if (riderCode) riderCodesForDebt.add(riderCode);
           allRequests.push({
-            id: i, // Row number as ID
+            id: i,
+            stableRequestId: row[STABLE_ID_COL]?.toString().trim() || '',
             supervisorCode: row[0]?.toString().trim(),
             supervisorName: row[1]?.toString().trim(),
             riderCode,
@@ -219,13 +252,21 @@ export async function GET(request: NextRequest) {
           return cached;
         };
 
-        allRequests = await Promise.all(
-          allRequests.map(async (req: any) => {
+        const uniqueSupervisors = [
+          ...new Set(
+            allRequests
+              .map((r: any) => (r.supervisorCode ?? '').toString().trim())
+              .filter(Boolean)
+          ),
+        ];
+        await Promise.all(uniqueSupervisors.map((sup) => getPerfForSupervisor(sup)));
+
+        allRequests = allRequests.map((req: any) => {
             const sup = (req.supervisorCode ?? '').toString().trim();
             const riderCode = (req.riderCode ?? '').toString().trim();
             if (!sup || !riderCode) return { ...req, periodStats: null };
 
-            const perf = await getPerfForSupervisor(sup);
+            const perf = perfBySupervisor.get(sup) || [];
             const sub = filterPerfForRider(perf, riderCode);
             if (sub.length === 0) {
               return {
@@ -243,8 +284,7 @@ export async function GET(request: NextRequest) {
               };
             }
             return { ...req, periodStats: aggregateRiderPeriodStats(sub) };
-          })
-        );
+          });
       }
     }
 
@@ -264,7 +304,7 @@ export async function GET(request: NextRequest) {
 // Create a new termination request (supervisor only)
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
 
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
@@ -276,14 +316,14 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { riderCode, reason } = body;
-
-    if (!riderCode || !reason) {
+    const parsedBody = terminationPostSchema.safeParse(body);
+    if (!parsedBody.success) {
       return NextResponse.json(
-        { success: false, error: 'كود المندوب والسبب مطلوبان' },
+        { success: false, error: parsedBody.error.errors[0]?.message || 'بيانات غير صالحة' },
         { status: 400 }
       );
     }
+    const { riderCode, reason } = parsedBody.data;
 
     // Verify that the rider is assigned to this supervisor
     console.log(`[TerminationRequest] Supervisor ${decoded.code} requesting termination for rider ${riderCode}`);
@@ -318,6 +358,7 @@ export async function POST(request: NextRequest) {
         'تاريخ الموافقة',
         'تمت الموافقة بواسطة',
         'المديونية',
+        'معرف_الطلب',
       ]);
     } catch (error: any) {
       console.error('[TerminationRequest] Error ensuring sheet exists:', error);
@@ -363,17 +404,19 @@ export async function POST(request: NextRequest) {
     } catch {
       debtValue = 0;
     }
+    const stableId = makeStableRequestId();
     const requestData = [
-      decoded.code?.toString().trim() || '', // Supervisor Code
-      decoded.name?.toString().trim() || '', // Supervisor Name
-      riderCode?.toString().trim() || '', // Rider Code
-      rider.name?.toString().trim() || '', // Rider Name
-      reason?.toString().trim() || '', // Reason
-      'pending', // Status
-      requestDate, // Request Date
-      '', // Approval Date
-      '', // Approved By
-      debtValue, // Debt
+      decoded.code?.toString().trim() || '',
+      decoded.name?.toString().trim() || '',
+      riderCode?.toString().trim() || '',
+      rider.name?.toString().trim() || '',
+      reason?.toString().trim() || '',
+      'pending',
+      requestDate,
+      '',
+      '',
+      debtValue,
+      stableId,
     ];
 
     console.log(`[TerminationRequest] Appending request data:`, requestData);
@@ -414,7 +457,7 @@ export async function POST(request: NextRequest) {
 // Approve or reject a termination request (admin only)
 export async function PUT(request: NextRequest) {
   try {
-    const token = request.headers.get('authorization')?.replace('Bearer ', '');
+    const token = extractBearerToken(request);
 
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
@@ -425,179 +468,127 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح - المدير فقط' }, { status: 401 });
     }
 
+    const denyAccess = assertAdminApiAccess(decoded, 'termination_requests');
+    if (denyAccess) return denyAccess;
+
     const body = await request.json();
-    const { requestId, action, newSupervisorCode, deleteRider } = body; 
-    // action: 'approve' or 'reject'
-    // newSupervisorCode: optional - if provided, assign rider to this supervisor
-    // deleteRider: optional - if true, delete rider completely
-    
-    console.log(`[TerminationRequest] Received request:`, {
-      requestId,
-      action,
-      newSupervisorCode: newSupervisorCode || 'none',
-      deleteRider: deleteRider || false,
-    });
-
-    if (!requestId || !action) {
+    const parsedPut = terminationPutSchema.safeParse(body);
+    if (!parsedPut.success) {
       return NextResponse.json(
-        { success: false, error: 'معرف الطلب والإجراء مطلوبان' },
+        { success: false, error: parsedPut.error.errors[0]?.message || 'بيانات غير صالحة' },
         { status: 400 }
       );
     }
+    const { requestId, action, newSupervisorCode, deleteRider } = parsedPut.data;
 
-    if (action !== 'approve' && action !== 'reject') {
+    const lockKey = `termination:${requestId}:${action}`;
+    if (!tryAcquireApprovalLock(lockKey)) {
       return NextResponse.json(
-        { success: false, error: 'الإجراء يجب أن يكون approve أو reject' },
-        { status: 400 }
+        { success: false, error: 'الطلب قيد المعالجة حالياً — حاول مرة أخرى' },
+        { status: 409 }
       );
     }
 
-    // Get the request from Google Sheets
-    const requestsData = await getSheetData('طلبات_الإقالة');
-    const rowIndex = parseInt(requestId);
+    try {
+      const requestsData = await getSheetData('طلبات_الإقالة', false);
+      const rowIndex = findTerminationRowIndex(requestsData, requestId);
 
-    if (rowIndex < 1 || rowIndex >= requestsData.length) {
-      return NextResponse.json({ success: false, error: 'الطلب غير موجود' }, { status: 404 });
-    }
+      if (rowIndex < 1) {
+        return NextResponse.json({ success: false, error: 'الطلب غير موجود' }, { status: 404 });
+      }
 
-    const row = requestsData[rowIndex];
-    if (row.length < 6 || row[5]?.toString().trim() !== 'pending') {
-      return NextResponse.json(
-        { success: false, error: 'الطلب غير صالح أو تمت معالجته بالفعل' },
-        { status: 400 }
-      );
-    }
-
-    const supervisorCode = row[0]?.toString().trim();
-    const riderCode = row[2]?.toString().trim();
-    const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded, supervisorCode);
-    if (zoneDeny) return zoneDeny;
-    if (action === 'approve' && newSupervisorCode && String(newSupervisorCode).trim() !== '') {
-      const denyNew = await assertLimitedAdminSupervisorZoneAccess(decoded, String(newSupervisorCode).trim());
-      if (denyNew) return denyNew;
-    }
-    const status = action === 'approve' ? 'approved' : 'rejected';
-    const approvalDate = new Date().toISOString().split('T')[0];
-    const approvedBy = decoded.name || decoded.code;
-
-    console.log(`[TerminationRequest] Processing ${action} for request ID ${requestId}`);
-    console.log(`[TerminationRequest] Supervisor: ${supervisorCode}, Rider: ${riderCode}`);
-
-    // Update the request in Google Sheets
-    const updatedRow = [...row];
-    updatedRow[5] = status; // Status
-    updatedRow[7] = approvalDate; // Approval Date
-    updatedRow[8] = approvedBy; // Approved By
-
-    await updateSheetRow('طلبات_الإقالة', rowIndex + 1, updatedRow);
-
-    // If approved, handle rider based on options
-    if (action === 'approve') {
-      try {
-        if (deleteRider === true) {
-          // Delete rider completely
-          console.log(`[TerminationRequest] Deleting rider "${riderCode}" completely`);
-          const { deleteRider: deleteRiderFunc } = await import('@/lib/adminService');
-          const result = await deleteRiderFunc(riderCode, true); // true = delete completely
-          if (!result.success) {
-            console.error(`[TerminationRequest] Failed to delete rider: ${result.error}`);
-            throw new Error(result.error || 'فشل حذف المندوب');
-          }
-          console.log(`[TerminationRequest] Successfully deleted rider "${riderCode}" completely`);
-        } else if (newSupervisorCode && newSupervisorCode.trim() !== '') {
-          // Assign rider to new supervisor
-          console.log(`[TerminationRequest] Assigning rider "${riderCode}" to new supervisor "${newSupervisorCode}"`);
-          const result = await updateRider(riderCode, {
-            supervisorCode: newSupervisorCode.trim(),
-          });
-          if (!result.success) {
-            console.error(`[TerminationRequest] Failed to assign rider: ${result.error}`);
-            throw new Error(result.error || 'فشل تعيين المندوب للمشرف الجديد');
-          }
-          console.log(`[TerminationRequest] Successfully assigned rider "${riderCode}" to supervisor "${newSupervisorCode}"`);
-        } else {
-          // Remove assignment only - set supervisorCode to empty string
-          console.log(`[TerminationRequest] Removing assignment for rider "${riderCode}" only`);
-          const result = await updateRider(riderCode.trim(), {
-            supervisorCode: '', // Remove assignment - this should only affect the specific rider
-          });
-          if (!result.success) {
-            console.error(`[TerminationRequest] Failed to remove rider assignment: ${result.error}`);
-            throw new Error(result.error || 'فشل إزالة تعيين المندوب');
-          } else {
-            console.log(`[TerminationRequest] Successfully removed assignment for rider "${riderCode}"`);
-          }
-        }
-      } catch (error: any) {
-        console.error('[TerminationRequest] Error processing rider:', error);
-        // Return error for all operations - they are all critical
+      const row = requestsData[rowIndex];
+      if (row.length < 6 || row[5]?.toString().trim() !== 'pending') {
         return NextResponse.json(
-          { success: false, error: error.message || 'فشل معالجة المندوب' },
-          { status: 500 }
+          { success: false, error: 'الطلب غير صالح أو تمت معالجته بالفعل' },
+          { status: 400 }
         );
       }
-    }
 
-    // Wait a moment for Google Sheets to propagate changes
-    await new Promise(resolve => setTimeout(resolve, 1000));
+      const supervisorCode = row[0]?.toString().trim();
+      const riderCode = row[2]?.toString().trim();
+      const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded, supervisorCode);
+      if (zoneDeny) return zoneDeny;
+      if (action === 'approve' && newSupervisorCode && String(newSupervisorCode).trim() !== '') {
+        const denyNew = await assertLimitedAdminSupervisorZoneAccess(
+          decoded,
+          String(newSupervisorCode).trim()
+        );
+        if (denyNew) return denyNew;
+      }
 
-    // Clear all caches after successful operation
-    if (action === 'approve') {
-      const { cache, CACHE_KEYS } = await import('@/lib/cache');
-      const { invalidateSupervisorCaches } = await import('@/lib/realtimeSync');
-      const oldSupervisorCode = row[0]?.toString().trim();
-      
-      console.log(`[TerminationRequest] Starting cache clearing process...`);
-      
-      // Clear cache for old supervisor
-      if (oldSupervisorCode && oldSupervisorCode !== '') {
-        console.log(`[TerminationRequest] Clearing cache for old supervisor "${oldSupervisorCode}"`);
-        invalidateSupervisorCaches(oldSupervisorCode);
-        cache.clear(CACHE_KEYS.supervisorRiders(oldSupervisorCode));
-        cache.clear(CACHE_KEYS.ridersData(oldSupervisorCode));
+      // Re-read pending status immediately before mutation (double-approval guard)
+      const freshData = await getSheetData('طلبات_الإقالة', false);
+      const freshRow = freshData[rowIndex];
+      if (!freshRow || freshRow[5]?.toString().trim() !== 'pending') {
+        return NextResponse.json(
+          { success: false, error: 'تمت معالجة الطلب بالفعل' },
+          { status: 409 }
+        );
       }
-      
-      // Clear cache for new supervisor if assigned
-      if (newSupervisorCode && newSupervisorCode.trim() !== '' && newSupervisorCode !== oldSupervisorCode) {
-        console.log(`[TerminationRequest] Clearing cache for new supervisor "${newSupervisorCode}"`);
-        invalidateSupervisorCaches(newSupervisorCode);
-        cache.clear(CACHE_KEYS.supervisorRiders(newSupervisorCode));
-        cache.clear(CACHE_KEYS.ridersData(newSupervisorCode));
-      }
-      
-      // Clear all admin caches
-      console.log(`[TerminationRequest] Clearing all admin and sheet caches`);
-      cache.clear('admin:riders');
-      cache.clear(CACHE_KEYS.sheetData('المناديب'));
-      
-      // Clear ALL supervisor rider caches to be absolutely sure
-      const allCacheKeys = cache.keys();
-      let clearedCount = 0;
-      for (const key of allCacheKeys) {
-        if (key.includes('supervisor-riders') || key.includes('riders-data') || key.includes('sheet:المناديب')) {
-          cache.clear(key);
-          clearedCount++;
+
+      const status = action === 'approve' ? 'approved' : 'rejected';
+      const approvalDate = new Date().toISOString().split('T')[0];
+      const approvedBy = decoded.name || decoded.code;
+
+      if (action === 'approve') {
+        try {
+          if (deleteRider === true) {
+            const { deleteRider: deleteRiderFunc } = await import('@/lib/adminService');
+            const result = await deleteRiderFunc(riderCode, true);
+            if (!result.success) throw new Error(result.error || 'فشل حذف المندوب');
+          } else if (newSupervisorCode && newSupervisorCode.trim() !== '') {
+            const result = await updateRider(riderCode, {
+              supervisorCode: newSupervisorCode.trim(),
+            });
+            if (!result.success) throw new Error(result.error || 'فشل تعيين المندوب للمشرف الجديد');
+          } else {
+            const result = await updateRider(riderCode.trim(), {
+              supervisorCode: '',
+              status: 'مُقال',
+            });
+            if (!result.success) throw new Error(result.error || 'فشل إزالة تعيين المندوب');
+          }
+        } catch (error: any) {
+          return NextResponse.json(
+            { success: false, error: error.message || 'فشل معالجة المندوب — لم يتم تسجيل الموافقة' },
+            { status: 500 }
+          );
         }
       }
-      console.log(`[TerminationRequest] Cleared ${clearedCount} additional cache keys`);
-    }
 
-    return NextResponse.json({
-      success: true,
-      message: action === 'approve' 
-        ? (deleteRider === true 
-          ? 'تمت الموافقة على الطلب وحذف المندوب تماماً' 
-          : newSupervisorCode && newSupervisorCode.trim() !== ''
-          ? 'تمت الموافقة على الطلب وتعيين المندوب لمشرف آخر'
-          : 'تمت الموافقة على الطلب وإزالة تعيين المندوب')
-        : 'تم رفض الطلب',
-      data: {
-        requestId,
-        status,
-        approvalDate,
-        approvedBy,
-      },
-    });
+      const updatedRow = [...freshRow];
+      updatedRow[5] = status;
+      updatedRow[7] = approvalDate;
+      updatedRow[8] = approvedBy;
+
+      await updateSheetRow('طلبات_الإقالة', rowIndex + 1, updatedRow);
+
+      if (action === 'approve') {
+        await invalidateRiderWorkflowCaches({
+          oldSupervisorCode: supervisorCode,
+          newSupervisorCode: newSupervisorCode?.trim() || '',
+          extraSheets: ['طلبات_الإقالة'],
+        });
+      } else {
+        await invalidateRiderWorkflowCaches({ extraSheets: ['طلبات_الإقالة'], notify: false });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message:
+          action === 'approve'
+            ? deleteRider === true
+              ? 'تمت الموافقة على الطلب وحذف المندوب تماماً'
+              : newSupervisorCode && newSupervisorCode.trim() !== ''
+                ? 'تمت الموافقة على الطلب وتعيين المندوب لمشرف آخر'
+                : 'تمت الموافقة على الطلب وإزالة تعيين المندوب'
+            : 'تم رفض الطلب',
+        data: { requestId, status, approvalDate, approvedBy },
+      });
+    } finally {
+      releaseApprovalLock(lockKey);
+    }
   } catch (error: any) {
     console.error('Update termination request error:', error);
     return NextResponse.json(

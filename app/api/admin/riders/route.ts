@@ -43,9 +43,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const limitParam = searchParams.get('limit');
+    const offsetParam = searchParams.get('offset');
+    const limit = limitParam ? Math.min(500, Math.max(1, parseInt(limitParam, 10) || 0)) : 0;
+    const offset = offsetParam ? Math.max(0, parseInt(offsetParam, 10) || 0) : 0;
+    const total = riders.length;
+    if (limit > 0) {
+      riders = riders.slice(offset, offset + limit);
+    }
+
     return NextResponse.json({
       success: true,
       data: riders,
+      meta: limit > 0 ? { total, limit, offset } : undefined,
     });
   } catch (error: any) {
     console.error('Get riders error:', error);

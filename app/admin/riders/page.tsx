@@ -136,9 +136,9 @@ export default function AdminRidersPage() {
       const data = await res.json();
       return data.success ? data.data : [];
     },
-    staleTime: 0, // Always consider data stale
-    gcTime: 0, // Don't cache
-    refetchOnMount: true, // Always refetch on mount
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnMount: true,
   });
 
   const { data: supervisors = [] } = useQuery({

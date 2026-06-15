@@ -1,16 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyToken } from '@/lib/auth';
 import { loadEquipmentPhoto } from '@/lib/equipmentPhotoStorage';
+import { verifyPhotoSignature } from '@/lib/photoAccess';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: { id: string } }
 ) {
   try {
     const photoId = decodeURIComponent(context.params.id || '').trim();
     if (!photoId || !/^eq-[\w-]+$/.test(photoId)) {
       return NextResponse.json({ error: 'معرف غير صالح' }, { status: 400 });
+    }
+
+    const sig = request.nextUrl.searchParams.get('sig');
+    const token = request.headers.get('authorization')?.replace('Bearer ', '').trim();
+    const authed = !!(token && verifyToken(token));
+    const sigOk = verifyPhotoSignature(photoId, sig);
+
+    if (!authed && !sigOk) {
+      return NextResponse.json({ error: 'غير مصرح' }, { status: 401 });
     }
 
     const loaded = await loadEquipmentPhoto(photoId);
@@ -22,7 +33,7 @@ export async function GET(
       status: 200,
       headers: {
         'Content-Type': loaded.mimeType,
-        'Cache-Control': 'public, max-age=86400, immutable',
+        'Cache-Control': 'private, max-age=3600',
       },
     });
   } catch (error: any) {

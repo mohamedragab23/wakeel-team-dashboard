@@ -21,6 +21,9 @@ import {
   type RiderNumFilterKey,
 } from '@/lib/ridersTableFilter';
 import { collectRiderColumnValues } from '@/lib/ridersTableColumnValues';
+import { normalizeRiderCodeForPerformance } from '@/lib/riderCodeUtils';
+import { useToast } from '@/lib/providers/ToastProvider';
+import AccessibleModal from '@/components/ui-v2/AccessibleModal';
 
 interface RiderData {
   code: string;
@@ -55,6 +58,8 @@ export default function RidersPage() {
   const [selectedRider, setSelectedRider] = useState<RiderData | null>(null);
   const [terminationReason, setTerminationReason] = useState('');
   const [terminationLoading, setTerminationLoading] = useState(false);
+  const [pendingTerminationCodes, setPendingTerminationCodes] = useState<Set<string>>(new Set());
+  const { showSuccess, showError } = useToast();
 
   const [filters, setFilters] = useState<RiderColumnFilters>(() => ({
     code: defaultTextFilter(),
@@ -90,7 +95,29 @@ export default function RidersPage() {
 
   useEffect(() => {
     fetchRiders();
+    fetchPendingTerminations();
   }, [startDate, endDate]);
+
+  const fetchPendingTerminations = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      const res = await fetch('/api/termination-requests?status=pending', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        const codes = new Set<string>(
+          data.data.map((r: { riderCode?: string }) =>
+            normalizeRiderCodeForPerformance(r.riderCode)
+          )
+        );
+        setPendingTerminationCodes(codes);
+      }
+    } catch {
+      // non-critical
+    }
+  };
 
   const normalizedSearchCode = searchRiderCode.trim().toLowerCase();
   const visibleRiders =
@@ -217,9 +244,24 @@ export default function RidersPage() {
       const safeEnd = (endDate || '').replaceAll(':', '-');
       const suffix = safeStart && safeEnd ? `${safeStart}_to_${safeEnd}` : new Date().toISOString().split('T')[0];
       const fileName = `riders_performance_${suffix}.xlsx`;
-      XLSX.writeFile(workbook, fileName);
+      await new Promise<void>((resolve, reject) => {
+        const run = () => {
+          try {
+            XLSX.writeFile(workbook, fileName);
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        };
+        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+          (window as Window & { requestIdleCallback: (cb: () => void) => number }).requestIdleCallback(run);
+        } else {
+          setTimeout(run, 0);
+        }
+      });
+      showSuccess('تم تنزيل ملف Excel');
     } catch (e: any) {
-      alert(`❌ فشل تنزيل ملف Excel: ${e?.message || 'خطأ غير معروف'}`);
+      showError(`فشل تنزيل ملف Excel: ${e?.message || 'خطأ غير معروف'}`);
     } finally {
       setExporting(false);
     }
@@ -269,14 +311,12 @@ export default function RidersPage() {
       console.log('[TerminationRequest] Response:', data);
 
       if (data.success) {
-        alert('✅ تم إرسال طلب الإقالة بنجاح. سيتم مراجعته من قبل المدير.');
+        showSuccess('تم إرسال طلب الإقالة بنجاح. سيتم مراجعته من قبل المدير.');
         setShowTerminationModal(false);
         setSelectedRider(null);
         setTerminationReason('');
-        // Wait a bit then refresh with force refresh
-        setTimeout(() => {
-          fetchRiders(true); // Force refresh to bypass cache
-        }, 500);
+        void fetchPendingTerminations();
+        void fetchRiders(true);
       } else {
         const errorMsg = data.error || 'فشل إرسال طلب الإقالة';
         setError(errorMsg);
@@ -693,6 +733,11 @@ export default function RidersPage() {
                       <td className="py-4 px-4 text-sm text-gray-800">{rider.code}</td>
                       <td className="py-4 px-4 text-sm text-gray-800 font-medium whitespace-normal break-words">
                         {rider.name}
+                        {pendingTerminationCodes.has(normalizeRiderCodeForPerformance(rider.code)) ? (
+                          <span className="mr-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900">
+                            طلب إقالة قيد الانتظار
+                          </span>
+                        ) : null}
                       </td>
                       <td className="py-4 px-4 text-sm text-gray-600">
                         {rider.date ? (() => {
@@ -767,53 +812,54 @@ export default function RidersPage() {
           </SupervisorTableSection>
         </div>
 
-        {/* Termination Request Modal */}
-        {showTerminationModal && selectedRider && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full mx-4">
-              <h3 className="text-xl font-bold text-gray-800 mb-4">طلب إقالة مندوب</h3>
-              <div className="space-y-4">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">المندوب:</p>
-                  <p className="font-semibold text-gray-800">{selectedRider.name} ({selectedRider.code})</p>
-                </div>
-                <div>
-                  <label htmlFor="termination-reason" className="block text-sm font-medium text-gray-700 mb-2">
-                    سبب الإقالة <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    id="termination-reason"
-                    name="termination-reason"
-                    value={terminationReason}
-                    onChange={(e) => setTerminationReason(e.target.value)}
-                    placeholder="أدخل سبب طلب الإقالة..."
-                    rows={4}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                  />
-                </div>
-                <div className="flex gap-3 justify-end">
-                  <button
-                    onClick={() => {
-                      setShowTerminationModal(false);
-                      setSelectedRider(null);
-                      setTerminationReason('');
-                    }}
-                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    إلغاء
-                  </button>
-                  <button
-                    onClick={submitTerminationRequest}
-                    disabled={terminationLoading || !terminationReason.trim()}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {terminationLoading ? 'جاري الإرسال...' : 'إرسال الطلب'}
-                  </button>
-                </div>
+        <AccessibleModal
+          open={showTerminationModal && !!selectedRider}
+          onClose={() => {
+            setShowTerminationModal(false);
+            setSelectedRider(null);
+            setTerminationReason('');
+          }}
+          title="طلب إقالة مندوب"
+          description={selectedRider ? `${selectedRider.name} (${selectedRider.code})` : undefined}
+        >
+          {selectedRider ? (
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="termination-reason" className="block text-sm font-medium text-[#EAF0FF] mb-2">
+                  سبب الإقالة <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  id="termination-reason"
+                  name="termination-reason"
+                  value={terminationReason}
+                  onChange={(e) => setTerminationReason(e.target.value)}
+                  placeholder="أدخل سبب طلب الإقالة..."
+                  rows={4}
+                  className="w-full px-4 py-2 border border-[rgba(255,255,255,0.15)] rounded-lg bg-[rgba(0,0,0,0.25)] text-[#EAF0FF] focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => {
+                    setShowTerminationModal(false);
+                    setSelectedRider(null);
+                    setTerminationReason('');
+                  }}
+                  className="px-4 py-2 border border-[rgba(255,255,255,0.2)] rounded-lg text-[#EAF0FF] hover:bg-[rgba(255,255,255,0.06)]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  onClick={submitTerminationRequest}
+                  disabled={terminationLoading || !terminationReason.trim()}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                >
+                  {terminationLoading ? 'جاري الإرسال...' : 'إرسال الطلب'}
+                </button>
               </div>
             </div>
-          </div>
-        )}
+          ) : null}
+        </AccessibleModal>
       </div>
     </Layout>
   );

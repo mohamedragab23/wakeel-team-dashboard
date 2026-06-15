@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Layout from '@/components/Layout';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query'
+import { usePageNotify } from '@/lib/usePageNotify';
 import { ZONE_OPTIONS, supervisorRowMatchesZoneFilter } from '@/lib/zones';
 
 interface SupervisorPerformanceRow {
@@ -42,6 +43,7 @@ interface ComparisonData {
 }
 
 export default function SupervisorPerformancePage() {
+  const notify = usePageNotify();
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [requestRange, setRequestRange] = useState<{ start: string; end: string } | null>(null);

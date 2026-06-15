@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react'
+import { usePageNotify } from '@/lib/usePageNotify';
 import Layout from '@/components/Layout';
 import DashboardStats from '@/components/DashboardStats';
 import PerformanceChart from '@/components/PerformanceChart';
@@ -38,6 +39,7 @@ interface DashboardData {
 }
 
 export default function DashboardPage() {
+  const notify = usePageNotify();
   const useNewUi = process.env.NEXT_PUBLIC_DASHBOARD_UI_V2 !== '0';
 
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);

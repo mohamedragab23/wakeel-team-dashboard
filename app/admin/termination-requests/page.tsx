@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useToast } from '@/lib/providers/ToastProvider';
 
 interface PeriodStats {
   orders: number;
@@ -49,6 +50,16 @@ export default function TerminationRequestsPage() {
   const [bulkDeleteRider, setBulkDeleteRider] = useState(false);
   const [{ from: statsFrom, to: statsTo }, setStatsRange] = useState(defaultAdminStatsRange);
   const queryClient = useQueryClient();
+  const { showSuccess, showError, showWarning } = useToast();
+
+  const invalidateTerminationQueries = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['termination-requests'] }),
+      queryClient.invalidateQueries({ queryKey: ['admin', 'riders'] }),
+      queryClient.invalidateQueries({ queryKey: ['riders'] }),
+      queryClient.invalidateQueries({ queryKey: ['supervisor-riders'] }),
+    ]);
+  };
 
   const { data: requests, isLoading, refetch } = useQuery({
     queryKey: ['termination-requests', statusFilter, statsFrom, statsTo],
@@ -102,33 +113,14 @@ export default function TerminationRequestsPage() {
       return data;
     },
     onSuccess: async () => {
-      // Clear all caches first
-      queryClient.removeQueries({ queryKey: ['termination-requests'] });
-      queryClient.removeQueries({ queryKey: ['admin', 'riders'] });
-      queryClient.removeQueries({ queryKey: ['riders'] });
-      queryClient.removeQueries({ queryKey: ['supervisor-riders'] });
-      
       setApprovalModal(null);
       setNewSupervisorCode('');
       setDeleteRider(false);
-      
-      // Wait a bit for Google Sheets to update, then refetch with refresh=true
-      setTimeout(async () => {
-        // Refetch with refresh=true to bypass cache
-        await Promise.all([
-          queryClient.refetchQueries({ queryKey: ['termination-requests'] }),
-          queryClient.refetchQueries({ queryKey: ['admin', 'riders'] }),
-        ]);
-        
-        // Also invalidate supervisor riders queries
-        queryClient.invalidateQueries({ queryKey: ['riders'] });
-        queryClient.invalidateQueries({ queryKey: ['supervisor-riders'] });
-      }, 1500);
-      
-      alert('✅ تمت الموافقة على الطلب بنجاح. سيتم تحديث القوائم تلقائياً.');
+      await invalidateTerminationQueries();
+      showSuccess('تمت الموافقة على الطلب بنجاح. تم تحديث القوائم.');
     },
     onError: (error: any) => {
-      alert(`❌ خطأ: ${error.message || 'فشل الموافقة على الطلب'}`);
+      showError(error.message || 'فشل الموافقة على الطلب');
     },
   });
 
@@ -147,12 +139,12 @@ export default function TerminationRequestsPage() {
       if (!data.success) throw new Error(data.error || 'فشل الرفض');
       return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['termination-requests'] });
-      alert('✅ تم رفض الطلب');
+    onSuccess: async () => {
+      await invalidateTerminationQueries();
+      showSuccess('تم رفض الطلب');
     },
     onError: (error: any) => {
-      alert(`❌ خطأ: ${error.message || 'فشل رفض الطلب'}`);
+      showError(error.message || 'فشل رفض الطلب');
     },
   });
 
@@ -189,6 +181,8 @@ export default function TerminationRequestsPage() {
     if (deleteRider && !confirm(`⚠️ هل أنت متأكد من حذف ${ids.length} مندوب تماماً من النظام؟ لا يمكن التراجع عن هذا الإجراء.`)) return;
     setBulkLoading(true);
     setBulkApprovalOpen(false);
+    let ok = 0;
+    const failures: string[] = [];
     try {
       const token = localStorage.getItem('token');
       for (const requestId of ids) {
@@ -203,20 +197,25 @@ export default function TerminationRequestsPage() {
           }),
         });
         const data = await res.json();
-        if (!data.success) throw new Error(data.error || 'فشل الموافقة');
+        if (!data.success) {
+          failures.push(`#${requestId}: ${data.error || 'فشل'}`);
+        } else {
+          ok += 1;
+        }
       }
       setSelectedIds(new Set());
       setBulkNewSupervisorCode('');
       setBulkDeleteRider(false);
-      queryClient.removeQueries({ queryKey: ['termination-requests'] });
-      queryClient.invalidateQueries({ queryKey: ['termination-requests'] });
-      queryClient.invalidateQueries({ queryKey: ['admin', 'riders'] });
-      queryClient.invalidateQueries({ queryKey: ['riders'] });
-      queryClient.invalidateQueries({ queryKey: ['supervisor-riders'] });
-      setTimeout(() => queryClient.refetchQueries({ queryKey: ['termination-requests'] }), 500);
-      alert(`✅ تمت الموافقة على ${ids.length} طلب بنجاح.`);
+      await invalidateTerminationQueries();
+      if (failures.length === 0) {
+        showSuccess(`تمت الموافقة على ${ok} طلب بنجاح.`);
+      } else if (ok > 0) {
+        showWarning(`نجح ${ok} وفشل ${failures.length}. ${failures.slice(0, 2).join(' — ')}`);
+      } else {
+        showError(failures[0] || 'فشل تنفيذ الموافقة');
+      }
     } catch (e: any) {
-      alert(`❌ خطأ: ${e.message || 'فشل تنفيذ الموافقة'}`);
+      showError(e.message || 'فشل تنفيذ الموافقة');
     } finally {
       setBulkLoading(false);
     }
@@ -239,10 +238,10 @@ export default function TerminationRequestsPage() {
         if (!data.success) throw new Error(data.error || 'فشل الرفض');
       }
       setSelectedIds(new Set());
-      queryClient.invalidateQueries({ queryKey: ['termination-requests'] });
-      alert(`✅ تم رفض ${ids.length} طلب.`);
+      await invalidateTerminationQueries();
+      showSuccess(`تم رفض ${ids.length} طلب.`);
     } catch (e: any) {
-      alert(`❌ خطأ: ${e.message || 'فشل تنفيذ الرفض'}`);
+      showError(e.message || 'فشل تنفيذ الرفض');
     } finally {
       setBulkLoading(false);
     }

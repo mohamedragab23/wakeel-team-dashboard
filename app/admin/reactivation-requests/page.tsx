@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useToast } from '@/lib/providers/ToastProvider';
 
 interface ReactivationRequest {
   id: number;
@@ -22,6 +23,7 @@ export default function AdminReactivationRequestsPage() {
     'all'
   );
   const queryClient = useQueryClient();
+  const { showSuccess, showError } = useToast();
 
   const { data: requests = [], isLoading } = useQuery({
     queryKey: ['reactivation-requests-admin', statusFilter],
@@ -60,9 +62,9 @@ export default function AdminReactivationRequestsPage() {
     },
     onSuccess: () => {
       handleDone();
-      alert('✅ تمت الموافقة على إعادة التفعيل');
+      showSuccess('تمت الموافقة على إعادة التفعيل');
     },
-    onError: (e: any) => alert(`❌ ${e.message || 'فشل الموافقة'}`),
+    onError: (e: any) => showError(e.message || 'فشل الموافقة'),
   });
 
   const rejectMutation = useMutation({
@@ -82,9 +84,9 @@ export default function AdminReactivationRequestsPage() {
     },
     onSuccess: () => {
       handleDone();
-      alert('✅ تم رفض الطلب');
+      showSuccess('تم رفض الطلب');
     },
-    onError: (e: any) => alert(`❌ ${e.message || 'فشل الرفض'}`),
+    onError: (e: any) => showError(e.message || 'فشل الرفض'),
   });
 
   const counts = {

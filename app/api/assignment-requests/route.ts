@@ -9,6 +9,9 @@ import { getSheetData, appendToSheet, updateSheetRow, ensureSheetExists } from '
 import { updateRider, addRider, getAllSupervisors } from '@/lib/adminService';
 import { isAllowedZone, ZONE_OPTIONS } from '@/lib/zones';
 import { assertLimitedAdminSupervisorZoneAccess, filterRowsBySupervisorInZoneScope } from '@/lib/adminZoneScope';
+import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { invalidateRiderWorkflowCaches } from '@/lib/cacheInvalidation';
+import { findRiderInSheet } from '@/lib/riderCodeUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +54,13 @@ export async function GET(request: NextRequest) {
 
     const decoded = verifyToken(token);
     if (!decoded) {
+      return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
+    }
+
+    if (decoded.role === 'admin') {
+      const deny = assertAdminApiAccess(decoded, 'assignment_requests');
+      if (deny) return deny;
+    } else if (decoded.role !== 'supervisor') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
@@ -288,6 +298,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح - المدير فقط' }, { status: 401 });
     }
 
+    const denyPut = assertAdminApiAccess(decoded, 'assignment_requests');
+    if (denyPut) return denyPut;
+
     const body = await request.json();
     const { requestId, action } = body;
     // action: 'approve' or 'reject'
@@ -341,109 +354,63 @@ export async function PUT(request: NextRequest) {
     console.log(`[AssignmentRequest] Processing ${action} for request ID ${requestId}`);
     console.log(`[AssignmentRequest] Supervisor: ${supervisorCode}, Rider: ${riderCode}`);
 
-    // Update the request in Google Sheets
-    const updatedRow = [...row];
-    // Support both legacy rows (no zone) and new rows (with zone).
-    if (parsedRow.hasZone) {
-      updatedRow[5] = status; // Status
-      updatedRow[7] = approvalDate; // Approval Date
-      updatedRow[8] = approvedBy; // Approved By
-    } else {
-      updatedRow[4] = status; // Status
-      updatedRow[6] = approvalDate; // Approval Date
-      updatedRow[7] = approvedBy; // Approved By
-    }
-
-    await updateSheetRow('طلبات_التعيين', rowIndex + 1, updatedRow);
-
-    // If approved, assign rider to supervisor
     if (action === 'approve') {
       try {
-        // Check if rider exists
         const ridersData = await getSheetData('المناديب', false);
-        let riderExists = false;
-        let riderRowIndex = -1;
-        
-        for (let i = 1; i < ridersData.length; i++) {
-          const riderRow = ridersData[i];
-          if (riderRow.length >= 1 && riderRow[0]?.toString().trim() === riderCode) {
-            riderExists = true;
-            riderRowIndex = i;
-            break;
-          }
-        }
+        const match = findRiderInSheet(ridersData, riderCode);
 
-        if (riderExists) {
-          // Update existing rider
-          console.log(`[AssignmentRequest] Updating existing rider "${riderCode}" to supervisor "${supervisorCode}"`);
-          const result = await updateRider(riderCode, {
+        if (match) {
+          console.log(`[AssignmentRequest] Updating existing rider "${match.actualCode}" to supervisor "${supervisorCode}"`);
+          const result = await updateRider(match.actualCode, {
             supervisorCode: supervisorCode,
           });
           if (!result.success) {
-            console.error(`[AssignmentRequest] Failed to assign rider: ${result.error}`);
             throw new Error(result.error || 'فشل تعيين المندوب للمشرف');
           }
-          console.log(`[AssignmentRequest] Successfully assigned existing rider "${riderCode}" to supervisor "${supervisorCode}"`);
         } else {
-          // Add new rider
           console.log(`[AssignmentRequest] Adding new rider "${riderCode}" to supervisor "${supervisorCode}"`);
           const result = await addRider({
             code: riderCode,
             name: riderName,
-            region: zone || '', // Use requested zone if provided
+            region: zone || '',
             supervisorCode: supervisorCode,
             phone: '',
             joinDate: new Date().toISOString().split('T')[0],
             status: 'active',
           });
           if (!result.success) {
-            console.error(`[AssignmentRequest] Failed to add rider: ${result.error}`);
             throw new Error(result.error || 'فشل إضافة المندوب');
           }
-          console.log(`[AssignmentRequest] Successfully added new rider "${riderCode}" to supervisor "${supervisorCode}"`);
         }
       } catch (error: any) {
-        console.error('[AssignmentRequest] Error processing rider:', error);
+        console.error('[AssignmentRequest] Error processing rider (before sheet update):', error);
         return NextResponse.json(
-          { success: false, error: error.message || 'فشل معالجة المندوب' },
+          { success: false, error: error.message || 'فشل معالجة المندوب — لم يتم تسجيل الموافقة' },
           { status: 500 }
         );
       }
     }
 
-    // Wait a moment for Google Sheets to propagate changes
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    const updatedRow = [...row];
+    if (parsedRow.hasZone) {
+      updatedRow[5] = status;
+      updatedRow[7] = approvalDate;
+      updatedRow[8] = approvedBy;
+    } else {
+      updatedRow[4] = status;
+      updatedRow[6] = approvalDate;
+      updatedRow[7] = approvedBy;
+    }
 
-    // Clear all caches after successful operation
+    await updateSheetRow('طلبات_التعيين', rowIndex + 1, updatedRow);
+
     if (action === 'approve') {
-      const { cache, CACHE_KEYS } = await import('@/lib/cache');
-      const { invalidateSupervisorCaches } = await import('@/lib/realtimeSync');
-      
-      console.log(`[AssignmentRequest] Starting cache clearing process...`);
-      
-      // Clear cache for supervisor
-      if (supervisorCode && supervisorCode !== '') {
-        console.log(`[AssignmentRequest] Clearing cache for supervisor "${supervisorCode}"`);
-        invalidateSupervisorCaches(supervisorCode);
-        cache.clear(CACHE_KEYS.supervisorRiders(supervisorCode));
-        cache.clear(CACHE_KEYS.ridersData(supervisorCode));
-      }
-      
-      // Clear all admin caches
-      console.log(`[AssignmentRequest] Clearing all admin and sheet caches`);
-      cache.clear('admin:riders');
-      cache.clear(CACHE_KEYS.sheetData('المناديب'));
-      
-      // Clear ALL supervisor rider caches to be absolutely sure
-      const allCacheKeys = cache.keys();
-      let clearedCount = 0;
-      for (const key of allCacheKeys) {
-        if (key.includes('supervisor-riders') || key.includes('riders-data') || key.includes('sheet:المناديب')) {
-          cache.clear(key);
-          clearedCount++;
-        }
-      }
-      console.log(`[AssignmentRequest] Cleared ${clearedCount} additional cache keys`);
+      await invalidateRiderWorkflowCaches({
+        newSupervisorCode: supervisorCode,
+        extraSheets: ['طلبات_التعيين'],
+      });
+    } else {
+      await invalidateRiderWorkflowCaches({ extraSheets: ['طلبات_التعيين'], notify: false });
     }
 
     return NextResponse.json({
