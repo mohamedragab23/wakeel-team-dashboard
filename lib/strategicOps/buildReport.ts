@@ -1,16 +1,24 @@
 import { getAllRiders, getAllSupervisors, type Rider, type Supervisor } from '@/lib/adminService';
 import { getSheetData } from '@/lib/googleSheets';
-import {
-  getSupervisorPerformanceFiltered,
-  parseDailySheetDate,
-  normalizeRiderCodeForPerformance,
-} from '@/lib/dataFilter';
+import { parseDailySheetDate, normalizeRiderCodeForPerformance } from '@/lib/dataFilter';
 import { loadAllCandidates } from '@/lib/recruitment/recruitmentService';
 import type { Candidate } from '@/lib/recruitment/types';
 import { supervisorRowMatchesZoneFilter } from '@/lib/zones';
 import { HOUR_BUCKET_DEFS_AR } from '@/lib/strategicOps/labelsAr';
 import { isApprovedResignationStatus, isSheetSuspendedStatus } from '@/lib/strategicOps/resignationStatus';
 import { buildOperationalFormulaAudit, type ResignationAuditRecord, type RiderLifetimeSample } from '@/lib/strategicOps/formulaAudit';
+import {
+  runDataIntegrityLayer,
+  KPI_QUALITY_WARNING_AR,
+  KPI_DATA_LEAKAGE_WARNING_AR,
+} from '@/lib/strategicOps/dataIntegrity';
+import { buildOperationalTruthIntelligence, createDisabledOperationalTruthIntelligence, type OperationalTruthIntelligence } from '@/lib/strategicOps/truthEngine';
+import { dualFromPeriod, type DualMetric } from '@/lib/strategicOps/dualMetrics';
+import { computeKpiTrustLevel, type KpiTrustReport } from '@/lib/strategicOps/kpiTrustLevel';
+import { buildJoinDateAudit, type JoinDateAuditReport } from '@/lib/strategicOps/joinDateAudit';
+import { buildGhostRiderAudit, type GhostRiderAuditReport } from '@/lib/strategicOps/ghostRiderAudit';
+import { buildFinalKpiAccuracyAudit } from '@/lib/strategicOps/finalKpiAccuracyAudit';
+import { buildPostNormalizationValidationReport } from '@/lib/strategicOps/postNormalizationValidation';
 
 export type StrategicOpsFilters = {
   startDate: string;
@@ -25,7 +33,11 @@ export type HourBucket = {
   key: string;
   count: number;
   percent: number;
+  /** Period total hours from riders in this bucket */
   hoursContribution: number;
+  /** Average daily hours per rider in bucket (classification basis) */
+  avgDailyHoursPerRider: number;
+  hoursDual: DualMetric;
 };
 
 export type RiderRankRow = {
@@ -34,10 +46,18 @@ export type RiderRankRow = {
   supervisorCode: string;
   supervisorName: string;
   region: string;
+  /** Period total hours */
   hours: number;
+  /** Period total orders */
   orders: number;
+  /** Calendar-day normalized hours (default operational view) */
   avgDailyHours: number;
+  /** Calendar-day normalized orders */
+  avgDailyOrders: number;
+  hoursDual: DualMetric;
+  ordersDual: DualMetric;
   workDays: number;
+  /** Change in calendar-normalized daily hours (2nd half − 1st half) */
   trendDelta?: number;
   consistencyScore?: number;
 };
@@ -53,8 +73,15 @@ export type SupervisorOpsRow = {
   newHires: number;
   resignations: number;
   totalHours: number;
+  /** Period avg hours per assigned rider */
   avgHoursPerRider: number;
+  /** Daily avg hours per assigned rider (default operational view) */
+  avgHoursPerRiderDaily: number;
   avgOrders: number;
+  avgOrdersDaily: number;
+  totalHoursDual: DualMetric;
+  avgHoursPerRiderDual: DualMetric;
+  avgOrdersDual: DualMetric;
   attendancePercent: number;
   targetAchievementPercent: number;
   productivityScore: number;
@@ -95,6 +122,7 @@ export type GrowthExpansionIndicator = {
 };
 
 const DAILY_HOURS_TARGET = 2200;
+const DAILY_HOURS_BASELINE = 1500;
 
 export type StrategicOpsReport = {
   meta: {
@@ -103,7 +131,13 @@ export type StrategicOpsReport = {
     zone: string;
     supervisorCode: string;
     periodDays: number;
+    validDaysInDataset: number;
     generatedAt: string;
+    /** Default UI/export view — daily normalized values */
+    defaultMetricView: 'daily';
+    normalizationCalendarDays: number;
+    dailyHoursBaseline: number;
+    dailyHoursTarget: number;
   };
   executiveSummary: {
     totalRegisteredRiders: number;
@@ -125,6 +159,7 @@ export type StrategicOpsReport = {
     buckets: HourBucket[];
     totalRiders: number;
     totalHours: number;
+    totalHoursDual: DualMetric;
     classificationBasis: 'average_daily_hours';
     classificationFormula: string;
     periodDays: number;
@@ -141,11 +176,17 @@ export type StrategicOpsReport = {
   };
   hoursAnalysis: {
     totalHours: number;
+    totalHoursDual: DualMetric;
+    /** Operational truth: totalHours ÷ calendar days in range */
     averageDailyHours: number;
+    /** Diagnostic only: totalHours ÷ days with uploaded data */
+    executionAverageDailyHours: number;
     highestDay: { date: string; hours: number } | null;
     lowestDay: { date: string; hours: number } | null;
     averageHoursPerRider: number;
+    averageHoursPerRiderDual: DualMetric;
     averageHoursPerActiveRider: number;
+    averageHoursPerActiveRiderDual: DualMetric;
     trend: Array<{ date: string; hours: number; orders: number }>;
     top10Days: Array<{ date: string; hours: number }>;
     worst10Days: Array<{ date: string; hours: number }>;
@@ -154,11 +195,15 @@ export type StrategicOpsReport = {
     potentialHours: number;
     actualHours: number;
     lostHours: number;
+    potentialHoursDual: DualMetric;
+    actualHoursDual: DualMetric;
+    lostHoursDual: DualMetric;
     lostPercent: number;
     breakdown: Array<{
       category: string;
       categoryKey: string;
       hours: number;
+      hoursDual: DualMetric;
       percent: number;
       riderCount: number;
     }>;
@@ -201,33 +246,64 @@ export type StrategicOpsReport = {
     monthlyAttritionRate: number;
     averageActiveRidersDuringPeriod: number;
     topSupervisorsLosingRiders: Array<{ code: string; name: string; count: number }>;
-    averageRiderLifetimeDays: number;
+    averageRiderLifetimeDays: number | null;
+    riderLifetimeKpiEnabled: boolean;
+    riderLifetimeDisabledReason?: string;
     attritionTrend: Array<{ period: string; resignations: number }>;
   };
   growthOpportunities: {
+    disabled: boolean;
+    disabledReason?: string;
     scenarios: Array<{
       key: string;
       label: string;
+      /** Period gain over selected range */
       additionalHoursGain: number;
+      /** Daily fleet gain (default operational view) */
+      additionalHoursGainDaily: number;
       expectedTotalHours: number;
+      expectedTotalHoursDaily: number;
       affectedRiders: number;
     }>;
   };
   growthExpansion: {
+    disabled: boolean;
+    disabledReason?: string;
     dailyTargetHours: number;
     currentAverageDailyHours: number;
     indicators: GrowthExpansionIndicator[];
   };
   hoursRoadmap: {
+    disabled: boolean;
+    disabledReason?: string;
+    lowConfidence?: boolean;
     currentDailyHours: number;
     targetDailyHours: number;
     dailyGap: number;
     currentPeriodHours: number;
     periodDays: number;
+    validDaysInDataset: number;
     additionalActiveRidersNeeded: number;
     additionalHoursPerRiderNeeded: number;
     roadmap: string[];
+    calculationTrace: {
+      formula: string;
+      dailyGapCalculation: string;
+      avgDailyHoursPerActiveRider: number;
+      additionalRidersFormula: string;
+      additionalRidersCalculation: string;
+      forecastDisabled: boolean;
+      forecastDisabledReason?: string;
+    };
   };
+  kpiTrust: KpiTrustReport;
+  ghostRiderAudit: GhostRiderAuditReport;
+  joinDateAudit: JoinDateAuditReport;
+  codeNormalizationAudit: import('@/lib/strategicOps/codeNormalization').CodeNormalizationAuditReport;
+  postNormalizationValidation: import('@/lib/strategicOps/postNormalizationValidation').PostNormalizationValidationReport;
+  finalKpiAccuracyAudit: import('@/lib/strategicOps/finalKpiAccuracyAudit').FinalKpiAccuracyAudit;
+  dataIntegrity: import('@/lib/strategicOps/dataIntegrity').DataIntegrityReport;
+  operationalTruthIntelligence: OperationalTruthIntelligence;
   operationalFormulaAudit: import('@/lib/strategicOps/formulaAudit').OperationalFormulaAudit;
   operationalHealth: OperationalHealthScore;
   dataValidation: DataValidationEntry[];
@@ -518,29 +594,35 @@ function computeConsistencyScore(dailyHours: Map<string, number>): number {
 }
 
 function computeTrendDelta(dailyHours: Map<string, number>, startDate: Date, endDate: Date): number {
+  const totalCalDays = diffDaysInclusive(startDate, endDate);
+  const midOffset = Math.floor(totalCalDays / 2);
   const mid = new Date(startDate);
-  mid.setDate(mid.getDate() + Math.floor(diffDaysInclusive(startDate, endDate) / 2));
+  mid.setDate(mid.getDate() + midOffset);
+
+  let firstCalDays = 0;
+  let secondCalDays = 0;
+  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    if (d < mid) firstCalDays += 1;
+    else secondCalDays += 1;
+  }
+
   let first = 0;
-  let firstDays = 0;
   let second = 0;
-  let secondDays = 0;
   for (const [dateStr, hrs] of dailyHours) {
     const d = parseDailySheetDate(dateStr);
     if (!d) continue;
-    if (d < mid) {
-      first += hrs;
-      if (hrs > 0) firstDays += 1;
-    } else {
-      second += hrs;
-      if (hrs > 0) secondDays += 1;
-    }
+    if (d < mid) first += hrs;
+    else second += hrs;
   }
-  const avgFirst = firstDays > 0 ? first / firstDays : 0;
-  const avgSecond = secondDays > 0 ? second / secondDays : 0;
+
+  const avgFirst = firstCalDays > 0 ? first / firstCalDays : 0;
+  const avgSecond = secondCalDays > 0 ? second / secondCalDays : 0;
   return round2(avgSecond - avgFirst);
 }
 
 function toRiderRankRow(agg: RiderAgg, periodDays: number, extra?: Partial<RiderRankRow>): RiderRankRow {
+  const avgDailyHours = periodDays > 0 ? round2(agg.totalHours / periodDays) : 0;
+  const avgDailyOrders = periodDays > 0 ? round2(agg.totalOrders / periodDays) : 0;
   return {
     code: agg.code,
     name: agg.name,
@@ -549,7 +631,10 @@ function toRiderRankRow(agg: RiderAgg, periodDays: number, extra?: Partial<Rider
     region: agg.region,
     hours: round2(agg.totalHours),
     orders: agg.totalOrders,
-    avgDailyHours: round2(periodDays > 0 ? agg.totalHours / periodDays : 0),
+    avgDailyHours,
+    avgDailyOrders,
+    hoursDual: dualFromPeriod(agg.totalHours, periodDays),
+    ordersDual: dualFromPeriod(agg.totalOrders, periodDays),
     workDays: agg.workDays,
     ...extra,
   };
@@ -569,9 +654,9 @@ function computeSupervisorRisk(
   let score = 0;
   const assigned = row.assignedRiders || 1;
 
-  if (row.avgHoursPerRider < 4) {
+  if (row.avgHoursPerRiderDaily < 4) {
     score += 20;
-    factors.push('متوسط ساعات منخفض للطيارين');
+    factors.push('متوسط ساعات يومي منخفض للطيارين');
   }
   const attritionRate = (row.resignations / assigned) * 100;
   if (attritionRate > 5) {
@@ -710,7 +795,7 @@ function computeGrowthExpansionMetrics(input: {
   recruitmentApplications: number;
   recruitmentActiveAfterJoining: number;
   averageDailyHours: number;
-}): StrategicOpsReport['growthExpansion'] {
+}): Pick<StrategicOpsReport['growthExpansion'], 'dailyTargetHours' | 'currentAverageDailyHours' | 'indicators'> {
   const {
     totalRegistered,
     totalAssigned,
@@ -855,18 +940,20 @@ function generateInsights(report: Omit<StrategicOpsReport, 'aiInsights'>): Strat
   const lh = report.lostHours;
   const worstSup = report.supervisorPerformance.worstSupervisor;
   const bottomRiders = report.utilization.bottom20ByHours.slice(0, 5);
-  const topScenario = [...report.growthOpportunities.scenarios].sort((a, b) => b.additionalHoursGain - a.additionalHoursGain)[0];
+  const topScenario = [...report.growthOpportunities.scenarios].sort(
+    (a, b) => b.additionalHoursGainDaily - a.additionalHoursGainDaily
+  )[0];
 
   const biggestProblem =
     lh.lostPercent > 40
-      ? `فقدان ${lh.lostPercent}% من الساعات المحتملة (${round2(lh.lostHours)} ساعة) خلال الفترة.`
+      ? `فقدان ${lh.lostPercent}% من الساعات المحتملة (${round2(lh.lostHoursDual.daily)} ساعة/يوم).`
       : es.inactiveRiders > es.totalRegisteredRiders * 0.2
         ? `${es.inactiveRiders} طياراً غير نشط (ساعات=٠ وطلبات=٠) أي ${es.inactivePercent}% من المسجلين.`
         : `معدل الاستغلال ${es.utilizationRate}% فقط — أقل من المستوى التشغيلي المطلوب.`;
 
   const lostHoursCause = lh.breakdown
     .filter((b) => b.hours > 0)
-    .map((b) => `${b.category}: ${round2(b.hours)} ساعة (${b.percent}%)`)
+    .map((b) => `${b.category}: ${round2(b.hoursDual.daily)} ساعة/يوم (${b.percent}%)`)
     .join('؛ ') || 'لا توجد بيانات كافية عن الساعات المهدرة.';
 
   const supervisorNeedingIntervention = worstSup
@@ -874,15 +961,15 @@ function generateInsights(report: Omit<StrategicOpsReport, 'aiInsights'>): Strat
     : 'لا يوجد مشرف ضمن النطاق.';
 
   const underutilizedRiders =
-    bottomRiders.map((r) => `${r.name} (${r.code}): ${r.hours} ساعة`).join(' | ') || '—';
+    bottomRiders.map((r) => `${r.name} (${r.code}): ${r.avgDailyHours} س/يوم`).join(' | ') || '—';
 
   const focusThisWeek = `تفعيل ${es.inactiveRiders} طيار غير نشط؛ رفع الاستغلال من ${es.utilizationRate}%؛ متابعة ${worstSup?.name ?? '—'}؛ معالجة ${es.approvedResignations} إقالة معتمدة.`;
 
-  const focusThisMonth = `خفض التسرب (${es.attritionRate}%)؛ سد فجوة ${report.hoursRoadmap.dailyGap} ساعة/يوم؛ تنفيذ «${topScenario?.label ?? '—'}» (+${topScenario?.additionalHoursGain ?? 0} ساعة)؛ رفع درجة الصحة التشغيلية (${report.operationalHealth.score}).`;
+  const focusThisMonth = `خفض التسرب (${es.attritionRate}%)؛ سد فجوة ${report.hoursRoadmap.dailyGap} ساعة/يوم؛ تنفيذ «${topScenario?.label ?? '—'}» (+${topScenario?.additionalHoursGainDaily ?? 0} س/يوم)؛ رفع درجة الصحة التشغيلية (${report.operationalHealth.score}).`;
 
   const fastestHourGains = topScenario
-    ? `${topScenario.label}: +${topScenario.additionalHoursGain} ساعة. بديل: ${report.hoursRoadmap.additionalActiveRidersNeeded} طيار إضافي.`
-    : 'تفعيل الطيارين غير النشطين ورفع متوسط الساعات.';
+    ? `${topScenario.label}: +${topScenario.additionalHoursGainDaily} ساعة/يوم (≈ ${topScenario.additionalHoursGain} ساعة للفترة). بديل: ${report.hoursRoadmap.additionalActiveRidersNeeded} طيار إضافي.`
+    : 'تفعيل الطيارين غير النشطين ورفع متوسط الساعات اليومية.';
 
   return {
     biggestProblem,
@@ -901,11 +988,10 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
   const endDate = new Date(filters.endDate + 'T23:59:59');
   const periodDays = diffDaysInclusive(startDate, endDate);
 
-  const [allRiders, allSupervisors, performanceRaw, terminationSheet, candidates, dailySheetRaw] =
+  const [allRiders, allSupervisors, terminationSheet, candidates, dailySheetRaw] =
     await Promise.all([
       getAllRiders(false),
       getAllSupervisors(false),
-      getSupervisorPerformanceFiltered(null, startDate, endDate, { useCache: false }),
       getSheetData(SHEET_TERMINATION, false).catch(() => [] as unknown[][]),
       loadAllCandidates().catch(() => [] as Candidate[]),
       getSheetData(SHEET_DAILY, false).catch(() => [] as unknown[][]),
@@ -934,26 +1020,44 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
             filters.zone !== 'all'
         );
 
-  const riderCodeSet = new Set(ridersInScope.map((r) => normalizeRiderCodeForPerformance(r.code)));
+  const { report: dataIntegrity, officialPerformance: validatedRaw, shadowPerformance } =
+    runDataIntegrityLayer({
+    dailySheetRaw,
+    startDate,
+    endDate,
+    ridersInScope,
+    allMasterRiders: allRiders,
+    supervisors: allSupervisors,
+  });
 
-  const performance: PerfRec[] = [];
-  for (const rec of performanceRaw) {
-    const norm = normalizeRiderCodeForPerformance(rec.riderCode);
-    if (!riderCodeSet.has(norm)) continue;
-    let dateStr = '';
-    if (rec.date instanceof Date) {
-      dateStr = rec.date.toISOString().split('T')[0];
-    } else {
-      const parsed = parseDailySheetDate(rec.date);
-      dateStr = parsed ? parsed.toISOString().split('T')[0] : String(rec.date ?? '').slice(0, 10);
-    }
-    performance.push({
-      date: dateStr,
-      riderCode: String(rec.riderCode ?? '').trim(),
-      hours: Number(rec.hours) || 0,
-      orders: Number(rec.orders) || 0,
-    });
-  }
+  const kpiTrust = computeKpiTrustLevel(
+    dataIntegrity.dataQualityScore,
+    dataIntegrity.ghostLeakagePercent
+  );
+  const kpiQualityGatePassed = kpiTrust.kpiQualityGatePassed;
+
+  const joinDateAudit = buildJoinDateAudit(ridersInScope);
+
+  const ghostRiderAudit = buildGhostRiderAudit({
+    ghostRiderList: dataIntegrity.ghostRiderListFull,
+    scopeExcludedRiders: dataIntegrity.scopeExcludedRiders,
+    allMasterRiders: allRiders,
+    ridersInScopeCount: ridersInScope.length,
+    ghostLeakagePercent: dataIntegrity.ghostLeakagePercent,
+    supervisors: allSupervisors,
+  });
+
+  /** Executive KPIs: calendar days (operational truth — missing days count as zero activity). */
+  const operationalPeriodDays = Math.max(1, periodDays);
+  /** Diagnostic only: days with actual uploaded data. */
+  const executionPeriodDays = Math.max(1, dataIntegrity.validDaysInDataset);
+
+  const performance: PerfRec[] = validatedRaw.map((rec) => ({
+    date: rec.date,
+    riderCode: rec.riderCode,
+    hours: rec.hours,
+    orders: rec.orders,
+  }));
 
   const assignedRiders = ridersInScope.filter((r) => String(r.supervisorCode ?? '').trim());
   const riderAggs = buildRiderAggs(ridersInScope, performance);
@@ -1006,7 +1110,7 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
   let totalHours = 0;
   for (const agg of aggList) {
     totalHours += agg.totalHours;
-    const avgDaily = periodDays > 0 ? agg.totalHours / periodDays : 0;
+    const avgDaily = operationalPeriodDays > 0 ? agg.totalHours / operationalPeriodDays : 0;
     const b = bucketCounts.get(hourBucketKey(avgDaily))!;
     b.count += 1;
     b.hours += agg.totalHours;
@@ -1015,23 +1119,28 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
   const activityDistribution = {
     totalRiders: aggList.length,
     totalHours: round2(totalHours),
+    totalHoursDual: dualFromPeriod(totalHours, operationalPeriodDays),
     classificationBasis: 'average_daily_hours' as const,
-    classificationFormula: 'متوسط يومي = إجمالي ساعات الطيار ÷ عدد أيام الفترة',
-    periodDays,
+    classificationFormula: `متوسط يومي = إجمالي ساعات الطيار ÷ أيام التقويم (${operationalPeriodDays} يوم) | متوسط تنفيذي تشخيصي ÷ ${executionPeriodDays} يوم بيانات`,
+    periodDays: operationalPeriodDays,
     buckets: HOUR_BUCKET_DEFS_AR.map((def) => {
       const b = bucketCounts.get(def.key)!;
+      const avgDailyInBucket =
+        b.count > 0 && operationalPeriodDays > 0 ? round2(b.hours / b.count / operationalPeriodDays) : 0;
       return {
         label: def.label,
         key: def.key,
         count: b.count,
         percent: pct(b.count, aggList.length),
         hoursContribution: round2(b.hours),
+        avgDailyHoursPerRider: avgDailyInBucket,
+        hoursDual: dualFromPeriod(b.hours, operationalPeriodDays),
       };
     }),
   };
 
   const rankRows = aggList.map((agg) =>
-    toRiderRankRow(agg, periodDays, {
+    toRiderRankRow(agg, operationalPeriodDays, {
       consistencyScore: computeConsistencyScore(agg.dailyHours),
       trendDelta: computeTrendDelta(agg.dailyHours, startDate, endDate),
     })
@@ -1041,8 +1150,8 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     totalRegisteredRiders: totalRegistered,
     activeRiders,
     utilizationRate,
-    top20ByHours: [...rankRows].sort((a, b) => b.hours - a.hours).slice(0, 20),
-    bottom20ByHours: [...rankRows].sort((a, b) => a.hours - b.hours).slice(0, 20),
+    top20ByHours: [...rankRows].sort((a, b) => b.avgDailyHours - a.avgDailyHours).slice(0, 20),
+    bottom20ByHours: [...rankRows].sort((a, b) => a.avgDailyHours - b.avgDailyHours).slice(0, 20),
     mostConsistent: [...rankRows].filter((r) => r.workDays >= 3).sort((a, b) => (b.consistencyScore ?? 0) - (a.consistencyScore ?? 0)).slice(0, 20),
     mostImproved: [...rankRows].filter((r) => (r.trendDelta ?? 0) > 0).sort((a, b) => (b.trendDelta ?? 0) - (a.trendDelta ?? 0)).slice(0, 20),
     declining: [...rankRows].filter((r) => (r.trendDelta ?? 0) < 0).sort((a, b) => (a.trendDelta ?? 0) - (b.trendDelta ?? 0)).slice(0, 20),
@@ -1062,32 +1171,39 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
 
   const sortedDays = [...trend.map((t) => ({ date: t.date, hours: t.hours }))].sort((a, b) => b.hours - a.hours);
 
+  const avgHoursPerRiderPeriod = round2(aggList.length > 0 ? totalHours / aggList.length : 0);
+  const avgHoursPerActiveRiderPeriod = round2(activeRiders > 0 ? totalHours / activeRiders : 0);
+
   const hoursAnalysis = {
     totalHours: round2(totalHours),
-    averageDailyHours: round2(periodDays > 0 ? totalHours / periodDays : 0),
+    totalHoursDual: dualFromPeriod(totalHours, operationalPeriodDays),
+    averageDailyHours: dataIntegrity.operationalAverageHoursPerDay,
+    executionAverageDailyHours: dataIntegrity.executionAverageHoursPerDay,
     highestDay: sortedDays[0] ?? null,
     lowestDay: sortedDays.length ? sortedDays[sortedDays.length - 1] : null,
-    averageHoursPerRider: round2(aggList.length > 0 ? totalHours / aggList.length : 0),
-    averageHoursPerActiveRider: round2(activeRiders > 0 ? totalHours / activeRiders : 0),
+    averageHoursPerRider: avgHoursPerRiderPeriod,
+    averageHoursPerRiderDual: dualFromPeriod(avgHoursPerRiderPeriod, operationalPeriodDays),
+    averageHoursPerActiveRider: avgHoursPerActiveRiderPeriod,
+    averageHoursPerActiveRiderDual: dualFromPeriod(avgHoursPerActiveRiderPeriod, operationalPeriodDays),
     trend,
     top10Days: sortedDays.slice(0, 10),
     worst10Days: [...sortedDays].reverse().slice(0, 10),
   };
 
-  const potentialHours = totalRegistered * HOURS_CAP_PER_DAY * periodDays;
+  const potentialHours = totalRegistered * HOURS_CAP_PER_DAY * operationalPeriodDays;
   const actualHours = totalHours;
   const lostHoursTotal = Math.max(0, potentialHours - actualHours);
 
   const zeroHourRiders = aggList.filter((a) => a.totalHours <= 0);
   const weakRiders = aggList.filter((a) => {
-    const avg = periodDays > 0 ? a.totalHours / periodDays : 0;
+    const avg = operationalPeriodDays > 0 ? a.totalHours / operationalPeriodDays : 0;
     return avg > 0 && avg < WEAK_HOURS_THRESHOLD;
   });
 
-  const lostFromNoOperation = zeroHourRiders.length * HOURS_CAP_PER_DAY * periodDays;
+  const lostFromNoOperation = zeroHourRiders.length * HOURS_CAP_PER_DAY * operationalPeriodDays;
   const lostFromWeak = weakRiders.reduce((s, a) => {
-    const avg = periodDays > 0 ? a.totalHours / periodDays : 0;
-    return s + (WEAK_HOURS_THRESHOLD - avg) * periodDays;
+    const avg = operationalPeriodDays > 0 ? a.totalHours / operationalPeriodDays : 0;
+    return s + (WEAK_HOURS_THRESHOLD - avg) * operationalPeriodDays;
   }, 0);
 
   const lostFromResignations = approvedResignationsList.reduce((s, r) => {
@@ -1105,10 +1221,14 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     potentialHours: round2(potentialHours),
     actualHours: round2(actualHours),
     lostHours: round2(lostHoursTotal),
+    potentialHoursDual: dualFromPeriod(potentialHours, operationalPeriodDays),
+    actualHoursDual: dualFromPeriod(actualHours, operationalPeriodDays),
+    lostHoursDual: dualFromPeriod(lostHoursTotal, operationalPeriodDays),
     lostPercent: pct(lostHoursTotal, potentialHours),
     breakdown: lostBreakdown.map((b) => ({
       ...b,
       hours: round2(b.hours),
+      hoursDual: dualFromPeriod(b.hours, operationalPeriodDays),
       percent: pct(b.hours, lostHoursTotal || 1),
     })),
   };
@@ -1133,11 +1253,18 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     const supResignations = resignationsBySup.get(code) ?? 0;
 
     const targetDaily = Number.isFinite(Number(sup.target)) ? Number(sup.target) : 0;
-    const targetTotal = targetDaily * periodDays;
-    const targetAchievement = targetTotal > 0 ? pct(supHours, targetTotal) : 0;
+    const supDailyHours = operationalPeriodDays > 0 ? supHours / operationalPeriodDays : 0;
+    const targetAchievement = targetDaily > 0 ? pct(supDailyHours, targetDaily) : 0;
     const attendancePercent = pct(supActive, supRiders.length || 1);
-    const avgOrders = supRiders.length > 0 ? round2(supOrders / supRiders.length) : 0;
-    const productivityScore = round2(attendancePercent * 0.3 + targetAchievement * 0.4 + Math.min(100, avgOrders * 5) * 0.3);
+    const avgOrdersPeriod = supRiders.length > 0 ? round2(supOrders / supRiders.length) : 0;
+    const avgHoursPerRiderPeriod = supRiders.length > 0 ? round2(supHours / supRiders.length) : 0;
+    const avgHoursPerRiderDaily =
+      operationalPeriodDays > 0 ? round2(avgHoursPerRiderPeriod / operationalPeriodDays) : 0;
+    const avgOrdersDaily =
+      operationalPeriodDays > 0 ? round2(avgOrdersPeriod / operationalPeriodDays) : 0;
+    const productivityScore = round2(
+      attendancePercent * 0.3 + targetAchievement * 0.4 + Math.min(100, avgHoursPerRiderDaily * 12) * 0.3
+    );
 
     const base: Omit<SupervisorOpsRow, 'riskScore' | 'riskLevel'> = {
       code,
@@ -1150,8 +1277,13 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
       newHires: supNewHires,
       resignations: supResignations,
       totalHours: round2(supHours),
-      avgHoursPerRider: round2(supRiders.length > 0 ? supHours / supRiders.length : 0),
-      avgOrders,
+      avgHoursPerRider: avgHoursPerRiderPeriod,
+      avgHoursPerRiderDaily,
+      avgOrders: avgOrdersPeriod,
+      avgOrdersDaily,
+      totalHoursDual: dualFromPeriod(supHours, operationalPeriodDays),
+      avgHoursPerRiderDual: dualFromPeriod(avgHoursPerRiderPeriod, operationalPeriodDays),
+      avgOrdersDual: dualFromPeriod(avgOrdersPeriod, operationalPeriodDays),
       attendancePercent,
       targetAchievementPercent: targetAchievement,
       productivityScore,
@@ -1176,6 +1308,29 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
       })
       .sort((a, b) => b.riskScore - a.riskScore),
   };
+
+  const operationalTruthIntelligence = kpiTrust.disableStiOrpsGrowthRoadmap
+    ? createDisabledOperationalTruthIntelligence(kpiTrust.descriptionAr)
+    : buildOperationalTruthIntelligence({
+        dataIntegrity,
+        officialPerformance: validatedRaw,
+        shadowPerformance,
+        supervisors: supervisorsScoped.map((s) => ({
+          code: String(s.code ?? '').trim(),
+          name: s.name || String(s.code ?? ''),
+          region: s.region || '',
+          targetDaily: Number.isFinite(Number(s.target)) ? Number(s.target) : 0,
+        })),
+        riderAggs: aggList.map((agg) => ({
+          code: agg.code,
+          name: agg.name,
+          supervisorCode: agg.supervisorCode,
+          totalHours: agg.totalHours,
+          totalOrders: agg.totalOrders,
+        })),
+        resignationsBySupervisor: resignationsBySup,
+        operationalPeriodDays,
+      });
 
   const recruitment = recruitmentMetrics(candidates, riderAggs);
 
@@ -1235,55 +1390,159 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
       })
       .sort((a, b) => b.count - a.count)
       .slice(0, 10),
-    averageRiderLifetimeDays: lifetimeDays.length > 0 ? round2(lifetimeDays.reduce((a, b) => a + b, 0) / lifetimeDays.length) : 0,
+    averageRiderLifetimeDays:
+      joinDateAudit.riderLifetimeKpiEnabled && lifetimeDays.length > 0
+        ? round2(lifetimeDays.reduce((a, b) => a + b, 0) / lifetimeDays.length)
+        : null,
+    riderLifetimeKpiEnabled: joinDateAudit.riderLifetimeKpiEnabled,
+    riderLifetimeDisabledReason: joinDateAudit.riderLifetimeDisabledReason,
     attritionTrend: Array.from(trendMap.entries()).map(([period, resignations]) => ({ period, resignations })).sort((a, b) => a.period.localeCompare(b.period)),
   };
 
-  const below4 = aggList.filter((a) => { const avg = periodDays > 0 ? a.totalHours / periodDays : 0; return avg > 0 && avg < 4; });
-  const below6 = aggList.filter((a) => { const avg = periodDays > 0 ? a.totalHours / periodDays : 0; return avg > 0 && avg < 6; });
+  const below4 = aggList.filter((a) => { const avg = operationalPeriodDays > 0 ? a.totalHours / operationalPeriodDays : 0; return avg > 0 && avg < 4; });
+  const below6 = aggList.filter((a) => { const avg = operationalPeriodDays > 0 ? a.totalHours / operationalPeriodDays : 0; return avg > 0 && avg < 6; });
   const inactiveAggs = aggList.filter(isRiderInactive);
 
-  const growthOpportunities = {
-    scenarios: [
-      { key: 'A', label: 'رفع الطيارين دون ٤ ساعات إلى ٦ ساعات يومياً', additionalHoursGain: round2(below4.reduce((s, a) => s + (6 - a.totalHours / periodDays) * periodDays, 0)), expectedTotalHours: 0, affectedRiders: below4.length },
-      { key: 'B', label: 'رفع الطيارين دون ٦ ساعات إلى ٨ ساعات يومياً', additionalHoursGain: round2(below6.reduce((s, a) => s + (8 - a.totalHours / periodDays) * periodDays, 0)), expectedTotalHours: 0, affectedRiders: below6.length },
-      { key: 'C', label: 'تفعيل الطيارين غير النشطين (٦ ساعات/يوم)', additionalHoursGain: round2(inactiveAggs.length * 6 * periodDays), expectedTotalHours: 0, affectedRiders: inactiveAggs.length },
-      { key: 'D', label: 'إضافة ٢٠ طيار جديد (٦ ساعات/يوم)', additionalHoursGain: round2(20 * 6 * periodDays), expectedTotalHours: 0, affectedRiders: 20 },
-    ].map((s) => ({ ...s, expectedTotalHours: round2(totalHours + s.additionalHoursGain) })),
-  };
+  const strategicForecastsDisabled = kpiTrust.disableStiOrpsGrowthRoadmap;
+
+  const growthDisabledReason = strategicForecastsDisabled
+    ? kpiTrust.descriptionAr
+    : kpiTrust.warningOnly || kpiTrust.lowConfidenceStrategic
+      ? kpiTrust.descriptionAr
+      : undefined;
+
+  const growthOpportunities = strategicForecastsDisabled
+    ? {
+        disabled: false as const,
+        scenarios: [
+          {
+            key: 'A',
+            label: 'رفع الطيارين دون ٤ ساعات/يوم إلى ٦ ساعات/يوم',
+            additionalHoursGain: round2(
+              below4.reduce((s, a) => s + (6 - a.totalHours / operationalPeriodDays) * operationalPeriodDays, 0)
+            ),
+            additionalHoursGainDaily: round2(
+              below4.reduce((s, a) => s + Math.max(0, 6 - a.totalHours / operationalPeriodDays), 0)
+            ),
+            expectedTotalHours: 0,
+            expectedTotalHoursDaily: 0,
+            affectedRiders: below4.length,
+          },
+          {
+            key: 'B',
+            label: 'رفع الطيارين دون ٦ ساعات/يوم إلى ٨ ساعات/يوم',
+            additionalHoursGain: round2(
+              below6.reduce((s, a) => s + (8 - a.totalHours / operationalPeriodDays) * operationalPeriodDays, 0)
+            ),
+            additionalHoursGainDaily: round2(
+              below6.reduce((s, a) => s + Math.max(0, 8 - a.totalHours / operationalPeriodDays), 0)
+            ),
+            expectedTotalHours: 0,
+            expectedTotalHoursDaily: 0,
+            affectedRiders: below6.length,
+          },
+          {
+            key: 'C',
+            label: 'تفعيل الطيارين غير النشطين (٦ ساعات/يوم)',
+            additionalHoursGain: round2(inactiveAggs.length * 6 * operationalPeriodDays),
+            additionalHoursGainDaily: round2(inactiveAggs.length * 6),
+            expectedTotalHours: 0,
+            expectedTotalHoursDaily: 0,
+            affectedRiders: inactiveAggs.length,
+          },
+          {
+            key: 'D',
+            label: 'إضافة ٢٠ طيار جديد (٦ ساعات/يوم)',
+            additionalHoursGain: round2(20 * 6 * operationalPeriodDays),
+            additionalHoursGainDaily: round2(20 * 6),
+            expectedTotalHours: 0,
+            expectedTotalHoursDaily: 0,
+            affectedRiders: 20,
+          },
+        ].map((s) => ({
+          ...s,
+          expectedTotalHours: round2(totalHours + s.additionalHoursGain),
+          expectedTotalHoursDaily: round2(
+            dataIntegrity.operationalAverageHoursPerDay + s.additionalHoursGainDaily
+          ),
+        })),
+      }
+    : {
+        disabled: true,
+        disabledReason: growthDisabledReason,
+        scenarios: [],
+      };
 
   const currentDailyHours = hoursAnalysis.averageDailyHours;
   const dailyGap = Math.max(0, DAILY_HOURS_TARGET - currentDailyHours);
   const avgDailyHoursPerActiveRider =
-    activeRiders > 0 && periodDays > 0 ? round2(totalHours / activeRiders / periodDays) : 0;
+    activeRiders > 0 && operationalPeriodDays > 0 ? round2(totalHours / activeRiders / operationalPeriodDays) : 0;
   const additionalActiveRidersNeeded =
-    avgDailyHoursPerActiveRider > 0 ? Math.ceil(dailyGap / avgDailyHoursPerActiveRider) : 0;
+    avgDailyHoursPerActiveRider > 0 && dailyGap > 0
+      ? Math.ceil(dailyGap / avgDailyHoursPerActiveRider)
+      : 0;
   const additionalHoursPerRiderDaily =
     totalRegistered > 0 ? round2(dailyGap / totalRegistered) : 0;
 
+  const additionalRidersCalculation =
+    dailyGap <= 0
+      ? 'لا فجوة — الهدف اليومي متحقق أو متجاوز'
+      : avgDailyHoursPerActiveRider <= 0
+        ? `تعذّر الحساب: متوسط ساعات الطيار النشط يومياً = 0 (نشطون=${activeRiders}، ساعات=${round2(totalHours)}، أيام=${operationalPeriodDays})`
+        : `⌈${round2(dailyGap)} ÷ ${avgDailyHoursPerActiveRider}⌉ = ${additionalActiveRidersNeeded} طيار`;
+
+  const calculationTrace = {
+    formula: 'فجوة يومية = 2200 − متوسط الساعات اليومية للأسطول',
+    dailyGapCalculation: `${DAILY_HOURS_TARGET} − ${currentDailyHours} = ${round2(dailyGap)} ساعة/يوم`,
+    avgDailyHoursPerActiveRider,
+    additionalRidersFormula: '⌈فجوة يومية ÷ متوسط ساعات الطيار النشط يومياً⌉',
+    additionalRidersCalculation,
+    forecastDisabled: strategicForecastsDisabled,
+    forecastDisabledReason: strategicForecastsDisabled ? kpiTrust.descriptionAr : undefined,
+  };
+
   const roadmap: string[] = [];
-  if (dailyGap <= 0) {
+  roadmap.push(`${kpiTrust.labelAr}: ${kpiTrust.descriptionAr}`);
+  if (strategicForecastsDisabled) {
+    if (dataIntegrity.dataLeakageDetected) {
+      roadmap.push(
+        `تسرب Ghost Riders: ${dataIntegrity.ghostRiderLeakageHours} ساعة (${dataIntegrity.ghostLeakagePercent}% من إجمالي الساعات المسجلة).`
+      );
+    }
+    if (dataIntegrity.missingDates.length > 0) {
+      roadmap.push(`أكمل رفع بيانات الأيام الناقصة (${dataIntegrity.missingDates.length} يوم) قبل تفعيل التوقعات.`);
+    }
+  } else if (dailyGap <= 0) {
     roadmap.push(`تم تجاوز هدف ${DAILY_HOURS_TARGET} ساعة يومياً (المتوسط الحالي: ${currentDailyHours}).`);
   } else {
     roadmap.push(`فجوة يومية: ${round2(dailyGap)} ساعة (هدف ${DAILY_HOURS_TARGET} − متوسط يومي ${currentDailyHours}).`);
-    roadmap.push(`مرجع الفترة: ${round2(totalHours)} ساعة إجمالية خلال ${periodDays} يوم — لا يُقارن مباشرة بالهدف اليومي.`);
+    roadmap.push(`تتبع الحساب: ${additionalRidersCalculation}`);
+    roadmap.push(`مرجع الفترة: ${round2(totalHours)} ساعة رسمية خلال ${operationalPeriodDays} يوم تقويم (${executionPeriodDays} يوم بيانات مرفوعة).`);
     roadmap.push(`خيار ١: إضافة ${additionalActiveRidersNeeded} طيار نشط بمتوسط ${avgDailyHoursPerActiveRider} ساعة/يوم.`);
     roadmap.push(`خيار ٢: رفع متوسط الساعات +${additionalHoursPerRiderDaily} ساعة/يوم لكل طيار مسجل.`);
+    if (kpiTrust.lowConfidenceStrategic) {
+      roadmap.push('⚠ ثقة منخفضة — استخدم هذه التوقعات للاتجاه العام فقط حتى تُحسَّن جودة البيانات.');
+    }
   }
 
   const hoursRoadmap = {
+    disabled: strategicForecastsDisabled,
+    disabledReason: strategicForecastsDisabled ? kpiTrust.descriptionAr : undefined,
+    lowConfidence: kpiTrust.lowConfidenceStrategic,
     currentDailyHours,
     targetDailyHours: DAILY_HOURS_TARGET,
     dailyGap: round2(dailyGap),
     currentPeriodHours: round2(totalHours),
     periodDays,
+    validDaysInDataset: executionPeriodDays,
     additionalActiveRidersNeeded,
     additionalHoursPerRiderNeeded: additionalHoursPerRiderDaily,
     roadmap,
+    calculationTrace,
   };
 
   const totalOrders = aggList.reduce((s, a) => s + a.totalOrders, 0);
-  const growthExpansion = computeGrowthExpansionMetrics({
+  const growthExpansionBase = computeGrowthExpansionMetrics({
     totalRegistered,
     totalAssigned,
     activeRiders,
@@ -1291,18 +1550,36 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     approvedResignations,
     totalHours,
     totalOrders,
-    periodDays,
+    periodDays: operationalPeriodDays,
     supervisorCount: supervisorsScoped.length,
     recruitmentApplications: recruitment.totalApplications,
     recruitmentActiveAfterJoining: recruitment.totalActiveAfterJoining,
     averageDailyHours: hoursAnalysis.averageDailyHours,
   });
+  const growthExpansion: StrategicOpsReport['growthExpansion'] = strategicForecastsDisabled
+    ? {
+        disabled: false,
+        dailyTargetHours: growthExpansionBase.dailyTargetHours,
+        currentAverageDailyHours: growthExpansionBase.currentAverageDailyHours,
+        indicators: growthExpansionBase.indicators,
+      }
+    : {
+        disabled: true,
+        disabledReason: growthDisabledReason,
+        dailyTargetHours: growthExpansionBase.dailyTargetHours,
+        currentAverageDailyHours: growthExpansionBase.currentAverageDailyHours,
+        indicators: growthExpansionBase.indicators.map((ind) => ({
+          ...ind,
+          displayValue: '—',
+          calculation: 'معطّل — جودة البيانات دون الحد المطلوب',
+        })),
+      };
 
   const operationalHealth = computeOperationalHealth(
     utilizationRate,
     attritionRate,
     pct(activeRiders, totalRegistered),
-    periodDays > 0 ? totalHours / totalRegistered / periodDays : 0,
+    operationalPeriodDays > 0 ? totalHours / totalRegistered / operationalPeriodDays : 0,
     recruitment.recruitmentEfficiencyPercent
   );
 
@@ -1311,6 +1588,14 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
   const terminationRows = Math.max(0, terminationSheet.length - 1);
 
   const dataValidation: DataValidationEntry[] = [
+    {
+      kpi: 'جودة البيانات (DIL)',
+      sourceSheet: SHEET_DAILY,
+      columns: 'التاريخ (0)، كود المندوب (1)، ساعات (2)، طلبات (6)',
+      recordsRead: dataIntegrity.totalRows,
+      formula: 'RAW → smart dedup → official + shadow → KPI',
+      result: `${dataIntegrity.dataQualityScore}/100 | تسرب: ${dataIntegrity.ghostLeakagePercent}%`,
+    },
     {
       kpi: 'الطيارون النشطون',
       sourceSheet: SHEET_DAILY,
@@ -1385,6 +1670,56 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     })),
   ];
 
+  const dataIntegrityFinal = {
+    ...dataIntegrity,
+    kpiQualityGatePassed: kpiTrust.kpiQualityGatePassed,
+    warningMessage:
+      kpiTrust.level > 1 ? kpiTrust.descriptionAr : dataIntegrity.warningMessage,
+    warningLevel:
+      kpiTrust.level >= 4
+        ? ('red' as const)
+        : kpiTrust.level >= 2
+          ? ('amber' as const)
+          : dataIntegrity.warningLevel,
+  };
+
+  const ghostLeakageOrders = shadowPerformance.reduce((s, r) => s + r.orders, 0);
+
+  const finalKpiAccuracyAudit = buildFinalKpiAccuracyAudit({
+    filters,
+    dataIntegrity: dataIntegrityFinal,
+    ghostRiderAudit,
+    joinDateAudit,
+    kpiTrust,
+    allMasterRiders: allRiders,
+    ridersScoped,
+    ridersInScope,
+    supervisorCodesScoped,
+    uniqueActiveRidersInPeriod: activeRiders,
+    averageDailyActiveRiders: avgActiveDuringPeriod,
+    dailyActiveCounts,
+    hoursRoadmap,
+    ghostLeakageOrders,
+    generatedAt: new Date().toISOString(),
+  });
+
+  const masterNormSet = new Set(
+    allRiders
+      .map((r) => normalizeRiderCodeForPerformance(r.code))
+      .filter((c): c is string => Boolean(c))
+  );
+
+  const postNormalizationValidation = buildPostNormalizationValidationReport({
+    codeNormalization: dataIntegrityFinal.codeNormalization,
+    masterNormSet,
+    dataIntegrity: dataIntegrityFinal,
+    joinDateAudit,
+    ridersInScopeCount: ridersInScope.length,
+    ghostAnomalyCount: ghostRiderAudit.totalAnomalies,
+    zeroValidationPassed: finalKpiAccuracyAudit.roadmapValidation.zeroValidationPassed,
+    generatedAt: new Date().toISOString(),
+  });
+
   const partial = {
     meta: {
       startDate: filters.startDate,
@@ -1392,7 +1727,12 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
       zone: filters.zone,
       supervisorCode: filters.supervisorCode,
       periodDays,
+      validDaysInDataset: executionPeriodDays,
       generatedAt: new Date().toISOString(),
+      defaultMetricView: 'daily' as const,
+      normalizationCalendarDays: operationalPeriodDays,
+      dailyHoursBaseline: DAILY_HOURS_BASELINE,
+      dailyHoursTarget: DAILY_HOURS_TARGET,
     },
     executiveSummary,
     activityDistribution,
@@ -1408,6 +1748,14 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     hoursRoadmap,
     operationalHealth,
     dataValidation,
+    dataIntegrity: dataIntegrityFinal,
+    kpiTrust,
+    ghostRiderAudit,
+    joinDateAudit,
+    codeNormalizationAudit: dataIntegrityFinal.codeNormalization,
+    postNormalizationValidation,
+    finalKpiAccuracyAudit,
+    operationalTruthIntelligence,
   };
 
   const operationalFormulaAudit = buildOperationalFormulaAudit({
@@ -1422,7 +1770,7 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     zeroHourRiderCount: zeroHourRiders.length,
     weakRiderCount: weakRiders.length,
     avgDailyHoursPerActiveRider,
-    periodDays,
+    periodDays: operationalPeriodDays,
   });
 
   const aiInsights = generateInsights({ ...partial, operationalFormulaAudit });

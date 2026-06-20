@@ -55,7 +55,7 @@ export type OperationalFormulaAudit = {
     ridersWithJoinDate: number;
     ridersWithoutJoinDate: number;
     calculation: string;
-    resultDays: number;
+    resultDays: number | null;
   };
   daily2200Roadmap: {
     formula: string;
@@ -88,6 +88,7 @@ export type OperationalFormulaAudit = {
       formula: string;
       rawData: string;
       resultHours: number;
+      resultHoursDaily: number;
     }>;
   };
 };
@@ -146,9 +147,11 @@ export function buildOperationalFormulaAudit(input: {
 
   const lifetimeResult = attr.averageRiderLifetimeDays;
   const lifetimeCalculation =
-    input.lifetimeSamples.length > 0
-      ? `متوسط(${input.lifetimeSamples.map((s) => s.lifetimeDays).join(' + ')}) ÷ ${input.lifetimeSamples.length} = ${lifetimeResult} يوم`
-      : 'لا توجد إقالات مع تاريخ انضمام صالح';
+    !attr.riderLifetimeKpiEnabled
+      ? attr.riderLifetimeDisabledReason ?? 'معطّل — تغطية تاريخ الانضمام دون 80%'
+      : input.lifetimeSamples.length > 0
+        ? `متوسط(${input.lifetimeSamples.map((s) => s.lifetimeDays).join(' + ')}) ÷ ${input.lifetimeSamples.length} = ${lifetimeResult} يوم`
+        : 'لا توجد إقالات مع تاريخ انضمام صالح';
 
   const additionalRidersIndicator = ge.indicators.find((i) => i.key === 'additional_riders_daily_2200');
   const avgDailyPerActive = input.avgDailyHoursPerActiveRider;
@@ -196,6 +199,7 @@ export function buildOperationalFormulaAudit(input: {
         formula: 'عدد الطيارين بصفر ساعات × 10 ساعات/يوم × أيام الفترة',
         rawData: `${input.zeroHourRiderCount} طيار × 10 × ${input.periodDays} يوم`,
         resultHours: noOp?.hours ?? 0,
+        resultHoursDaily: noOp?.hoursDual.daily ?? 0,
       },
       {
         key: 'weak_operation',
@@ -203,6 +207,7 @@ export function buildOperationalFormulaAudit(input: {
         formula: 'Σ لكل طيار (6 − متوسطه اليومي) × أيام الفترة — حيث 0 < متوسط < 6',
         rawData: `${input.weakRiderCount} طيار تحت 6 ساعات/يوم متوسط`,
         resultHours: weakRiders?.hours ?? 0,
+        resultHoursDaily: weakRiders?.hoursDual.daily ?? 0,
       },
       {
         key: 'resignations',
@@ -210,6 +215,7 @@ export function buildOperationalFormulaAudit(input: {
         formula: 'Σ لكل إقالة معتمدة: أيام من تاريخ الموافقة حتى نهاية الفترة × 10 ساعات/يوم',
         rawData: `${attr.approvedResignations} إقالة (فريدة لكل طيار)`,
         resultHours: resignLoss?.hours ?? 0,
+        resultHoursDaily: resignLoss?.hoursDual.daily ?? 0,
       },
     ],
   };
@@ -239,11 +245,13 @@ export function buildOperationalFormulaAudit(input: {
     {
       kpi: 'متوسط عمر الطيار',
       formula: 'تاريخ الموافقة (طلبات_الإقالة) − تاريخ الانضمام (المناديب عمود G)',
-      rawData: `${input.ridersWithJoinDate} بتاريخ انضمام | ${input.ridersWithoutJoinDate} بدون تاريخ`,
-      result: `${lifetimeResult} يوم`,
+      rawData: `تغطية انضمام=${r.joinDateAudit.joinDateCoveragePercent}% | ${input.ridersWithJoinDate} بتاريخ | ${input.ridersWithoutJoinDate} بدون`,
+      result: attr.riderLifetimeKpiEnabled ? `${lifetimeResult} يوم` : 'معطّل',
       ...auditStatus(
-        input.ridersWithoutJoinDate > 0 && input.lifetimeSamples.length < attr.approvedResignations,
-        'بعض الإقالات بدون تاريخ انضمام صالح في شيت المناديب'
+        !attr.riderLifetimeKpiEnabled ||
+          (input.ridersWithoutJoinDate > 0 && input.lifetimeSamples.length < attr.approvedResignations),
+        attr.riderLifetimeDisabledReason ??
+          'بعض الإقالات بدون تاريخ انضمام صالح في شيت المناديب'
       ),
     },
     {
@@ -268,6 +276,20 @@ export function buildOperationalFormulaAudit(input: {
       status: 'valid',
     },
     {
+      kpi: 'نموذج القيم المزدوجة (يومي/فترة)',
+      formula: 'القيمة اليومية = إجمالي الفترة ÷ أيام التقويم — العرض الافتراضي يومي',
+      rawData: `أيام التطبيع=${r.meta.normalizationCalendarDays} | هدف يومي=${r.meta.dailyHoursTarget} | خط أساس=${r.meta.dailyHoursBaseline}`,
+      result: `متوسط أسطول يومي=${ha.averageDailyHours} | فترة=${ha.totalHours}`,
+      status: 'valid',
+    },
+    {
+      kpi: 'ترتيب الطيارين والمشرفين',
+      formula: 'الترتيب والتصنيف والفرص والساعات المهدرة تُحسب بالمتوسط اليومي',
+      rawData: `top20 avgDaily | supervisor productivity من avgHoursPerRiderDaily`,
+      result: 'يومي افتراضي',
+      status: 'valid',
+    },
+    {
       kpi: 'الإقالات المعتمدة',
       formula: resignationAudit.formula,
       rawData: `صفوف خام=${input.rawResignationRowsMatched} | بعد إزالة التكرار=${resignationAudit.afterDedupe}`,
@@ -278,21 +300,21 @@ export function buildOperationalFormulaAudit(input: {
       kpi: 'ساعات مهدرة — عدم التشغيل',
       formula: lostHoursAudit.categories[0].formula,
       rawData: lostHoursAudit.categories[0].rawData,
-      result: `${lostHoursAudit.categories[0].resultHours} ساعة`,
+      result: `${lostHoursAudit.categories[0].resultHoursDaily} س/يوم (فترة: ${lostHoursAudit.categories[0].resultHours})`,
       status: 'valid',
     },
     {
       kpi: 'ساعات مهدرة — ضعف التشغيل',
       formula: lostHoursAudit.categories[1].formula,
       rawData: lostHoursAudit.categories[1].rawData,
-      result: `${lostHoursAudit.categories[1].resultHours} ساعة`,
+      result: `${lostHoursAudit.categories[1].resultHoursDaily} س/يوم (فترة: ${lostHoursAudit.categories[1].resultHours})`,
       status: 'valid',
     },
     {
       kpi: 'ساعات مهدرة — الإقالات',
       formula: lostHoursAudit.categories[2].formula,
       rawData: lostHoursAudit.categories[2].rawData,
-      result: `${lostHoursAudit.categories[2].resultHours} ساعة`,
+      result: `${lostHoursAudit.categories[2].resultHoursDaily} س/يوم (فترة: ${lostHoursAudit.categories[2].resultHours})`,
       status: 'valid',
     },
     {

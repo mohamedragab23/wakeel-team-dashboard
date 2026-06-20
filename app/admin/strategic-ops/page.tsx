@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { usePageNotify } from '@/lib/usePageNotify';
 import { ZONE_OPTIONS } from '@/lib/zones';
 import { STRATEGIC_OPS_LABELS as L } from '@/lib/strategicOps/labelsAr';
+import { GHOST_CATEGORY_LABELS_AR } from '@/lib/strategicOps/ghostRiderAudit';
 import type { StrategicOpsReport } from '@/lib/strategicOps/buildReport';
 import {
   exportStrategicOpsExcel,
@@ -47,6 +48,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       {children}
     </section>
   );
+}
+
+function roundPct(n: number): number {
+  return Math.round(n * 10000) / 100;
 }
 
 function RiskBadge({ level }: { level: 'green' | 'yellow' | 'red' }) {
@@ -230,6 +235,25 @@ export default function StrategicOpsCenterPage() {
 
         {report && (
           <>
+            {report.kpiTrust.level > 1 && (
+              <div
+                className={`rounded-2xl border p-4 text-sm font-medium ${
+                  report.kpiTrust.level >= 4
+                    ? 'border-red-500/50 bg-red-500/15 text-red-100'
+                    : report.kpiTrust.level === 3
+                      ? 'border-amber-500/50 bg-amber-500/15 text-amber-100'
+                      : 'border-amber-500/50 bg-amber-500/15 text-amber-100'
+                }`}
+              >
+                {report.kpiTrust.labelAr}: {report.kpiTrust.descriptionAr}
+                <span className="block text-xs mt-1 font-normal opacity-90">
+                  جودة البيانات: {report.kpiTrust.dataQualityScore}/100 — تسرب Ghost: {report.kpiTrust.ghostLeakagePercent}%
+                  {report.kpiTrust.disableStiOrpsGrowthRoadmap && ' — STI/ORPS/النمو/الخارطة معطّلة'}
+                  {report.kpiTrust.lowConfidenceStrategic && !report.kpiTrust.disableStiOrpsGrowthRoadmap && ' — مؤشرات استراتيجية بثقة منخفضة'}
+                </span>
+              </div>
+            )}
+
             {/* درجة صحة التشغيل */}
             <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-5 flex flex-wrap items-center justify-between gap-4">
               <div>
@@ -246,6 +270,360 @@ export default function StrategicOpsCenterPage() {
               <button type="button" onClick={() => exportStrategicOpsPdf(report)} className="rounded-lg border border-white/15 bg-white/5 px-4 py-2 text-sm text-[#EAF0FF] hover:bg-white/10">{L.exportPdf}</button>
               <button type="button" onClick={handleCopy} className="rounded-lg border border-purple-500/40 bg-purple-500/15 px-4 py-2 text-sm text-purple-200 hover:bg-purple-500/25">{L.copyChatGpt}</button>
             </div>
+
+            <Section title={L.dataIntegrityReport}>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                <StatCard label="درجة جودة البيانات" value={`${report.dataIntegrity.dataQualityScore}/100`} />
+                <StatCard label="صفوف معالجة" value={report.dataIntegrity.totalRows} />
+                <StatCard label="صفوف صالحة للمؤشرات" value={report.dataIntegrity.validRows} />
+                <StatCard label="تكرارات محذوفة" value={report.dataIntegrity.duplicateRows} />
+                <StatCard label="اكتمال الأيام" value={`${report.dataIntegrity.completenessPercentage}%`} sub={`${report.dataIntegrity.validDaysInDataset}/${report.meta.periodDays} يوم`} />
+                <StatCard label="أيام ناقصة" value={report.dataIntegrity.missingDates.length} />
+                <StatCard label="Ghost Riders" value={report.dataIntegrity.missingRiders} sub={`${report.dataIntegrity.ghostRiderRowCount} صف`} />
+                <StatCard label="غير معيّنين" value={report.dataIntegrity.unassignedRiderCount} />
+              </div>
+              {report.dataIntegrity.missingDates.length > 0 && (
+                <p className="text-xs text-amber-300/90 mb-3">
+                  أيام بدون بيانات: {report.dataIntegrity.missingDates.slice(0, 15).join('، ')}
+                  {report.dataIntegrity.missingDates.length > 15 ? ` … (+${report.dataIntegrity.missingDates.length - 15})` : ''}
+                </p>
+              )}
+              {report.dataIntegrity.ghostRiders.length > 0 && (
+                <>
+                  <h3 className="text-sm font-medium text-[#94A3B8] mb-2">Ghost Riders — عينة (صفوف يومية)</h3>
+                  <MiniTable
+                    headers={['الكود', 'التاريخ', 'صف الشيت', 'ساعات']}
+                    rows={report.dataIntegrity.ghostRiders.slice(0, 20).map((g) => [g.riderCode, g.date, g.sheetRow, g.hours])}
+                  />
+                  <p className="text-xs text-[#64748B] mt-2">للقائمة الكاملة والتصنيف — انظر قسم تدقيق Ghost Riders أدناه</p>
+                </>
+              )}
+              {report.dataIntegrity.unassignedRiders.length > 0 && (
+                <>
+                  <h3 className="text-sm font-medium text-[#94A3B8] mt-4 mb-2">طيارون بدون مشرف</h3>
+                  <MiniTable
+                    headers={['الكود', 'الاسم']}
+                    rows={report.dataIntegrity.unassignedRiders.slice(0, 20).map((u) => [u.riderCode, u.name])}
+                  />
+                </>
+              )}
+              <p className="text-xs text-[#64748B] mt-3">
+                مسار المعالجة: {report.codeNormalizationAudit.pipelinePath}
+              </p>
+            </Section>
+
+            <Section title={L.ghostRiderAudit}>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                <StatCard label="إجمالي Ghost" value={report.ghostRiderAudit.totalGhostRiders} sub={`${report.ghostRiderAudit.ratioGhostToRegisteredPercent}% من المسجلين`} />
+                <StatCard label="مستبعدون بالفلتر" value={report.ghostRiderAudit.totalScopeExcludedRiders} />
+                <StatCard label="إجمالي الشذوذ" value={report.ghostRiderAudit.totalAnomalies} />
+                <StatCard label="تسرب Ghost" value={`${report.ghostRiderAudit.ghostLeakagePercent}%`} />
+              </div>
+              <h3 className="text-sm font-medium text-[#94A3B8] mb-2">ملخص السبب الجذري</h3>
+              <div className="grid sm:grid-cols-5 gap-2 mb-4 text-xs">
+                <div className="rounded-lg border border-white/10 p-2">A عدم تطابق: {report.ghostRiderAudit.rootCauseSummary.codeMismatchPercent}%</div>
+                <div className="rounded-lg border border-white/10 p-2">B غائب من المناديب: {report.ghostRiderAudit.rootCauseSummary.missingMasterPercent}%</div>
+                <div className="rounded-lg border border-white/10 p-2">C فشل تطبيع: {report.ghostRiderAudit.rootCauseSummary.normalizationFailedPercent}%</div>
+                <div className="rounded-lg border border-white/10 p-2">D فلتر زون: {report.ghostRiderAudit.rootCauseSummary.zoneFilteringPercent}%</div>
+                <div className="rounded-lg border border-white/10 p-2">E ربط مشرف: {report.ghostRiderAudit.rootCauseSummary.supervisorMappingPercent}%</div>
+              </div>
+              <MiniTable
+                headers={['الكود', 'الاسم', 'المشرف', 'ساعات', 'طلبات', 'التصنيف', 'السبب']}
+                rows={report.ghostRiderAudit.riders.slice(0, 50).map((g) => [
+                  g.rawRiderCode,
+                  g.riderName,
+                  g.supervisorName,
+                  g.totalHours,
+                  g.totalOrders,
+                  GHOST_CATEGORY_LABELS_AR[g.category],
+                  g.reasonAr,
+                ])}
+              />
+              {report.ghostRiderAudit.riders.length > 50 && (
+                <p className="text-xs text-[#64748B] mt-2">يعرض ٥٠ من {report.ghostRiderAudit.riders.length} — صدّر Excel للقائمة الكاملة</p>
+              )}
+            </Section>
+
+            <Section title={L.joinDateAudit}>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                <StatCard label="تغطية تاريخ الانضمام" value={`${report.joinDateAudit.joinDateCoveragePercent}%`} />
+                <StatCard label="بتاريخ صالح" value={report.joinDateAudit.ridersWithValidJoinDate} />
+                <StatCard label="بدون تاريخ" value={report.joinDateAudit.ridersWithoutJoinDate} />
+                <StatCard
+                  label="KPI عمر الطيار"
+                  value={report.joinDateAudit.riderLifetimeKpiEnabled ? 'مفعّل' : 'معطّل'}
+                  sub={report.joinDateAudit.riderLifetimeDisabledReason}
+                />
+              </div>
+              {report.joinDateAudit.ridersMissingJoinDate.length > 0 && (
+                <>
+                  <h3 className="text-sm font-medium text-[#94A3B8] mb-2">طيارون بدون تاريخ انضمام</h3>
+                  <MiniTable
+                    headers={['الكود', 'الاسم', 'المشرف']}
+                    rows={report.joinDateAudit.ridersMissingJoinDate.slice(0, 30).map((r) => [r.riderCode, r.name, r.supervisorCode || '—'])}
+                  />
+                </>
+              )}
+            </Section>
+
+            <Section title={L.postNormalizationValidation}>
+              {(() => {
+                const pn = report.postNormalizationValidation;
+                return (
+                  <>
+                    <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-4 mb-6">
+                      <p className="text-sm font-semibold text-cyan-200">إثبات رقمي — Smart Rider Code Normalization Engine</p>
+                      <p className="text-sm text-[#CBD5E1] mt-2">{pn.proofStatementAr}</p>
+                    </div>
+
+                    <h3 className="text-sm font-semibold text-[#94A3B8] mb-2">1 — Ghost Before Normalization</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                      <StatCard label="Ghost Riders Count" value={pn.ghostBefore.ridersCount} />
+                      <StatCard label="Ghost Hours" value={pn.ghostBefore.hours} />
+                      <StatCard label="Ghost Orders" value={pn.ghostBefore.orders} />
+                      <StatCard label="Ghost %" value={`${pn.ghostBefore.percent}%`} />
+                    </div>
+
+                    <h3 className="text-sm font-semibold text-[#94A3B8] mb-2">2 — Ghost After Normalization</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                      <StatCard label="Ghost Riders Count" value={pn.ghostAfter.ridersCount} />
+                      <StatCard label="Ghost Hours" value={pn.ghostAfter.hours} />
+                      <StatCard label="Ghost Orders" value={pn.ghostAfter.orders} />
+                      <StatCard label="Ghost %" value={`${pn.ghostAfter.percent}%`} />
+                    </div>
+
+                    <h3 className="text-sm font-semibold text-[#94A3B8] mb-2">3 — Recovery Analysis</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                      <StatCard label="Recovered Riders" value={pn.recovery.riders} />
+                      <StatCard label="Recovered Hours" value={pn.recovery.hours} />
+                      <StatCard label="Recovered Orders" value={pn.recovery.orders} />
+                      <StatCard label="Improvement %" value={`${pn.recovery.improvementPercent}%`} />
+                    </div>
+
+                    <h3 className="text-sm font-semibold text-[#94A3B8] mb-2">4 — Root Cause Analysis (Riders Fixed)</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                      <StatCard label="Direct Match" value={pn.rootCauseFixes.directMatch} />
+                      <StatCard label="Suffix Removal" value={pn.rootCauseFixes.suffixRemoval} />
+                      <StatCard label="Numeric Extraction" value={pn.rootCauseFixes.numericExtraction} />
+                      <StatCard label="Manual Review" value={pn.rootCauseFixes.manualReview} />
+                    </div>
+
+                    <h3 className="text-sm font-semibold text-[#94A3B8] mb-2">5 — Confidence Distribution</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                      <StatCard label="100%" value={`${pn.confidenceDistribution.pct100}%`} sub={`${pn.confidenceDistribution.counts.pct100} كود`} />
+                      <StatCard label="95%" value={`${pn.confidenceDistribution.pct95}%`} sub={`${pn.confidenceDistribution.counts.pct95} كود`} />
+                      <StatCard label="90%" value={`${pn.confidenceDistribution.pct90}%`} sub={`${pn.confidenceDistribution.counts.pct90} كود`} />
+                      <StatCard label="<90%" value={`${pn.confidenceDistribution.below90}%`} sub={`${pn.confidenceDistribution.counts.below90} كود`} />
+                    </div>
+
+                    <h3 className="text-sm font-semibold text-[#94A3B8] mb-2">6 — Top 50 Recovered Riders</h3>
+                    <MiniTable
+                      headers={['Original Code', 'Normalized Code', 'Hours Recovered', 'Orders Recovered', 'Confidence']}
+                      rows={pn.top50Recovered.map((r) => [
+                        r.originalCode,
+                        r.normalizedCode,
+                        r.hoursRecovered,
+                        r.ordersRecovered,
+                        `${r.confidence}%`,
+                      ])}
+                    />
+
+                    <h3 className="text-sm font-semibold text-[#94A3B8] mt-6 mb-2">7 — Remaining Ghost Riders ({pn.remainingGhosts.count})</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                      <StatCard label="Not Found In Master" value={pn.remainingGhosts.byReason.not_found_in_master} />
+                      <StatCard label="Low Confidence" value={pn.remainingGhosts.byReason.low_confidence} />
+                      <StatCard label="Multiple Matches" value={pn.remainingGhosts.byReason.multiple_matches} />
+                      <StatCard label="Invalid Code" value={pn.remainingGhosts.byReason.invalid_code} />
+                    </div>
+                    <MiniTable
+                      headers={['Original', 'Legacy', 'Effective', 'Hours', 'Orders', 'Reason']}
+                      rows={pn.remainingGhosts.riders.slice(0, 40).map((r) => [
+                        r.originalCode,
+                        r.legacyCode,
+                        r.effectiveCode,
+                        r.hours,
+                        r.orders,
+                        r.reasonAr,
+                      ])}
+                    />
+                    {pn.remainingGhosts.riders.length > 40 && (
+                      <p className="text-xs text-[#64748B] mt-2">
+                        يعرض ٤٠ من {pn.remainingGhosts.riders.length} — صدّر Excel ورقة POST NORMALIZATION VALIDATION
+                      </p>
+                    )}
+
+                    <h3 className="text-sm font-semibold text-[#94A3B8] mt-6 mb-2">8 — Executive Conclusion</h3>
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 mb-6">
+                      <p className="font-medium text-amber-200">السبب الرئيسي: {pn.executiveConclusion.primaryCauseAr}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                        <StatCard
+                          label="Code Formatting Problem"
+                          value={`${pn.executiveConclusion.codeFormattingProblemPercent}%`}
+                          sub={`${pn.executiveConclusion.codeFormattingHours} ساعة مستردة`}
+                        />
+                        <StatCard
+                          label="Missing Riders In Master Data"
+                          value={`${pn.executiveConclusion.missingRidersInMasterPercent}%`}
+                          sub={`${pn.executiveConclusion.missingInMasterHours} ساعة ما زالت Ghost`}
+                        />
+                      </div>
+                      <p className="text-sm text-[#CBD5E1] mt-3">{pn.executiveConclusion.explanationAr}</p>
+                    </div>
+
+                    <h3 className="text-sm font-semibold text-[#94A3B8] mb-2">9 — Trust Impact</h3>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+                      <div className="rounded-xl border border-slate-500/30 bg-slate-500/10 p-4">
+                        <p className="text-xs uppercase tracking-wide text-[#94A3B8] mb-2">Before Normalization</p>
+                        <StatCard label="Trust Level" value={pn.trustImpact.before.trustLevel} sub={pn.trustImpact.before.trustLabelAr} />
+                        <div className="mt-3">
+                          <StatCard
+                            label="Executive Accuracy Score"
+                            value={`${pn.trustImpact.before.executiveAccuracyScore}/100`}
+                            sub={pn.trustImpact.before.executiveGradeAr}
+                          />
+                        </div>
+                        <div className={`mt-3 rounded-lg border p-3 ${pn.trustImpact.before.canTrust ? 'border-emerald-500/40' : 'border-red-500/40'}`}>
+                          <p className="text-sm font-medium text-[#EAF0FF]">CAN MANAGEMENT TRUST THIS REPORT?</p>
+                          <p className={`text-xl font-bold ${pn.trustImpact.before.canTrust ? 'text-emerald-300' : 'text-red-300'}`}>
+                            {pn.trustImpact.before.canTrustAnswerAr}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+                        <p className="text-xs uppercase tracking-wide text-emerald-200/80 mb-2">After Normalization</p>
+                        <StatCard label="Trust Level" value={pn.trustImpact.after.trustLevel} sub={pn.trustImpact.after.trustLabelAr} />
+                        <div className="mt-3">
+                          <StatCard
+                            label="Executive Accuracy Score"
+                            value={`${pn.trustImpact.after.executiveAccuracyScore}/100`}
+                            sub={pn.trustImpact.after.executiveGradeAr}
+                          />
+                        </div>
+                        <div className={`mt-3 rounded-lg border p-3 ${pn.trustImpact.after.canTrust ? 'border-emerald-500/40' : 'border-red-500/40'}`}>
+                          <p className="text-sm font-medium text-[#EAF0FF]">CAN MANAGEMENT TRUST THIS REPORT?</p>
+                          <p className={`text-xl font-bold ${pn.trustImpact.after.canTrust ? 'text-emerald-300' : 'text-red-300'}`}>
+                            {pn.trustImpact.after.canTrustAnswerAr}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      <StatCard label="Accuracy Score Δ" value={pn.trustImpact.accuracyScoreDelta} />
+                      <StatCard label="Ghost Leakage Δ" value={`${pn.trustImpact.ghostLeakageDelta}%`} />
+                      <StatCard
+                        label="Trust Improved"
+                        value={pn.trustImpact.trustLevelImproved ? 'نعم' : 'لا'}
+                      />
+                    </div>
+                  </>
+                );
+              })()}
+            </Section>
+
+            <Section title={L.finalKpiAccuracyAudit}>
+              <div className="rounded-xl border border-purple-500/30 bg-purple-500/10 p-4 mb-4">
+                <p className="text-lg font-bold text-[#EAF0FF]">Executive Accuracy Score</p>
+                <p className="text-4xl font-bold text-purple-300 mt-1">
+                  {report.finalKpiAccuracyAudit.executiveAccuracyScore.score}
+                  <span className="text-lg text-[#64748B]">/100</span>
+                </p>
+                <p className="text-sm text-purple-200/90 mt-1">{report.finalKpiAccuracyAudit.executiveAccuracyScore.gradeLabelAr}</p>
+              </div>
+
+              <div className={`rounded-xl border p-4 mb-6 ${report.finalKpiAccuracyAudit.managementTrust.canTrust ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-red-500/40 bg-red-500/10'}`}>
+                <p className="font-bold text-[#EAF0FF]">CAN MANAGEMENT TRUST THIS REPORT?</p>
+                <p className={`text-2xl font-bold mt-1 ${report.finalKpiAccuracyAudit.managementTrust.canTrust ? 'text-emerald-300' : 'text-red-300'}`}>
+                  {report.finalKpiAccuracyAudit.managementTrust.answerAr}
+                </p>
+                <ul className="list-disc list-inside text-sm text-[#CBD5E1] mt-2 space-y-1">
+                  {report.finalKpiAccuracyAudit.managementTrust.reasons.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <h3 className="text-sm font-semibold text-[#94A3B8] mb-2">1 — Ghost Rider Verification</h3>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                <StatCard label="Ghost فعلي" value={report.finalKpiAccuracyAudit.ghostVerification.actualGhostRiders} />
+                <StatCard label="Code Mismatch" value={report.finalKpiAccuracyAudit.ghostVerification.codeMismatchCount} />
+                <StatCard label="غير موجود في المناديب" value={report.finalKpiAccuracyAudit.ghostVerification.missingFromMasterCount} />
+                <StatCard label="مستبعد — Zone" value={report.finalKpiAccuracyAudit.ghostVerification.zoneFilterExcludedCount} />
+                <StatCard label="مستبعد — Supervisor" value={report.finalKpiAccuracyAudit.ghostVerification.supervisorFilterExcludedCount} />
+                <StatCard label="Ghost Leakage Hours" value={report.finalKpiAccuracyAudit.ghostVerification.ghostLeakageHours} />
+                <StatCard label="Ghost Leakage Orders" value={report.finalKpiAccuracyAudit.ghostVerification.ghostLeakageOrders} />
+                <StatCard label="Ghost Leakage %" value={`${report.finalKpiAccuracyAudit.ghostVerification.ghostLeakagePercent}%`} />
+              </div>
+              <MiniTable
+                headers={['Code', 'Name', 'Hours', 'Orders', 'Root Cause']}
+                rows={report.finalKpiAccuracyAudit.ghostVerification.top100.slice(0, 25).map((g) => [
+                  g.code, g.name, g.hours, g.orders, g.rootCauseLabelAr,
+                ])}
+              />
+              <p className="text-xs text-[#64748B] mt-1">Top 25 من 100 — Excel للقائمة الكاملة</p>
+
+              <h3 className="text-sm font-semibold text-[#94A3B8] mt-6 mb-2">2 — Join Date Coverage</h3>
+              <div className="grid sm:grid-cols-4 gap-3 mb-3">
+                <StatCard label="Coverage %" value={`${report.finalKpiAccuracyAudit.joinDateValidation.joinDateCoveragePercent}%`} />
+                <StatCard label="Valid Join Dates" value={report.finalKpiAccuracyAudit.joinDateValidation.validJoinDates} />
+                <StatCard label="Missing Join Dates" value={report.finalKpiAccuracyAudit.joinDateValidation.missingJoinDates} />
+                <StatCard
+                  label="Average Rider Lifetime"
+                  value={report.finalKpiAccuracyAudit.joinDateValidation.lifetimeDisplayBlocked ? 'NULL' : '—'}
+                  sub={report.finalKpiAccuracyAudit.joinDateValidation.lifetimeBlockReason}
+                />
+              </div>
+
+              <h3 className="text-sm font-semibold text-[#94A3B8] mt-6 mb-2">3 — Active Riders Consistency</h3>
+              <div className="grid sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-2">
+                <StatCard label="Unique Active (Period)" value={report.finalKpiAccuracyAudit.activeRidersConsistency.uniqueActiveRidersInPeriod} />
+                <StatCard label="Avg Daily Active" value={report.finalKpiAccuracyAudit.activeRidersConsistency.averageDailyActiveRiders} />
+                <StatCard label="Daily Min" value={report.finalKpiAccuracyAudit.activeRidersConsistency.dailyActiveMin} />
+                <StatCard label="Daily Max" value={report.finalKpiAccuracyAudit.activeRidersConsistency.dailyActiveMax} />
+                <StatCard label="Std Dev" value={report.finalKpiAccuracyAudit.activeRidersConsistency.dailyActiveStdDev} />
+                <StatCard label="Days w/ Data" value={report.finalKpiAccuracyAudit.activeRidersConsistency.daysWithData} />
+              </div>
+              <p className="text-xs text-[#94A3B8] mb-4">{report.finalKpiAccuracyAudit.activeRidersConsistency.discrepancyExplanationAr}</p>
+
+              <h3 className="text-sm font-semibold text-[#94A3B8] mb-2">4 — Roadmap Validation</h3>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4 mb-4 text-sm space-y-1">
+                <p>Daily Gap: <strong>{report.finalKpiAccuracyAudit.roadmapValidation.dailyGap}</strong> س/يوم</p>
+                <p>Avg Daily Hrs/Active Rider: <strong>{report.finalKpiAccuracyAudit.roadmapValidation.averageDailyHoursPerActiveRider}</strong></p>
+                <p className="font-mono text-xs text-cyan-400/90">{report.finalKpiAccuracyAudit.roadmapValidation.formula}</p>
+                <p>Additional Riders Needed: <strong>{report.finalKpiAccuracyAudit.roadmapValidation.additionalRidersNeeded}</strong></p>
+                <p>{report.finalKpiAccuracyAudit.roadmapValidation.additionalRidersCalculation}</p>
+                <p className={report.finalKpiAccuracyAudit.roadmapValidation.zeroValidationPassed ? 'text-emerald-400' : 'text-red-400'}>
+                  Zero validation: {report.finalKpiAccuracyAudit.roadmapValidation.zeroValidationPassed ? 'PASS' : 'FAIL'}
+                </p>
+              </div>
+
+              <h3 className="text-sm font-semibold text-[#94A3B8] mb-2">5 — KPI Trust Verification</h3>
+              <div className="grid sm:grid-cols-4 gap-3 mb-3">
+                <StatCard label="Trust Level" value={report.finalKpiAccuracyAudit.kpiTrustVerification.trustLevel} sub={report.finalKpiAccuracyAudit.kpiTrustVerification.trustLabelAr} />
+                <StatCard label="Data Quality" value={`${report.finalKpiAccuracyAudit.kpiTrustVerification.dataQualityScore}/100`} />
+                <StatCard label="Ghost Leakage" value={`${report.finalKpiAccuracyAudit.kpiTrustVerification.ghostLeakagePercent}%`} />
+                <StatCard label="Gate Status" value={report.finalKpiAccuracyAudit.kpiTrustVerification.gateStatusAr} />
+              </div>
+              <MiniTable
+                headers={['KPI', 'الحالة', 'السبب']}
+                rows={report.finalKpiAccuracyAudit.kpiTrustVerification.kpiGates.map((g) => [
+                  g.kpiAr,
+                  g.enabled ? 'مفعّل' : 'معطّل',
+                  g.reasonAr,
+                ])}
+              />
+
+              <h3 className="text-sm font-semibold text-[#94A3B8] mt-6 mb-2">6 — Executive Accuracy Components</h3>
+              <MiniTable
+                headers={['المكوّن', 'الدرجة', 'الوزن']}
+                rows={[
+                  ['جودة البيانات', report.finalKpiAccuracyAudit.executiveAccuracyScore.components.dataQuality, `${report.finalKpiAccuracyAudit.executiveAccuracyScore.weights.dataQuality * 100}%`],
+                  ['عكس تسرب Ghost', report.finalKpiAccuracyAudit.executiveAccuracyScore.components.ghostLeakageInverse, `${report.finalKpiAccuracyAudit.executiveAccuracyScore.weights.ghostLeakageInverse * 100}%`],
+                  ['تغطية الانضمام', report.finalKpiAccuracyAudit.executiveAccuracyScore.components.joinDateCoverage, `${report.finalKpiAccuracyAudit.executiveAccuracyScore.weights.joinDateCoverage * 100}%`],
+                  ['سلامة التكرارات', report.finalKpiAccuracyAudit.executiveAccuracyScore.components.duplicateIntegrity, `${report.finalKpiAccuracyAudit.executiveAccuracyScore.weights.duplicateIntegrity * 100}%`],
+                  ['سلامة النطاق', report.finalKpiAccuracyAudit.executiveAccuracyScore.components.scopeIntegrity, `${report.finalKpiAccuracyAudit.executiveAccuracyScore.weights.scopeIntegrity * 100}%`],
+                ]}
+              />
+            </Section>
 
             <Section title={L.executiveSummary}>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -279,7 +657,18 @@ export default function StrategicOpsCenterPage() {
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie data={report.activityDistribution.buckets.filter((b) => b.count > 0)} dataKey="hoursContribution" nameKey="label" cx="50%" cy="50%" outerRadius={90} label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}>
+                      <Pie
+                        data={report.activityDistribution.buckets.filter((b) => b.count > 0)}
+                        dataKey="count"
+                        nameKey="label"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={90}
+                        label={({ percent }) => {
+                          const pctLabel = percent <= 1 ? percent * 100 : percent;
+                          return `${Math.round(pctLabel)}%`;
+                        }}
+                      >
                         {report.activityDistribution.buckets.map((_, i) => <Cell key={i} fill={BUCKET_COLORS[i % BUCKET_COLORS.length]} />)}
                       </Pie>
                       <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155' }} />
@@ -289,9 +678,9 @@ export default function StrategicOpsCenterPage() {
                 </div>
               </div>
               <p className="text-xs text-[#64748B] mb-2">
-                أساس التصنيف: {report.activityDistribution.classificationFormula} — {report.activityDistribution.periodDays} يوم
+                أساس التصنيف: {report.activityDistribution.classificationFormula} — {report.activityDistribution.periodDays} يوم · العرض الافتراضي: متوسط يومي
               </p>
-              <MiniTable headers={['الفئة', 'العدد', 'النسبة', 'مساهمة الساعات']} rows={report.activityDistribution.buckets.map((b) => [b.label, b.count, `${b.percent}%`, b.hoursContribution])} />
+              <MiniTable headers={['الفئة', 'العدد', 'النسبة', 'متوسط يومي/طيار', 'ساعات الفترة']} rows={report.activityDistribution.buckets.map((b) => [b.label, b.count, `${b.percent}%`, b.avgDailyHoursPerRider, b.hoursContribution])} />
             </Section>
 
             <Section title={L.utilization}>
@@ -302,22 +691,22 @@ export default function StrategicOpsCenterPage() {
               </div>
               <div className="grid lg:grid-cols-2 gap-4">
                 <div>
-                  <h3 className="text-sm font-medium text-[#94A3B8] mb-2">أعلى ٢٠ طياراً بالساعات</h3>
-                  <MiniTable headers={['الاسم', 'الكود', 'الساعات', 'الطلبات']} rows={report.utilization.top20ByHours.map((r) => [r.name, r.code, r.hours, r.orders])} />
+                  <h3 className="text-sm font-medium text-[#94A3B8] mb-2">أعلى ٢٠ طياراً (متوسط يومي)</h3>
+                  <MiniTable headers={['الاسم', 'الكود', 'متوسط يومي', 'طلبات/يوم', 'ساعات الفترة']} rows={report.utilization.top20ByHours.map((r) => [r.name, r.code, r.avgDailyHours, r.avgDailyOrders, r.hours])} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-medium text-[#94A3B8] mb-2">أدنى ٢٠ طياراً بالساعات</h3>
-                  <MiniTable headers={['الاسم', 'الكود', 'الساعات', 'متوسط يومي']} rows={report.utilization.bottom20ByHours.map((r) => [r.name, r.code, r.hours, r.avgDailyHours])} />
+                  <h3 className="text-sm font-medium text-[#94A3B8] mb-2">أدنى ٢٠ طياراً (متوسط يومي)</h3>
+                  <MiniTable headers={['الاسم', 'الكود', 'متوسط يومي', 'طلبات/يوم', 'ساعات الفترة']} rows={report.utilization.bottom20ByHours.map((r) => [r.name, r.code, r.avgDailyHours, r.avgDailyOrders, r.hours])} />
                 </div>
                 <div>
                   <h3 className="text-sm font-medium text-[#94A3B8] mb-2">الأكثر انتظاماً</h3>
-                  <MiniTable headers={['الاسم', 'الدرجة', 'أيام عمل', 'الساعات']} rows={report.utilization.mostConsistent.slice(0, 10).map((r) => [r.name, r.consistencyScore ?? 0, r.workDays, r.hours])} />
+                  <MiniTable headers={['الاسم', 'الدرجة', 'أيام عمل', 'متوسط يومي']} rows={report.utilization.mostConsistent.slice(0, 10).map((r) => [r.name, r.consistencyScore ?? 0, r.workDays, r.avgDailyHours])} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-medium text-[#94A3B8] mb-2">الأكثر تحسناً / تراجعاً</h3>
-                  <MiniTable headers={['الاسم', 'التغير', 'الساعات']} rows={[
-                    ...report.utilization.mostImproved.slice(0, 5).map((r) => [r.name, `+${r.trendDelta ?? 0}`, r.hours]),
-                    ...report.utilization.declining.slice(0, 5).map((r) => [r.name, String(r.trendDelta ?? 0), r.hours]),
+                  <h3 className="text-sm font-medium text-[#94A3B8] mb-2">الأكثر تحسناً / تراجعاً (س/يوم)</h3>
+                  <MiniTable headers={['الاسم', 'التغير يومي', 'متوسط يومي']} rows={[
+                    ...report.utilization.mostImproved.slice(0, 5).map((r) => [r.name, `+${r.trendDelta ?? 0}`, r.avgDailyHours]),
+                    ...report.utilization.declining.slice(0, 5).map((r) => [r.name, String(r.trendDelta ?? 0), r.avgDailyHours]),
                   ]} />
                 </div>
               </div>
@@ -325,12 +714,12 @@ export default function StrategicOpsCenterPage() {
 
             <Section title={L.hoursAnalysis}>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                <StatCard label="إجمالي الساعات" value={report.hoursAnalysis.totalHours} />
-                <StatCard label="متوسط الساعات اليومية" value={report.hoursAnalysis.averageDailyHours} />
+                <StatCard label="متوسط الساعات اليومية (الأسطول)" value={report.hoursAnalysis.averageDailyHours} sub={`فترة: ${report.hoursAnalysis.totalHours}`} />
+                <StatCard label="إجمالي الساعات (الفترة)" value={report.hoursAnalysis.totalHours} sub={`يومي: ${report.hoursAnalysis.totalHoursDual.daily}`} />
                 <StatCard label="أعلى يوم" value={report.hoursAnalysis.highestDay?.hours ?? 0} sub={report.hoursAnalysis.highestDay?.date} />
                 <StatCard label="أدنى يوم" value={report.hoursAnalysis.lowestDay?.hours ?? 0} sub={report.hoursAnalysis.lowestDay?.date} />
-                <StatCard label="متوسط الساعات/طيار" value={report.hoursAnalysis.averageHoursPerRider} />
-                <StatCard label="متوسط الساعات/طيار نشط" value={report.hoursAnalysis.averageHoursPerActiveRider} />
+                <StatCard label="متوسط الساعات/طيار/يوم" value={report.hoursAnalysis.averageHoursPerRiderDual.daily} sub={`فترة: ${report.hoursAnalysis.averageHoursPerRider}`} />
+                <StatCard label="متوسط الساعات/طيار نشط/يوم" value={report.hoursAnalysis.averageHoursPerActiveRiderDual.daily} sub={`فترة: ${report.hoursAnalysis.averageHoursPerActiveRider}`} />
               </div>
               <div className="h-64 mt-4">
                 <ResponsiveContainer width="100%" height="100%">
@@ -359,22 +748,22 @@ export default function StrategicOpsCenterPage() {
 
             <Section title={L.lostHours}>
               <div className="grid sm:grid-cols-4 gap-3">
-                <StatCard label="الساعات المحتملة" value={report.lostHours.potentialHours} sub="طيار × ١٠س × أيام" />
-                <StatCard label="الساعات الفعلية" value={report.lostHours.actualHours} />
-                <StatCard label="الساعات المهدرة" value={report.lostHours.lostHours} sub={`${report.lostHours.lostPercent}%`} />
+                <StatCard label="الساعات المحتملة/يوم" value={report.lostHours.potentialHoursDual.daily} sub={`فترة: ${report.lostHours.potentialHours}`} />
+                <StatCard label="الساعات الفعلية/يوم" value={report.lostHours.actualHoursDual.daily} sub={`فترة: ${report.lostHours.actualHours}`} />
+                <StatCard label="الساعات المهدرة/يوم" value={report.lostHours.lostHoursDual.daily} sub={`${report.lostHours.lostPercent}% · فترة: ${report.lostHours.lostHours}`} />
               </div>
               <div className="h-56 mt-4">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={report.lostHours.breakdown} layout="vertical">
+                  <BarChart data={report.lostHours.breakdown.map((b) => ({ ...b, dailyLost: b.hoursDual.daily }))} layout="vertical">
                     <CartesianGrid stroke="rgba(255,255,255,0.08)" />
                     <XAxis type="number" tick={{ fill: '#94A3B8' }} />
                     <YAxis type="category" dataKey="category" width={200} tick={{ fill: '#94A3B8', fontSize: 11 }} />
                     <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155' }} />
-                    <Bar dataKey="hours" name="ساعات مهدرة" fill="#ef4444" radius={[0, 4, 4, 0]} />
+                    <Bar dataKey="dailyLost" name="ساعات مهدرة/يوم" fill="#ef4444" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <MiniTable headers={['الفئة', 'الساعات المهدرة', 'النسبة', 'العدد']} rows={report.lostHours.breakdown.map((b) => [b.category, b.hours, `${b.percent}%`, b.riderCount])} />
+              <MiniTable headers={['الفئة', 'مهدرة/يوم', 'مهدرة (فترة)', 'النسبة', 'العدد']} rows={report.lostHours.breakdown.map((b) => [b.category, b.hoursDual.daily, b.hours, `${b.percent}%`, b.riderCount])} />
             </Section>
 
             <Section title={L.supervisorPerformance}>
@@ -385,9 +774,10 @@ export default function StrategicOpsCenterPage() {
                 <p className="text-sm text-red-300">الأضعف: {report.supervisorPerformance.worstSupervisor.name} (إنتاجية {report.supervisorPerformance.worstSupervisor.productivityScore})</p>
               )}
               <MiniTable
-                headers={['المشرف', 'معيّنون', 'نشطون', 'غير نشطين', 'ساعات', 'متوسط س/ط', 'طلبات', 'حضور%', 'هدف%', 'درجة', 'إقالات']}
+                headers={['المشرف', 'معيّنون', 'نشطون', 'غير نشطين', 'س/يوم', 'ساعات الفترة', 'متوسط س/ط/يوم', 'طلبات/يوم', 'حضور%', 'هدف%', 'درجة', 'إقالات']}
                 rows={report.supervisorPerformance.rows.map((s) => [
-                  s.name, s.assignedRiders, s.activeRiders, s.inactiveRiders, s.totalHours, s.avgHoursPerRider, s.avgOrders,
+                  s.name, s.assignedRiders, s.activeRiders, s.inactiveRiders,
+                  s.totalHoursDual.daily, s.totalHours, s.avgHoursPerRiderDaily, s.avgOrdersDaily,
                   `${s.attendancePercent}%`, `${s.targetAchievementPercent}%`, s.productivityScore, s.resignations,
                 ])}
               />
@@ -397,6 +787,114 @@ export default function StrategicOpsCenterPage() {
               <MiniTable headers={['المشرف', 'درجة المخاطر', 'المستوى', 'العوامل']} rows={report.supervisorRisk.rows.map((s) => [
                 s.name, s.riskScore, <RiskBadge key={s.code} level={s.riskLevel} />, s.factors.join('؛ ') || '—',
               ])} />
+            </Section>
+
+            <Section title={L.operationalTruthIntelligence}>
+              {report.kpiTrust.disableStiOrpsGrowthRoadmap && (
+                <p className="text-sm text-red-300/90 mb-3">STI / ORPS / RDE معطّلة — {report.kpiTrust.descriptionAr}</p>
+              )}
+              {report.kpiTrust.lowConfidenceStrategic && !report.kpiTrust.disableStiOrpsGrowthRoadmap && (
+                <p className="text-sm text-amber-300/90 mb-3">⚠ ثقة منخفضة — STI/ORPS للاتجاه العام فقط</p>
+              )}
+              {report.operationalTruthIntelligence.criticalAlerts.length > 0 && (
+                <div className="space-y-2 mb-4">
+                  <h3 className="text-sm font-semibold text-[#94A3B8]">تنبيهات حرجة</h3>
+                  {report.operationalTruthIntelligence.criticalAlerts.slice(0, 12).map((alert, i) => (
+                    <div
+                      key={i}
+                      className={`rounded-lg border px-3 py-2 text-sm ${
+                        alert.severity === 'red'
+                          ? 'border-red-500/40 bg-red-500/10 text-red-200'
+                          : 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+                      }`}
+                    >
+                      {alert.messageAr}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <h3 className="text-sm font-semibold text-[#94A3B8] mb-2">ترتيب الحقيقة التشغيلية للمشرفين (STI)</h3>
+              <MiniTable
+                headers={['الترتيب', 'المشرف', 'STI', 'تسرب Ghost', 'احتفاظ', 'المستوى', 'تفصيل']}
+                rows={report.operationalTruthIntelligence.supervisorTruthIndex.map((s) => [
+                  s.rank,
+                  s.supervisorName,
+                  s.stiScore,
+                  `${roundPct(s.ghostDependencyRatio)}%`,
+                  s.retentionScore,
+                  <RiskBadge key={`sti-${s.supervisorId}`} level={s.riskLevel} />,
+                  `ساعات=${s.breakdown.officialHours} | ghost=${s.breakdown.allocatedGhostHours}`,
+                ])}
+              />
+
+              <h3 className="text-sm font-semibold text-[#94A3B8] mt-6 mb-2">محرك الاعتماد التشغيلي (RDE)</h3>
+              <MiniTable
+                headers={['المشرف', 'اعتماد', 'هشاشة', 'نواة', 'المستوى']}
+                rows={report.operationalTruthIntelligence.riderDependency.map((d) => [
+                  d.supervisorName,
+                  `${roundPct(d.dependencyScore)}%`,
+                  `${roundPct(d.fragilityIndex)}%`,
+                  d.coreRidersList.slice(0, 3).map((c) => c.riderName).join('، ') || '—',
+                  <RiskBadge key={`rde-${d.supervisorId}`} level={d.riskLevel} />,
+                ])}
+              />
+
+              <h3 className="text-sm font-semibold text-[#94A3B8] mt-6 mb-2">توقع المخاطر التشغيلية (ORPS)</h3>
+              <MiniTable
+                headers={['المشرف', 'ORPS', 'المستوى', 'السبب الرئيسي', 'تفصيل العوامل']}
+                rows={report.operationalTruthIntelligence.operationalRiskPrediction.map((o) => [
+                  o.supervisorName,
+                  o.orpsScore,
+                  <RiskBadge key={`orps-${o.supervisorId}`} level={o.riskLevel} />,
+                  o.primaryRiskDriver,
+                  `ghost=${o.breakdown.ghostLeakageScore} dep=${o.breakdown.dependencyRisk} attr=${o.breakdown.attritionPressure}`,
+                ])}
+              />
+
+              <div className="grid lg:grid-cols-2 gap-4 mt-6">
+                <div>
+                  <h3 className="text-sm text-[#94A3B8] mb-2">أكثر ٥ فرق استقراراً (STI)</h3>
+                  <MiniTable
+                    headers={['المشرف', 'STI']}
+                    rows={report.operationalTruthIntelligence.globalInsights.top5StableSupervisors.map((s) => [
+                      s.supervisorName,
+                      s.stiScore,
+                    ])}
+                  />
+                </div>
+                <div>
+                  <h3 className="text-sm text-[#94A3B8] mb-2">أعلى ٥ مخاطر (ORPS)</h3>
+                  <MiniTable
+                    headers={['المشرف', 'ORPS']}
+                    rows={report.operationalTruthIntelligence.globalInsights.top5HighestRiskSupervisors.map((s) => [
+                      s.supervisorName,
+                      s.orpsScore,
+                    ])}
+                  />
+                </div>
+              </div>
+
+              <h3 className="text-sm font-semibold text-[#94A3B8] mt-6 mb-2">نقاط فشل واحدة (Single Point of Failure)</h3>
+              <MiniTable
+                headers={['الطيار', 'المشرف', 'الساعات', 'حصة من المشرف']}
+                rows={report.operationalTruthIntelligence.globalInsights.singlePointOfFailureRiders.map((r) => [
+                  `${r.riderName} (${r.riderCode})`,
+                  r.supervisorName,
+                  r.hours,
+                  `${r.supervisorShare}%`,
+                ])}
+              />
+
+              <h3 className="text-sm font-semibold text-[#94A3B8] mt-6 mb-2">بؤر تسرب Ghost Riders</h3>
+              <MiniTable
+                headers={['الكود', 'الساعات', 'حصة من التسرب']}
+                rows={report.operationalTruthIntelligence.globalInsights.ghostLeakageHotspots.map((g) => [
+                  g.riderCode,
+                  g.hours,
+                  `${g.shareOfGhostLeakage}%`,
+                ])}
+              />
             </Section>
 
             <Section title={L.recruitment}>
@@ -419,7 +917,11 @@ export default function StrategicOpsCenterPage() {
                 <StatCard label="عدد الإقالات" value={report.attrition.approvedResignations} />
                 <StatCard label="نسبة التسرب" value={`${report.attrition.attritionRate}%`} />
                 <StatCard label="متوسط التسرب الشهري" value={`${report.attrition.monthlyAttritionRate}%`} />
-                <StatCard label="متوسط عمر الطيار (يوم)" value={report.attrition.averageRiderLifetimeDays} />
+                <StatCard
+                  label="متوسط عمر الطيار (يوم)"
+                  value={report.attrition.riderLifetimeKpiEnabled ? (report.attrition.averageRiderLifetimeDays ?? '—') : 'معطّل'}
+                  sub={report.attrition.riderLifetimeDisabledReason}
+                />
               </div>
               <p className="text-xs text-[#64748B]">متوسط الطيارين النشطين يومياً: {report.attrition.averageActiveRidersDuringPeriod}</p>
               <h3 className="text-sm text-[#94A3B8] mt-4">أكثر المشرفين فقداناً للطيارين</h3>
@@ -440,18 +942,25 @@ export default function StrategicOpsCenterPage() {
             </Section>
 
             <Section title={L.growthOpportunities}>
+              {report.growthOpportunities.disabled ? (
+                <p className="text-sm text-amber-300/90">{report.growthOpportunities.disabledReason}</p>
+              ) : (
               <div className="grid sm:grid-cols-2 gap-4">
                 {report.growthOpportunities.scenarios.map((sc) => (
                   <div key={sc.key} className="rounded-xl border border-white/10 p-4 bg-white/5">
                     <p className="font-medium text-[#EAF0FF]">{sc.label}</p>
-                    <p className="text-cyan-400 text-lg font-bold mt-1">+{sc.additionalHoursGain} ساعة</p>
-                    <p className="text-xs text-[#94A3B8]">إجمالي متوقع: {sc.expectedTotalHours}س · {sc.affectedRiders} طيار</p>
+                    <p className="text-cyan-400 text-lg font-bold mt-1">+{sc.additionalHoursGainDaily} ساعة/يوم</p>
+                    <p className="text-xs text-[#94A3B8]">فترة: +{sc.additionalHoursGain}س · متوقع يومي: {sc.expectedTotalHoursDaily}س · {sc.affectedRiders} طيار</p>
                   </div>
                 ))}
               </div>
+              )}
             </Section>
 
             <Section title={L.growthExpansion}>
+              {report.growthExpansion.disabled && (
+                <p className="text-sm text-amber-300/90 mb-3">{report.growthExpansion.disabledReason}</p>
+              )}
               <div className="grid sm:grid-cols-2 gap-3 mb-4">
                 <StatCard
                   label="هدف الساعات اليومية"
@@ -489,12 +998,37 @@ export default function StrategicOpsCenterPage() {
             </Section>
 
             <Section title={L.hoursRoadmap}>
+              {report.hoursRoadmap.disabled && (
+                <p className="text-sm text-amber-300/90 mb-3">{report.hoursRoadmap.disabledReason}</p>
+              )}
+              {report.hoursRoadmap.lowConfidence && !report.hoursRoadmap.disabled && (
+                <p className="text-sm text-amber-300/90 mb-3">⚠ ثقة منخفضة — التوقعات للاتجاه العام فقط</p>
+              )}
               <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
                 <StatCard label="المتوسط اليومي الحالي" value={report.hoursRoadmap.currentDailyHours} sub="ساعة/يوم" />
                 <StatCard label="الهدف اليومي" value={report.hoursRoadmap.targetDailyHours} sub="ساعة/يوم" />
                 <StatCard label="الفجوة اليومية" value={report.hoursRoadmap.dailyGap} sub="ساعة/يوم" />
-                <StatCard label="إجمالي الفترة (مرجع)" value={report.hoursRoadmap.currentPeriodHours} sub={`${report.hoursRoadmap.periodDays} يوم`} />
-                <StatCard label="طيارون إضافيون" value={report.hoursRoadmap.additionalActiveRidersNeeded} sub={`+${report.hoursRoadmap.additionalHoursPerRiderNeeded}س/طيار/يوم`} />
+                <StatCard label="إجمالي الفترة (مرجع)" value={report.hoursRoadmap.currentPeriodHours} sub={`${report.hoursRoadmap.validDaysInDataset} يوم بيانات`} />
+                <StatCard
+                  label="طيارون إضافيون"
+                  value={report.hoursRoadmap.additionalActiveRidersNeeded}
+                  sub={
+                    report.hoursRoadmap.disabled
+                      ? 'توقعات معطّلة'
+                      : `+${report.hoursRoadmap.additionalHoursPerRiderNeeded}س/طيار/يوم`
+                  }
+                />
+              </div>
+              <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4 mt-4 text-sm text-[#CBD5E1] space-y-1">
+                <p className="font-medium text-cyan-200/90">تتبع الحساب</p>
+                <p className="text-xs font-mono text-cyan-400/90">{report.hoursRoadmap.calculationTrace.formula}</p>
+                <p>{report.hoursRoadmap.calculationTrace.dailyGapCalculation}</p>
+                <p>متوسط ساعات الطيار النشط يومياً: {report.hoursRoadmap.calculationTrace.avgDailyHoursPerActiveRider}</p>
+                <p className="text-xs font-mono text-cyan-400/90">{report.hoursRoadmap.calculationTrace.additionalRidersFormula}</p>
+                <p className="font-medium">{report.hoursRoadmap.calculationTrace.additionalRidersCalculation}</p>
+                {report.hoursRoadmap.calculationTrace.forecastDisabled && (
+                  <p className="text-amber-300 text-xs">{report.hoursRoadmap.calculationTrace.forecastDisabledReason}</p>
+                )}
               </div>
               <ul className="list-disc list-inside text-sm text-[#CBD5E1] space-y-1 mt-3">
                 {report.hoursRoadmap.roadmap.map((r, i) => <li key={i}>{r}</li>)}
@@ -533,7 +1067,7 @@ export default function StrategicOpsCenterPage() {
                   <p>انضمام: {report.operationalFormulaAudit.riderLifetime.joinDateColumn}</p>
                   <p>موافقة: {report.operationalFormulaAudit.riderLifetime.approvalDateColumns}</p>
                   <p>{report.operationalFormulaAudit.riderLifetime.calculation}</p>
-                  <p className="font-medium">النتيجة: {report.operationalFormulaAudit.riderLifetime.resultDays} يوم</p>
+                  <p className="font-medium">النتيجة: {report.operationalFormulaAudit.riderLifetime.resultDays != null ? `${report.operationalFormulaAudit.riderLifetime.resultDays} يوم` : 'معطّل'}</p>
                 </AuditCard>
 
                 <AuditCard title="خارطة 2200 ساعة يومياً">
