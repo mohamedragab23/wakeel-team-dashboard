@@ -69,7 +69,11 @@ export default function Layout({ children }: LayoutProps) {
           const parsedUser = JSON.parse(userStr) as User;
           setUser(parsedUser);
 
-          if (pathname?.startsWith('/admin') && parsedUser?.role !== 'admin') {
+          if (
+            pathname?.startsWith('/admin') &&
+            parsedUser?.role !== 'admin' &&
+            !(parsedUser?.role === 'supervisor' && pathname?.startsWith('/admin/rider-strategic-profiles'))
+          ) {
             clearClientSession();
             router.push('/');
             return;
@@ -137,6 +141,7 @@ export default function Layout({ children }: LayoutProps) {
         { href: '/deductions-upload', label: 'الاستقطاعات (Excel)', icon: '📑' },
         { href: '/termination-requests', label: 'الإقالات', icon: '🚫' },
         { href: '/reactivation-requests', label: 'إعادة التفعيل', icon: '🔄' },
+        { href: '/admin/rider-strategic-profiles', label: 'إدارة بيانات المناديب', icon: '📋' },
         { href: '/performance', label: 'الأداء', icon: '📈' },
         { href: '/salary', label: 'الراتب', icon: '💰' },
         { href: '/shifts', label: 'الشفتات', icon: '🕒' },

@@ -27,7 +27,15 @@ export async function invalidateRiderWorkflowCaches(
   cache.clear('admin:riders');
   cache.clear(CACHE_KEYS.sheetData('المناديب'));
 
-  const sheetsToClear = new Set(['المناديب', 'طلبات_الإقالة', 'طلبات_إعادة_التفعيل', 'طلبات_التعيين', ...extraSheets]);
+  const sheetsToClear = new Set([
+    'المناديب',
+    'طلبات_الإقالة',
+    'طلبات_إعادة_التفعيل',
+    'طلبات_التعيين',
+    'بيانات_المناديب_الاستراتيجية',
+    'سجل_بيانات_المناديب_الاستراتيجية',
+    ...extraSheets,
+  ]);
   for (const sheet of sheetsToClear) {
     cache.clear(CACHE_KEYS.sheetData(sheet));
   }

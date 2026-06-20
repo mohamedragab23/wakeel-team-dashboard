@@ -22,7 +22,9 @@ export type AdminFeatureKey =
   | 'debug'
   | 'debts'
   | 'shifts'
-  | 'recruitment';
+  | 'recruitment'
+  | 'strategic_ops'
+  | 'rider_strategic_profiles';
 
 const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   main_inventory: 'main_inventory',
@@ -42,6 +44,8 @@ const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   termination_requests: 'termination_requests',
   recruitment: 'recruitment',
   shifts: 'shifts',
+  strategic_ops: 'strategic_ops',
+  rider_strategic_profiles: 'rider_strategic_profiles',
 };
 
 export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
@@ -63,6 +67,8 @@ export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
   debts: 'المديونية / الديون',
   shifts: 'الشفتات',
   recruitment: 'إدارة المرشحين (التعيين)',
+  strategic_ops: 'مركز العمليات الاستراتيجي',
+  rider_strategic_profiles: 'إدارة بيانات المناديب',
 };
 
 export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
@@ -84,6 +90,8 @@ export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
   'debts',
   'shifts',
   'recruitment',
+  'strategic_ops',
+  'rider_strategic_profiles',
 ];
 
 export type AdminMenuDef = { href: string; label: string; icon: string; feature: AdminFeatureKey };
@@ -98,6 +106,8 @@ export function getAdminMenuDefs(): AdminMenuDef[] {
     { href: '/admin/reactivation-requests', label: 'طلبات إعادة التفعيل', icon: '🔄', feature: 'assignment_requests' },
     { href: '/admin/performance', label: 'رفع بيانات الأداء', icon: '📈', feature: 'performance_upload' },
     { href: '/admin/supervisor-performance', label: 'أداء المشرفين', icon: '📊', feature: 'supervisor_performance' },
+    { href: '/admin/strategic-ops', label: 'مركز العمليات الاستراتيجي', icon: '🎯', feature: 'strategic_ops' },
+    { href: '/admin/rider-strategic-profiles', label: 'إدارة بيانات المناديب', icon: '📋', feature: 'rider_strategic_profiles' },
     { href: '/admin/salary-config', label: 'إعدادات الرواتب', icon: '⚙️', feature: 'salary_config' },
     { href: '/admin/equipment-pricing', label: 'أسعار المعدات', icon: '🛠️', feature: 'equipment_pricing' },
     { href: '/admin/equipment-limits', label: 'حدود خصم المعدات', icon: '📦', feature: 'equipment_limits' },
