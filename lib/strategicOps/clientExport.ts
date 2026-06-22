@@ -17,19 +17,45 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
         ['المشرف', report.meta.supervisorCode],
         [],
         ['المؤشر', 'القيمة'],
-        ['إجمالي الطيارين المسجلين', es.totalRegisteredRiders],
-        ['المعيّنون للمشرفين', es.totalAssignedToSupervisors],
-        ['الطيارون النشطون', es.activeRiders],
-        ['الطيارون غير النشطين', es.inactiveRiders],
-        ['الطيارون الموقوفون', es.suspendedRiders],
-        ['الإقالات المعتمدة', es.approvedResignations],
-        ['انضمام جديد', es.newRidersJoined],
+        ['Headcount', es.totalRegisteredRiders],
+        ['متوسط الطيارين النشطين يومياً', es.activeRiders],
+        ['متوسط No Show يومياً', es.noShowRiders],
+        ['متوسط الساعات الفعلية يومياً', es.actualDailyHours],
+        ['متوسط الهدف اليومي', es.targetDailyHours],
+        ['نسبة تحقيق الهدف %', es.achievementPercent],
+        ['متوسط الساعات/طيار نشط', es.avgHoursPerActiveRider],
         ['معدل الاستغلال %', es.utilizationRate],
+        ['فريدون بالفترة (تشخيص)', es.uniqueActiveRidersInPeriod],
+        ['الإقالات المعتمدة', es.approvedResignations],
         ['نسبة التسرب %', es.attritionRate],
-        ['متوسط التسرب الشهري %', es.monthlyAttritionRate],
-        ['درجة صحة التشغيل', report.operationalHealth.score],
+        ['درجة صحة التشغيل', report.operationalHealth.disabled ? 'بيانات غير كافية' : report.operationalHealth.score],
       ]),
       'الملخص التنفيذي'
+    );
+
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['Talabat Operations KPIs'],
+        ['Headcount', report.talabatOperations.headcount],
+        ['Active Riders (avg daily)', report.talabatOperations.activeRiders],
+        ['No Show (avg daily)', report.talabatOperations.noShowRiders],
+        ['Actual Hours (avg daily)', report.talabatOperations.actualHours],
+        ['Target Hours (avg daily)', report.talabatOperations.targetHours],
+        ['Achievement %', report.talabatOperations.achievementPercent],
+        ['Avg Hours/Active Rider', report.talabatOperations.avgHoursPerActiveRider],
+        ['Utilization %', report.talabatOperations.utilizationPercent],
+        [],
+        ['TALABAT ACCURACY SCORE'],
+        ['Overall %', report.talabatAccuracyScore.overallAccuracyPercent ?? '—'],
+        ...report.talabatAccuracyScore.matches.map((m) => [
+          m.kpiLabelAr,
+          m.dashboardValue,
+          m.talabatValue ?? '—',
+          m.matchPercent ?? '—',
+        ]),
+      ]),
+      'Talabat Ops'
     );
 
     XLSX.utils.book_append_sheet(
@@ -129,6 +155,11 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
         ['الصيغة', report.hoursRoadmap.calculationTrace.formula],
         ['حساب الفجوة', report.hoursRoadmap.calculationTrace.dailyGapCalculation],
         ['حساب الطيارين', report.hoursRoadmap.calculationTrace.additionalRidersCalculation],
+        ['gapHours', report.hoursRoadmap.ridersAudit.gapHours],
+        ['avgHoursPerActiveRider', report.hoursRoadmap.ridersAudit.avgHoursPerActiveRider],
+        ['rawCalculation', report.hoursRoadmap.ridersAudit.rawCalculation],
+        ['roundedResult', report.hoursRoadmap.ridersAudit.roundedResult],
+        ['validationPassed', report.hoursRoadmap.ridersAudit.validationPassed],
       ]),
       'تتبع 2200'
     );

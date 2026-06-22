@@ -102,6 +102,47 @@ function MiniTable({ headers, rows }: { headers: string[]; rows: ReactNode[][] }
   );
 }
 
+function TalabatKpiCard({
+  label,
+  value,
+  sub,
+  trace,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+  trace?: StrategicOpsReport['talabatOperations']['auditTraces'][number];
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-4">
+      <p className="text-xs text-[#94A3B8] mb-1">{label}</p>
+      <p className="text-2xl font-bold text-[#EAF0FF]">{value}</p>
+      {sub && <p className="text-xs text-[#64748B] mt-1">{sub}</p>}
+      {trace && (
+        <>
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="text-xs text-cyan-300/90 mt-2 hover:underline"
+          >
+            {open ? 'إخفاء التدقيق' : 'عرض التدقيق'}
+          </button>
+          {open && (
+            <div className="mt-2 text-xs text-[#94A3B8] space-y-1 border-t border-white/10 pt-2">
+              <p><span className="text-[#64748B]">المعادلة:</span> {trace.formula}</p>
+              <p><span className="text-[#64748B]">البسط:</span> {trace.numerator} ({trace.numeratorLabel})</p>
+              <p><span className="text-[#64748B]">المقام:</span> {trace.denominator} ({trace.denominatorLabel})</p>
+              <p><span className="text-[#64748B]">المصدر:</span> {trace.rawDataSource}</p>
+              <p><span className="text-[#64748B]">النتيجة:</span> {trace.result}</p>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function StrategicOpsCenterPage() {
   const notify = usePageNotify();
   const today = new Date().toISOString().split('T')[0];
@@ -118,7 +159,17 @@ export default function StrategicOpsCenterPage() {
     endDate: string;
     zone: string;
     supervisorCode: string;
+    talabatActive?: string;
+    talabatNoShow?: string;
+    talabatHours?: string;
+    talabatAchievement?: string;
   } | null>(null);
+  const [dashboardMode, setDashboardMode] = useState<'talabat_ops' | 'strategic_full'>('talabat_ops');
+  const [showStrategicSections, setShowStrategicSections] = useState(false);
+  const [talabatActive, setTalabatActive] = useState('');
+  const [talabatNoShow, setTalabatNoShow] = useState('');
+  const [talabatHours, setTalabatHours] = useState('');
+  const [talabatAchievement, setTalabatAchievement] = useState('');
 
   const { data: supervisorsList } = useQuery({
     queryKey: ['admin', 'supervisors-list'],
@@ -135,7 +186,7 @@ export default function StrategicOpsCenterPage() {
   });
 
   const { data: report, isLoading, isFetching, error } = useQuery({
-    queryKey: ['admin', 'strategic-ops', requestFilters?.startDate, requestFilters?.endDate, requestFilters?.zone, requestFilters?.supervisorCode],
+    queryKey: ['admin', 'strategic-ops', requestFilters],
     queryFn: async () => {
       const token = localStorage.getItem('token');
       const q = new URLSearchParams({
@@ -144,6 +195,10 @@ export default function StrategicOpsCenterPage() {
         zone: requestFilters!.zone,
         supervisorCode: requestFilters!.supervisorCode,
       });
+      if (requestFilters!.talabatActive) q.set('talabatActive', requestFilters!.talabatActive);
+      if (requestFilters!.talabatNoShow) q.set('talabatNoShow', requestFilters!.talabatNoShow);
+      if (requestFilters!.talabatHours) q.set('talabatHours', requestFilters!.talabatHours);
+      if (requestFilters!.talabatAchievement) q.set('talabatAchievement', requestFilters!.talabatAchievement);
       const res = await fetch(`/api/admin/strategic-ops?${q}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -172,7 +227,16 @@ export default function StrategicOpsCenterPage() {
       notify.error('تاريخ البداية يجب أن يكون قبل النهاية');
       return;
     }
-    setRequestFilters({ startDate, endDate, zone, supervisorCode });
+    setRequestFilters({
+      startDate,
+      endDate,
+      zone,
+      supervisorCode,
+      talabatActive: talabatActive.trim() || undefined,
+      talabatNoShow: talabatNoShow.trim() || undefined,
+      talabatHours: talabatHours.trim() || undefined,
+      talabatAchievement: talabatAchievement.trim() || undefined,
+    });
   };
 
   const loading = isLoading || isFetching;
@@ -254,16 +318,148 @@ export default function StrategicOpsCenterPage() {
               </div>
             )}
 
-            {/* درجة صحة التشغيل */}
+            {/* درجة صحة التشغيل — معطّلة عند تغطية < 80% */}
             <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-5 flex flex-wrap items-center justify-between gap-4">
               <div>
                 <p className="text-sm text-[#94A3B8]">{L.operationalHealth}</p>
-                <p className="text-4xl font-bold text-[#EAF0FF] mt-1">{report.operationalHealth.score}<span className="text-lg text-[#64748B]">/100</span></p>
+                {report.operationalHealth.disabled ? (
+                  <p className="text-2xl font-bold text-amber-300 mt-1">{L.insufficientData}</p>
+                ) : (
+                  <p className="text-4xl font-bold text-[#EAF0FF] mt-1">{report.operationalHealth.score}<span className="text-lg text-[#64748B]">/100</span></p>
+                )}
               </div>
               <div className="text-right">
-                <HealthBadge score={report.operationalHealth.score} label={report.operationalHealth.levelLabelAr} />
+                {report.operationalHealth.disabled ? (
+                  <span className="text-sm text-amber-300/90">{report.operationalHealth.disabledReason}</span>
+                ) : (
+                  <HealthBadge score={report.operationalHealth.score} label={report.operationalHealth.levelLabelAr} />
+                )}
               </div>
             </div>
+
+            <Section title={L.talabatOperations}>
+              <div className="flex flex-wrap gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setDashboardMode('talabat_ops')}
+                  className={`rounded-lg px-3 py-1.5 text-sm border ${dashboardMode === 'talabat_ops' ? 'border-cyan-500 bg-cyan-500/20 text-cyan-200' : 'border-white/10 text-[#94A3B8]'}`}
+                >
+                  Talabat Operations
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setDashboardMode('strategic_full'); setShowStrategicSections(true); }}
+                  className={`rounded-lg px-3 py-1.5 text-sm border ${dashboardMode === 'strategic_full' ? 'border-purple-500 bg-purple-500/20 text-purple-200' : 'border-white/10 text-[#94A3B8]'}`}
+                >
+                  {L.showStrategicAnalysis}
+                </button>
+                <span className="text-xs text-[#64748B] self-center">
+                  تغطية البيانات: {report.sourceDataCoverage.coverage}%
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <TalabatKpiCard label={L.headcount} value={report.talabatOperations.headcount} trace={report.talabatOperations.auditTraces[0]} />
+                <TalabatKpiCard label={L.activeRiders} value={report.talabatOperations.activeRiders} sub={`تشخيص فريد: ${report.talabatOperations.uniqueActiveRidersInPeriod}`} trace={report.talabatOperations.auditTraces[1]} />
+                <TalabatKpiCard label={L.noShowRiders} value={report.talabatOperations.noShowRiders} trace={report.talabatOperations.auditTraces[2]} />
+                <TalabatKpiCard label={L.actualHours} value={report.talabatOperations.actualHours} sub="متوسط يومي" trace={report.talabatOperations.auditTraces[3]} />
+                <TalabatKpiCard label={L.targetHours} value={report.talabatOperations.targetHours} sub="متوسط يومي" trace={report.talabatOperations.auditTraces[4]} />
+                <TalabatKpiCard label={L.achievementPercent} value={`${report.talabatOperations.achievementPercent}%`} trace={report.talabatOperations.auditTraces[5]} />
+                <TalabatKpiCard label={L.avgHoursPerActiveRider} value={report.talabatOperations.avgHoursPerActiveRider} trace={report.talabatOperations.auditTraces[6]} />
+                <TalabatKpiCard label={L.utilizationRate} value={`${report.talabatOperations.utilizationPercent}%`} trace={report.talabatOperations.auditTraces[7]} />
+              </div>
+              <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                <p className="text-sm font-semibold text-amber-200/90 mb-3">{L.noShowComparison}</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <StatCard label={L.dashboardNoShow} value={report.talabatOperations.noShowComparison.dashboardNoShow} sub="متوسط يومي" />
+                  <StatCard
+                    label={L.talabatNoShow}
+                    value={report.talabatOperations.noShowComparison.talabatNoShow ?? '—'}
+                    sub={report.talabatOperations.noShowComparison.talabatNoShow === null ? 'أدخل قيمة Talabat' : 'متوسط يومي'}
+                  />
+                  <StatCard
+                    label={L.deviationPercent}
+                    value={
+                      report.talabatOperations.noShowComparison.deviationPercent !== null
+                        ? `${report.talabatOperations.noShowComparison.deviationPercent}%`
+                        : '—'
+                    }
+                    sub={
+                      report.talabatOperations.noShowComparison.withinTolerance === null
+                        ? undefined
+                        : report.talabatOperations.noShowComparison.withinTolerance
+                          ? 'ضمن 2%'
+                          : 'خارج 2%'
+                    }
+                  />
+                  <StatCard
+                    label="تطابق %"
+                    value={
+                      report.talabatOperations.noShowComparison.matchPercent !== null
+                        ? `${report.talabatOperations.noShowComparison.matchPercent}%`
+                        : '—'
+                    }
+                  />
+                </div>
+                <p className="text-xs text-[#64748B] mt-2">
+                  يُحسب No Show فقط للطيارين المجدولين (صف يومي في البيانات) الذين لم يعملوا (ساعات=٠ وطلبات=٠). المعيّنون بلا صف يومي لا يُحسبون.
+                </p>
+              </div>
+            </Section>
+
+            <Section title={L.talabatAccuracyScore}>
+              <p className="text-xs text-[#94A3B8] mb-3">{L.talabatBenchmark} — أدخل قيم تقرير Talabat للمقارنة (اختياري)</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                <div>
+                  <label className="text-xs text-[#64748B]">{L.activeRiders}</label>
+                  <input type="number" value={talabatActive} onChange={(e) => setTalabatActive(e.target.value)} className="w-full mt-1 rounded-lg bg-black/30 border border-white/10 px-2 py-1.5 text-sm text-[#EAF0FF]" />
+                </div>
+                <div>
+                  <label className="text-xs text-[#64748B]">{L.noShowRiders}</label>
+                  <input type="number" value={talabatNoShow} onChange={(e) => setTalabatNoShow(e.target.value)} className="w-full mt-1 rounded-lg bg-black/30 border border-white/10 px-2 py-1.5 text-sm text-[#EAF0FF]" />
+                </div>
+                <div>
+                  <label className="text-xs text-[#64748B]">{L.actualHours}</label>
+                  <input type="number" value={talabatHours} onChange={(e) => setTalabatHours(e.target.value)} className="w-full mt-1 rounded-lg bg-black/30 border border-white/10 px-2 py-1.5 text-sm text-[#EAF0FF]" />
+                </div>
+                <div>
+                  <label className="text-xs text-[#64748B]">{L.achievementPercent}</label>
+                  <input type="number" value={talabatAchievement} onChange={(e) => setTalabatAchievement(e.target.value)} className="w-full mt-1 rounded-lg bg-black/30 border border-white/10 px-2 py-1.5 text-sm text-[#EAF0FF]" />
+                </div>
+              </div>
+              <div className="grid sm:grid-cols-3 gap-3 mb-4">
+                <StatCard
+                  label={L.overallAccuracy}
+                  value={report.talabatAccuracyScore.overallAccuracyPercent !== null ? `${report.talabatAccuracyScore.overallAccuracyPercent}%` : '—'}
+                  sub={report.talabatAccuracyScore.providedBenchmarkCount > 0 ? `${report.talabatAccuracyScore.providedBenchmarkCount} KPIs` : 'أدخل قيم Talabat'}
+                />
+                <StatCard
+                  label="ضمن 2%"
+                  value={report.talabatAccuracyScore.allWithinTolerance === null ? '—' : report.talabatAccuracyScore.allWithinTolerance ? 'نعم' : 'لا'}
+                />
+                <StatCard
+                  label="هدف 95%+"
+                  value={report.talabatAccuracyScore.goalMet === null ? '—' : report.talabatAccuracyScore.goalMet ? 'متحقق' : 'غير متحقق'}
+                />
+              </div>
+              <MiniTable
+                headers={['KPI', 'لوحة التحكم', 'Talabat', 'انحراف %', 'تطابق %']}
+                rows={report.talabatAccuracyScore.matches.map((m) => [
+                  m.kpiLabelAr,
+                  m.dashboardValue,
+                  m.talabatValue ?? '—',
+                  m.deviationPercent !== null ? `${m.deviationPercent}%` : '—',
+                  m.matchPercent !== null ? `${m.matchPercent}%` : '—',
+                ])}
+              />
+            </Section>
+
+            {(dashboardMode === 'strategic_full' || showStrategicSections) && (
+              <div className="flex justify-end">
+                <button type="button" onClick={() => setShowStrategicSections((s) => !s)} className="text-sm text-[#94A3B8] hover:text-[#EAF0FF]">
+                  {showStrategicSections ? L.hideStrategicAnalysis : L.showStrategicAnalysis}
+                </button>
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => exportStrategicOpsExcel(report)} className="rounded-lg border border-white/15 bg-white/5 px-4 py-2 text-sm text-[#EAF0FF] hover:bg-white/10">{L.exportExcel}</button>
@@ -271,6 +467,24 @@ export default function StrategicOpsCenterPage() {
               <button type="button" onClick={handleCopy} className="rounded-lg border border-purple-500/40 bg-purple-500/15 px-4 py-2 text-sm text-purple-200 hover:bg-purple-500/25">{L.copyChatGpt}</button>
             </div>
 
+            <Section title={L.supervisorPerformance}>
+              <MiniTable
+                headers={['المشرف', 'Headcount', 'نشطون يومياً', 'No Show', 'ساعات/يوم', 'س/طيار', 'تحقيق%', 'استغلال%']}
+                rows={report.supervisorPerformance.rows.map((s) => [
+                  s.name,
+                  s.headcount,
+                  s.activeRiders,
+                  s.noShowRiders,
+                  s.dailyHours,
+                  s.avgHoursPerRiderDaily,
+                  `${s.achievementPercent}%`,
+                  `${s.utilizationPercent}%`,
+                ])}
+              />
+            </Section>
+
+            {(showStrategicSections || dashboardMode === 'strategic_full') && (
+            <>
             <Section title={L.dataIntegrityReport}>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                 <StatCard label="درجة جودة البيانات" value={`${report.dataIntegrity.dataQualityScore}/100`} />
@@ -524,8 +738,12 @@ export default function StrategicOpsCenterPage() {
               <div className="rounded-xl border border-purple-500/30 bg-purple-500/10 p-4 mb-4">
                 <p className="text-lg font-bold text-[#EAF0FF]">Executive Accuracy Score</p>
                 <p className="text-4xl font-bold text-purple-300 mt-1">
-                  {report.finalKpiAccuracyAudit.executiveAccuracyScore.score}
-                  <span className="text-lg text-[#64748B]">/100</span>
+                  {!report.sourceDataCoverage.strategicKpisEnabled
+                    ? L.insufficientData
+                    : <>
+                        {report.finalKpiAccuracyAudit.executiveAccuracyScore.score}
+                        <span className="text-lg text-[#64748B]">/100</span>
+                      </>}
                 </p>
                 <p className="text-sm text-purple-200/90 mt-1">{report.finalKpiAccuracyAudit.executiveAccuracyScore.gradeLabelAr}</p>
               </div>
@@ -591,6 +809,12 @@ export default function StrategicOpsCenterPage() {
                 <p className="font-mono text-xs text-cyan-400/90">{report.finalKpiAccuracyAudit.roadmapValidation.formula}</p>
                 <p>Additional Riders Needed: <strong>{report.finalKpiAccuracyAudit.roadmapValidation.additionalRidersNeeded}</strong></p>
                 <p>{report.finalKpiAccuracyAudit.roadmapValidation.additionalRidersCalculation}</p>
+                <div className="text-xs font-mono text-cyan-400/90 space-y-0.5 mt-2">
+                  <p>gapHours: {report.finalKpiAccuracyAudit.roadmapValidation.ridersAudit.gapHours}</p>
+                  <p>avgHoursPerActiveRider: {report.finalKpiAccuracyAudit.roadmapValidation.ridersAudit.avgHoursPerActiveRider ?? 'null'}</p>
+                  <p>rawCalculation: {report.finalKpiAccuracyAudit.roadmapValidation.ridersAudit.rawCalculation}</p>
+                  <p>roundedResult: {report.finalKpiAccuracyAudit.roadmapValidation.ridersAudit.roundedResult ?? 'null'}</p>
+                </div>
                 <p className={report.finalKpiAccuracyAudit.roadmapValidation.zeroValidationPassed ? 'text-emerald-400' : 'text-red-400'}>
                   Zero validation: {report.finalKpiAccuracyAudit.roadmapValidation.zeroValidationPassed ? 'PASS' : 'FAIL'}
                 </p>
@@ -627,18 +851,18 @@ export default function StrategicOpsCenterPage() {
 
             <Section title={L.executiveSummary}>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <StatCard label={L.totalRegistered} value={report.executiveSummary.totalRegisteredRiders} />
-                <StatCard label={L.totalAssigned} value={report.executiveSummary.totalAssignedToSupervisors} />
-                <StatCard label={L.activeRiders} value={report.executiveSummary.activeRiders} sub={`${report.executiveSummary.activePercent}%`} />
-                <StatCard label={L.inactiveRiders} value={report.executiveSummary.inactiveRiders} sub={`${report.executiveSummary.inactivePercent}%`} />
-                <StatCard label={L.suspendedRiders} value={report.executiveSummary.suspendedRiders} sub={`${report.executiveSummary.suspensionPercent}%`} />
-                <StatCard label={L.approvedResignations} value={report.executiveSummary.approvedResignations} />
-                <StatCard label={L.newJoins} value={report.executiveSummary.newRidersJoined} />
+                <StatCard label={L.headcount} value={report.executiveSummary.totalRegisteredRiders} />
+                <StatCard label={L.activeRiders} value={report.executiveSummary.activeRiders} sub="متوسط يومي" />
+                <StatCard label={L.noShowRiders} value={report.executiveSummary.noShowRiders} />
+                <StatCard label={L.actualHours} value={report.executiveSummary.actualDailyHours} sub="متوسط يومي" />
+                <StatCard label={L.targetHours} value={report.executiveSummary.targetDailyHours} />
+                <StatCard label={L.achievementPercent} value={`${report.executiveSummary.achievementPercent}%`} />
+                <StatCard label={L.avgHoursPerActiveRider} value={report.executiveSummary.avgHoursPerActiveRider} />
                 <StatCard label={L.utilizationRate} value={`${report.executiveSummary.utilizationRate}%`} />
+                <StatCard label="فريدون بالفترة (تشخيص)" value={report.executiveSummary.uniqueActiveRidersInPeriod} />
+                <StatCard label={L.approvedResignations} value={report.executiveSummary.approvedResignations} />
                 <StatCard label={L.attritionRate} value={`${report.executiveSummary.attritionRate}%`} />
-                <StatCard label={L.monthlyAttrition} value={`${report.executiveSummary.monthlyAttritionRate}%`} />
               </div>
-              <p className="text-xs text-[#64748B]">الطيارون غير النشطين = بدون نشاط (ساعات ٠ وطلبات ٠) — نفس قيمة «بدون نشاط»</p>
             </Section>
 
             <Section title={L.activityDistribution}>
@@ -764,23 +988,6 @@ export default function StrategicOpsCenterPage() {
                 </ResponsiveContainer>
               </div>
               <MiniTable headers={['الفئة', 'مهدرة/يوم', 'مهدرة (فترة)', 'النسبة', 'العدد']} rows={report.lostHours.breakdown.map((b) => [b.category, b.hoursDual.daily, b.hours, `${b.percent}%`, b.riderCount])} />
-            </Section>
-
-            <Section title={L.supervisorPerformance}>
-              {report.supervisorPerformance.bestSupervisor && (
-                <p className="text-sm text-emerald-300">الأفضل: {report.supervisorPerformance.bestSupervisor.name} (إنتاجية {report.supervisorPerformance.bestSupervisor.productivityScore})</p>
-              )}
-              {report.supervisorPerformance.worstSupervisor && (
-                <p className="text-sm text-red-300">الأضعف: {report.supervisorPerformance.worstSupervisor.name} (إنتاجية {report.supervisorPerformance.worstSupervisor.productivityScore})</p>
-              )}
-              <MiniTable
-                headers={['المشرف', 'معيّنون', 'نشطون', 'غير نشطين', 'س/يوم', 'ساعات الفترة', 'متوسط س/ط/يوم', 'طلبات/يوم', 'حضور%', 'هدف%', 'درجة', 'إقالات']}
-                rows={report.supervisorPerformance.rows.map((s) => [
-                  s.name, s.assignedRiders, s.activeRiders, s.inactiveRiders,
-                  s.totalHoursDual.daily, s.totalHours, s.avgHoursPerRiderDaily, s.avgOrdersDaily,
-                  `${s.attendancePercent}%`, `${s.targetAchievementPercent}%`, s.productivityScore, s.resignations,
-                ])}
-              />
             </Section>
 
             <Section title={L.supervisorRisk}>
@@ -1013,9 +1220,11 @@ export default function StrategicOpsCenterPage() {
                   label="طيارون إضافيون"
                   value={report.hoursRoadmap.additionalActiveRidersNeeded}
                   sub={
-                    report.hoursRoadmap.disabled
-                      ? 'توقعات معطّلة'
-                      : `+${report.hoursRoadmap.additionalHoursPerRiderNeeded}س/طيار/يوم`
+                    report.hoursRoadmap.ridersAudit?.validationPassed === false
+                      ? 'تحقق فاشل'
+                      : report.hoursRoadmap.calculationTrace.forecastDisabled
+                        ? 'توقعات معطّلة — الحساب متاح'
+                        : `+${report.hoursRoadmap.additionalHoursPerRiderNeeded}س/طيار/يوم`
                   }
                 />
               </div>
@@ -1026,6 +1235,18 @@ export default function StrategicOpsCenterPage() {
                 <p>متوسط ساعات الطيار النشط يومياً: {report.hoursRoadmap.calculationTrace.avgDailyHoursPerActiveRider}</p>
                 <p className="text-xs font-mono text-cyan-400/90">{report.hoursRoadmap.calculationTrace.additionalRidersFormula}</p>
                 <p className="font-medium">{report.hoursRoadmap.calculationTrace.additionalRidersCalculation}</p>
+                {report.hoursRoadmap.ridersAudit && (
+                  <div className="mt-2 pt-2 border-t border-cyan-500/20 text-xs font-mono space-y-0.5">
+                    <p>gapHours: {report.hoursRoadmap.ridersAudit.gapHours}</p>
+                    <p>avgHoursPerActiveRider: {report.hoursRoadmap.ridersAudit.avgHoursPerActiveRider ?? 'null'}</p>
+                    <p>rawCalculation: {report.hoursRoadmap.ridersAudit.rawCalculation}</p>
+                    <p>roundedResult: {report.hoursRoadmap.ridersAudit.roundedResult ?? 'null'}</p>
+                    <p className={report.hoursRoadmap.ridersAudit.validationPassed ? 'text-emerald-400' : 'text-red-400'}>
+                      validation: {report.hoursRoadmap.ridersAudit.validationPassed ? 'PASS' : 'FAIL'}
+                      {report.hoursRoadmap.ridersAudit.validationMessage ? ` — ${report.hoursRoadmap.ridersAudit.validationMessage}` : ''}
+                    </p>
+                  </div>
+                )}
                 {report.hoursRoadmap.calculationTrace.forecastDisabled && (
                   <p className="text-amber-300 text-xs">{report.hoursRoadmap.calculationTrace.forecastDisabledReason}</p>
                 )}
@@ -1075,6 +1296,15 @@ export default function StrategicOpsCenterPage() {
                   <p>{report.operationalFormulaAudit.daily2200Roadmap.calculation}</p>
                   <p>{report.operationalFormulaAudit.daily2200Roadmap.additionalRidersFormula}</p>
                   <p className="font-medium">{report.operationalFormulaAudit.daily2200Roadmap.additionalRidersCalculation}</p>
+                  <div className="text-xs font-mono text-cyan-400/80 mt-2 space-y-0.5">
+                    <p>gapHours: {report.operationalFormulaAudit.daily2200Roadmap.ridersAudit.gapHours}</p>
+                    <p>avgHoursPerActiveRider: {report.operationalFormulaAudit.daily2200Roadmap.ridersAudit.avgHoursPerActiveRider ?? 'null'}</p>
+                    <p>rawCalculation: {report.operationalFormulaAudit.daily2200Roadmap.ridersAudit.rawCalculation}</p>
+                    <p>roundedResult: {report.operationalFormulaAudit.daily2200Roadmap.ridersAudit.roundedResult ?? 'null'}</p>
+                    <p className={report.operationalFormulaAudit.daily2200Roadmap.mathValidationPassed ? 'text-emerald-400' : 'text-red-400'}>
+                      validation: {report.operationalFormulaAudit.daily2200Roadmap.mathValidationPassed ? 'PASS' : 'FAIL'}
+                    </p>
+                  </div>
                 </AuditCard>
 
                 <AuditCard title="توزيع الساعات">
@@ -1144,10 +1374,19 @@ export default function StrategicOpsCenterPage() {
               </div>
             </Section>
 
+            </>
+            )}
+
             <Section title={L.dataValidation}>
               <MiniTable
-                headers={['المؤشر', 'الشيت', 'الأعمدة', 'السجلات', 'طريقة الحساب', 'النتيجة']}
-                rows={report.dataValidation.map((d) => [d.kpi, d.sourceSheet, d.columns, d.recordsRead, d.formula, d.result])}
+                headers={['المؤشر', 'البسط', 'المقام', 'المعادلة', 'النتيجة']}
+                rows={report.dataValidation.map((d) => [
+                  d.kpi,
+                  d.numerator !== undefined ? `${d.numerator} (${d.numeratorLabel ?? ''})` : '—',
+                  d.denominator !== undefined ? `${d.denominator} (${d.denominatorLabel ?? ''})` : '—',
+                  d.formula,
+                  d.result,
+                ])}
               />
             </Section>
           </>

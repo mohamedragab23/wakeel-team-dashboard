@@ -1,6 +1,7 @@
 import type { StrategicOpsReport } from '@/lib/strategicOps/buildReport';
+import type { RoadmapRidersAudit } from '@/lib/strategicOps/roadmapCalculation';
 
-export type FormulaAuditStatus = 'valid' | 'warning';
+export type FormulaAuditStatus = 'valid' | 'warning' | 'insufficient_data';
 
 export type FormulaAuditRow = {
   kpi: string;
@@ -9,6 +10,11 @@ export type FormulaAuditRow = {
   result: string;
   status: FormulaAuditStatus;
   statusReason?: string;
+  numerator?: number;
+  numeratorLabel?: string;
+  denominator?: number;
+  denominatorLabel?: string;
+  rawDataSource?: string;
 };
 
 export type ResignationAuditRecord = {
@@ -64,6 +70,8 @@ export type OperationalFormulaAudit = {
     additionalRidersFormula: string;
     additionalRidersCalculation: string;
     additionalRidersResult: number;
+    ridersAudit: RoadmapRidersAudit;
+    mathValidationPassed: boolean;
     warning?: string;
   };
   hoursDistribution: {
@@ -153,8 +161,9 @@ export function buildOperationalFormulaAudit(input: {
         ? `متوسط(${input.lifetimeSamples.map((s) => s.lifetimeDays).join(' + ')}) ÷ ${input.lifetimeSamples.length} = ${lifetimeResult} يوم`
         : 'لا توجد إقالات مع تاريخ انضمام صالح';
 
-  const additionalRidersIndicator = ge.indicators.find((i) => i.key === 'additional_riders_daily_2200');
   const avgDailyPerActive = input.avgDailyHoursPerActiveRider;
+
+  const ridersAudit = hr.ridersAudit ?? hr.calculationTrace.ridersAudit;
 
   const daily2200Audit = {
     formula: 'فجوة يومية = 2200 − متوسط الساعات اليومية؛ طيارون إضافيون = ⌈فجوة يومية ÷ متوسط ساعات الطيار النشط يومياً⌉',
@@ -168,12 +177,11 @@ export function buildOperationalFormulaAudit(input: {
       متوسط_ساعات_النشط_يومياً: avgDailyPerActive,
     },
     calculation: `${hr.targetDailyHours} − ${hr.currentDailyHours} = ${hr.dailyGap} ساعة/يوم`,
-    additionalRidersFormula: '⌈فجوة يومية ÷ متوسط ساعات الطيار النشط يومياً⌉',
-    additionalRidersCalculation:
-      avgDailyPerActive > 0
-        ? `⌈${hr.dailyGap} ÷ ${avgDailyPerActive}⌉ = ${hr.additionalActiveRidersNeeded} طيار`
-        : 'لا يمكن الحساب — لا يوجد طيارون نشطون',
+    additionalRidersFormula: hr.calculationTrace.additionalRidersFormula,
+    additionalRidersCalculation: hr.calculationTrace.additionalRidersCalculation,
     additionalRidersResult: hr.additionalActiveRidersNeeded,
+    ridersAudit,
+    mathValidationPassed: hr.mathValidationPassed,
     warning: 'تم تصحيح الخارطة: المقارنة يومية فقط (لا تُقارن ساعات الفترة الكلية بهدف 2200 يومي).',
   };
 
@@ -230,6 +238,18 @@ export function buildOperationalFormulaAudit(input: {
   };
 
   const validationTable: FormulaAuditRow[] = [
+    ...r.talabatOperations.auditTraces.map((trace) => ({
+      kpi: trace.kpi,
+      formula: trace.formula,
+      rawData: `بسط=${trace.numerator} (${trace.numeratorLabel}) | مقام=${trace.denominator} (${trace.denominatorLabel})`,
+      result: String(trace.result),
+      status: trace.status,
+      numerator: trace.numerator,
+      numeratorLabel: trace.numeratorLabel,
+      denominator: trace.denominator,
+      denominatorLabel: trace.denominatorLabel,
+      rawDataSource: trace.rawDataSource,
+    })),
     {
       kpi: 'نسبة التسرب',
       formula: attritionAudit.formula,
@@ -318,18 +338,41 @@ export function buildOperationalFormulaAudit(input: {
       status: 'valid',
     },
     {
-      kpi: 'معدل الاستغلال',
-      formula: 'النشطون ÷ المسجلين × 100',
+      kpi: 'معدل الاستغلال (Talabat)',
+      formula: 'متوسط الطيارين النشطين يومياً ÷ Headcount × 100',
       rawData: `${es.activeRiders} ÷ ${es.totalRegisteredRiders}`,
       result: `${es.utilizationRate}%`,
       status: 'valid',
+      numerator: es.activeRiders,
+      numeratorLabel: 'متوسط النشطين يومياً',
+      denominator: es.totalRegisteredRiders,
+      denominatorLabel: 'Headcount',
+      rawDataSource: 'البيانات اليومية + المناديب',
     },
     {
-      kpi: 'الطيارون النشطون',
-      formula: 'SUM(ساعات) > 0',
-      rawData: `من ${es.totalRegisteredRiders} مسجل`,
+      kpi: 'الطيارون النشطون (Talabat)',
+      formula: 'AVG(COUNT(DISTINCT rider WHERE hours > 0 ON DAY))',
+      rawData: `فريدون بالفترة (تشخيص): ${es.uniqueActiveRidersInPeriod}`,
       result: String(es.activeRiders),
       status: 'valid',
+      numerator: es.activeRiders,
+      numeratorLabel: 'متوسط النشطين يومياً',
+      denominator: r.meta.normalizationCalendarDays,
+      denominatorLabel: 'أيام التقويم',
+      rawDataSource: 'البيانات اليومية',
+    },
+    {
+      kpi: 'No Show (Talabat)',
+      formula:
+        'AVG على أيام التشغيل: طيار مجدول (صف يومي + معيّن) AND hours=0 AND orders=0 — يُستبعد المعيّن بلا صف',
+      rawData: `${r.talabatOperations.operationalDays} يوم تشغيل`,
+      result: String(es.noShowRiders),
+      status: 'valid',
+      numerator: es.noShowRiders,
+      numeratorLabel: 'متوسط No Show يومياً',
+      denominator: r.talabatOperations.operationalDays || 1,
+      denominatorLabel: 'أيام بها طيارون مجدولون',
+      rawDataSource: 'البيانات اليومية + المناديب',
     },
     {
       kpi: 'الطيارون غير النشطين',

@@ -12,6 +12,12 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
+function parseOptionalNum(v: string | null): number | undefined {
+  if (v === null || v.trim() === '') return undefined;
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const token = extractBearerToken(request);
@@ -67,6 +73,12 @@ export async function GET(request: NextRequest) {
       zone,
       supervisorCode,
       allowedSupervisorCodes: allowed ?? null,
+      talabatBenchmark: {
+        active: parseOptionalNum(searchParams.get('talabatActive')),
+        noShow: parseOptionalNum(searchParams.get('talabatNoShow')),
+        hours: parseOptionalNum(searchParams.get('talabatHours')),
+        achievement: parseOptionalNum(searchParams.get('talabatAchievement')),
+      },
     });
 
     if (allowed) {

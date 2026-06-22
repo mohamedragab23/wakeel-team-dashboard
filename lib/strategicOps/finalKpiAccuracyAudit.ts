@@ -67,6 +67,15 @@ export type FinalKpiAccuracyAudit = {
     formula: string;
     additionalRidersNeeded: number;
     additionalRidersCalculation: string;
+    ridersAudit: {
+      gapHours: number;
+      avgHoursPerActiveRider: number | null;
+      rawQuotient: number | null;
+      rawCalculation: string;
+      roundedResult: number | null;
+      validationPassed: boolean;
+      validationMessage?: string;
+    };
     zeroOnlyWhenGapNonPositive: boolean;
     zeroValidationPassed: boolean;
     forecastDisabled: boolean;
@@ -167,6 +176,16 @@ export function buildFinalKpiAccuracyAudit(input: {
   hoursRoadmap: {
     dailyGap: number;
     additionalActiveRidersNeeded: number;
+    ridersAudit: {
+      gapHours: number;
+      avgHoursPerActiveRider: number | null;
+      rawQuotient: number | null;
+      rawCalculation: string;
+      roundedResult: number | null;
+      validationPassed: boolean;
+      validationMessage?: string;
+    };
+    mathValidationPassed: boolean;
     calculationTrace: {
       formula: string;
       avgDailyHoursPerActiveRider: number;
@@ -178,6 +197,8 @@ export function buildFinalKpiAccuracyAudit(input: {
   };
   ghostLeakageOrders: number;
   generatedAt: string;
+  strategicKpisEnabled?: boolean;
+  sourceDataCoveragePercent?: number;
 }): FinalKpiAccuracyAudit {
   const {
     filters,
@@ -195,6 +216,8 @@ export function buildFinalKpiAccuracyAudit(input: {
     hoursRoadmap,
     ghostLeakageOrders,
     generatedAt,
+    strategicKpisEnabled = true,
+    sourceDataCoveragePercent,
   } = input;
 
   const masterByNorm = new Map<string, Rider>();
@@ -250,15 +273,16 @@ export function buildFinalKpiAccuracyAudit(input: {
   const dailyStd = stdDev(dailyActiveCounts);
 
   const discrepancyExplanationAr =
-    `«الطيارون النشطون» (${uniqueActiveRidersInPeriod}) = عدد الطيارين الفريدين بمجموع ساعات > 0 خلال الفترة بأكملها. ` +
-    `«متوسط النشطين يومياً» (${averageDailyActiveRiders}) = متوسط عدد الطيارين الذين سجّلوا ساعات > 0 في كل يوم ببيانات (${dailyActiveCounts.length} يوم). ` +
-    `الفرق طبيعي لأن الطيار لا يعمل كل يوم — مع الانحراف المعياري ${dailyStd} (أدنى يوم ${dailyMin}، أعلى يوم ${dailyMax}).`;
+    `KPI التشغيلي «الطيارون النشطون» = متوسط النشطين يومياً (${averageDailyActiveRiders}) — منطق Talabat. ` +
+    `«فريدون بالفترة» (${uniqueActiveRidersInPeriod}) = تشخيص فقط — عدد الطيارين بمجموع ساعات > 0 خلال الفترة. ` +
+    `الفرق طبيعي لأن الطيار لا يعمل كل يوم — انحراف معياري ${dailyStd} (أدنى يوم ${dailyMin}، أعلى يوم ${dailyMax}).`;
 
   const zeroValidationPassed =
-    hoursRoadmap.dailyGap <= 0
+    hoursRoadmap.mathValidationPassed ??
+    (hoursRoadmap.dailyGap <= 0
       ? hoursRoadmap.additionalActiveRidersNeeded === 0
       : hoursRoadmap.additionalActiveRidersNeeded > 0 ||
-        hoursRoadmap.calculationTrace.avgDailyHoursPerActiveRider <= 0;
+        hoursRoadmap.calculationTrace.avgDailyHoursPerActiveRider <= 0);
 
   let gateStatus: FinalKpiAccuracyAudit['kpiTrustVerification']['gateStatus'];
   let gateStatusAr: string;
@@ -355,7 +379,7 @@ export function buildFinalKpiAccuracyAudit(input: {
     scopeIntegrity: round2(Math.max(0, 100 - Math.min(100, scopeAnomalyRatio * 100))),
   };
 
-  const executiveScore = round2(
+  const executiveScoreRaw = round2(
     components.dataQuality * weights.dataQuality +
       components.ghostLeakageInverse * weights.ghostLeakageInverse +
       components.joinDateCoverage * weights.joinDateCoverage +
@@ -363,10 +387,18 @@ export function buildFinalKpiAccuracyAudit(input: {
       components.scopeIntegrity * weights.scopeIntegrity
   );
 
-  const { grade, labelAr: gradeLabelAr } = gradeFromScore(executiveScore);
+  const executiveScore = strategicKpisEnabled ? executiveScoreRaw : 0;
+  const { grade, labelAr: gradeLabelAr } = strategicKpisEnabled
+    ? gradeFromScore(executiveScoreRaw)
+    : { grade: 'not_decision_ready' as ExecutiveAccuracyGrade, labelAr: 'بيانات غير كافية' };
 
   const blockers: string[] = [];
-  if (executiveScore < 80) {
+  if (!strategicKpisEnabled) {
+    blockers.push(
+      `تغطية البيانات ${sourceDataCoveragePercent ?? joinDateAudit.joinDateCoveragePercent}% < ٨٠٪ — Executive Score معطّل.`
+    );
+  }
+  if (strategicKpisEnabled && executiveScoreRaw < 80) {
     blockers.push(`درجة الدقة التنفيذية ${executiveScore}/100 دون حد القبول الإداري (٨٠).`);
   }
   if (kpiTrust.level > 2) {
@@ -396,7 +428,9 @@ export function buildFinalKpiAccuracyAudit(input: {
   const canTrust = blockers.length === 0;
   const reasons = canTrust
     ? [
-        `درجة الدقة ${executiveScore}/100 (${gradeLabelAr}).`,
+        strategicKpisEnabled
+          ? `درجة الدقة ${executiveScoreRaw}/100 (${gradeLabelAr}).`
+          : 'Executive Score معطّل — بيانات غير كافية.',
         `مستوى الثقة ${kpiTrust.level} — تسرب Ghost ${kpiTrust.ghostLeakagePercent}%.`,
         `تغطية انضمام ${joinDateAudit.joinDateCoveragePercent}%.`,
         `خارطة ٢٢٠٠: فجوة ${hoursRoadmap.dailyGap} س/يوم → ${hoursRoadmap.additionalActiveRidersNeeded} طيار إضافي (تحقق: ${zeroValidationPassed ? 'PASS' : 'FAIL'}).`,
@@ -445,6 +479,7 @@ export function buildFinalKpiAccuracyAudit(input: {
       formula: hoursRoadmap.calculationTrace.additionalRidersFormula,
       additionalRidersNeeded: hoursRoadmap.additionalActiveRidersNeeded,
       additionalRidersCalculation: hoursRoadmap.calculationTrace.additionalRidersCalculation,
+      ridersAudit: hoursRoadmap.ridersAudit,
       zeroOnlyWhenGapNonPositive: true,
       zeroValidationPassed,
       forecastDisabled: hoursRoadmap.calculationTrace.forecastDisabled,

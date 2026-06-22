@@ -21,6 +21,23 @@ export function formatStrategicOpsChatGptText(report: StrategicOpsReport): strin
   add(`المشرف: ${report.meta.supervisorCode === 'all' ? 'كل المشرفين' : report.meta.supervisorCode}`);
   add();
 
+  const to = report.talabatOperations;
+  add('── Talabat Operations (مصدر الحقيقة) ──');
+  add(`Headcount: ${to.headcount}`);
+  add(`Active Riders (avg daily): ${to.activeRiders} | فريدون بالفترة: ${to.uniqueActiveRidersInPeriod}`);
+  add(`No Show (avg daily): ${to.noShowRiders}`);
+  add(`Actual Hours (avg daily): ${to.actualHours} | Target: ${to.targetHours}`);
+  add(`Achievement: ${to.achievementPercent}% | Utilization: ${to.utilizationPercent}%`);
+  add(`Avg Hours/Active Rider: ${to.avgHoursPerActiveRider}`);
+  add(`Data coverage: ${report.sourceDataCoverage.coverage}%`);
+  add();
+  add('── TALABAT ACCURACY SCORE ──');
+  add(`Overall: ${report.talabatAccuracyScore.overallAccuracyPercent ?? '—'}%`);
+  report.talabatAccuracyScore.matches.forEach((m) =>
+    add(`  ${m.kpiLabelAr}: dashboard=${m.dashboardValue} talabat=${m.talabatValue ?? '—'} match=${m.matchPercent ?? '—'}%`)
+  );
+  add();
+
   const dil = report.dataIntegrity;
   add('── ٠. تقرير سلامة البيانات (DIL) ──');
   add(`درجة الجودة: ${dil.dataQualityScore}/100 | بوابة KPI: ${dil.kpiQualityGatePassed ? 'مفتوحة' : 'مغلقة'}`);
@@ -62,14 +79,11 @@ export function formatStrategicOpsChatGptText(report: StrategicOpsReport): strin
   add(`  مطبّع: ${cn.codesNormalized} | مطابق: ${cn.codesMatched} | مراجعة: ${cn.codesManualReview}`);
   add();
 
-  add('── ١. إجمالي الطيارين والنشاط ──');
-  add(`إجمالي الطيارين المسجلين: ${es.totalRegisteredRiders}`);
-  add(`المعيّنون للمشرفين: ${es.totalAssignedToSupervisors}`);
-  add(`الطيارون النشطون (SUM ساعات > 0): ${es.activeRiders} (${es.activePercent}%)`);
-  add(`الطيارون غير النشطين (ساعات=٠ وطلبات=٠): ${es.inactiveRiders} (${es.inactivePercent}%)`);
-  add(`الطيارون الموقوفون (من شيت المناديب): ${es.suspendedRiders}`);
-  add(`عدد الإقالات المعتمدة: ${es.approvedResignations}`);
-  add(`معدل الاستغلال: ${es.utilizationRate}%`);
+  add('── ١. إجمالي الطيارين والنشاط (Talabat) ──');
+  add(`Headcount: ${es.totalRegisteredRiders}`);
+  add(`متوسط النشطين يومياً: ${es.activeRiders} | فريدون بالفترة: ${es.uniqueActiveRidersInPeriod}`);
+  add(`No Show يومياً: ${es.noShowRiders}`);
+  add(`تحقيق الهدف: ${es.achievementPercent}% | استغلال: ${es.utilizationRate}%`);
   add();
 
   add('── ٢. الساعات ──');
