@@ -3,6 +3,7 @@ import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { buildStrategicOpsReport } from '@/lib/strategicOps/buildReport';
+import { checkApiRateLimit, rateLimitResponse } from '@/lib/apiRateLimit';
 import {
   adminScopeHasSupervisorCode,
   getSupervisorCodesInAdminDataScope,
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest) {
 
     const decoded = verifyToken(token) as {
       role?: string;
+      code?: string;
       permissions?: string;
       dataZone?: string;
       linkedSupervisorCode?: string;
@@ -38,6 +40,12 @@ export async function GET(request: NextRequest) {
 
     const denied = assertAdminApiAccess(decoded, 'strategic_ops');
     if (denied) return denied;
+
+    const rateKey = String(decoded.code ?? decoded.role ?? 'admin');
+    const limited = checkApiRateLimit('strategic-ops', rateKey, 12, 60_000);
+    if (!limited.allowed) {
+      return NextResponse.json(rateLimitResponse(limited.retryAfterSec), { status: 429 });
+    }
 
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get('startDate');

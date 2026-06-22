@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useMemo, useState } from 'react';
 import Layout from '@/components/Layout';
 import Card from '@/components/ui-v2/Card';
@@ -7,8 +8,7 @@ import Button from '@/components/ui-v2/Button';
 import {
   ARABIC_MONTH_NAMES,
   DEDUCTION_CYCLE_LABELS,
-  type DeductionCycleKey,
-} from '@/lib/equipmentSheetConstants';
+  type DeductionCycleKey } from '@/lib/equipmentSheetConstants';
 
 const CYCLE_OPTIONS: { key: DeductionCycleKey; label: string }[] = (
   Object.entries(DEDUCTION_CYCLE_LABELS) as [DeductionCycleKey, string][]
@@ -40,33 +40,28 @@ export default function DeductionsUploadPage() {
     setLoading(true);
     setMessage(null);
     try {
-      const token = localStorage.getItem('token');
       const fd = new FormData();
       fd.append('file', file);
       fd.append('deductionCycle', deductionCycle);
       fd.append('month', month);
       fd.append('year', year);
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
-      const res = await fetch(`${origin}/api/supervisor/deductions-upload`, {
+      const res = await authFetch(`${origin}/api/supervisor/deductions-upload`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
         credentials: 'same-origin',
-        body: fd,
-      });
+        body: fd });
       const data = await res.json();
       if (!data.success) {
         setMessage({
           type: 'err',
           text: data.error || 'فشل الرفع',
-          details: data.details,
-        });
+          details: data.details });
         return;
       }
       setMessage({
         type: 'ok',
         text: `${data.message || 'تم'} (${data.imported || 0} صف)`,
-        details: data.errors,
-      });
+        details: data.errors });
       setFile(null);
     } catch (err: any) {
       setMessage({ type: 'err', text: err.message || 'خطأ' });

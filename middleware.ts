@@ -1,20 +1,11 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { applySecurityHeaders } from '@/lib/securityHeaders';
 
 export function middleware(request: NextRequest) {
-  const pathname = request.nextUrl.pathname;
-
-  if (pathname === '/' || pathname === '') {
-    return NextResponse.next();
-  }
-
-  // API auth is enforced inside each route handler (Bearer header + httpOnly cookie).
-  // Blocking here caused 401s when the edge layer could not read the session reliably.
-  if (pathname.startsWith('/api/')) {
-    return NextResponse.next();
-  }
-
-  return NextResponse.next();
+  const response = NextResponse.next();
+  const isProduction = process.env.NODE_ENV === 'production';
+  return applySecurityHeaders(response, isProduction);
 }
 
 export const config = {

@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -28,15 +29,11 @@ export default function EquipmentLimitsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['admin', 'equipment-limits'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/equipment-limits', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/equipment-limits');
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       return json.data as { supervisors: SupervisorWithLimits[] };
-    },
-  });
+    } });
 
   useEffect(() => {
     if (data?.supervisors) {
@@ -50,15 +47,11 @@ export default function EquipmentLimitsPage() {
 
   const saveMutation = useMutation({
     mutationFn: async (limits: Record<string, SupervisorLimits>) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/equipment-limits', {
+      const res = await authFetch('/api/admin/equipment-limits', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ limits }),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ limits }) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
     },
@@ -68,8 +61,7 @@ export default function EquipmentLimitsPage() {
     },
     onError: (e: Error) => {
       alert('❌ فشل الحفظ: ' + e.message);
-    },
-  });
+    } });
 
   const defaultLimitsRow: SupervisorLimits = { motorcycleBox: 0, bicycleBox: 0, tshirt: 0, jacket: 0, helmet: 0 };
 
@@ -79,9 +71,7 @@ export default function EquipmentLimitsPage() {
       ...prev,
       [code]: {
         ...(prev[code] || defaultLimitsRow),
-        [field]: value,
-      },
-    }));
+        [field]: value } }));
   };
 
   const safeNum = (n: number | undefined): number => {
@@ -99,8 +89,7 @@ export default function EquipmentLimitsPage() {
         bicycleBox: safeNum(limits.bicycleBox),
         tshirt: safeNum(limits.tshirt),
         jacket: safeNum(limits.jacket),
-        helmet: safeNum(limits.helmet),
-      };
+        helmet: safeNum(limits.helmet) };
     });
     saveMutation.mutate(toSend);
   };

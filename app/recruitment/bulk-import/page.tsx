@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import BulkImportPanel from '@/components/recruitment/BulkImportPanel';
@@ -11,15 +12,11 @@ export default function RecruitmentBulkImportPage() {
   const { data: allCandidates = [] } = useQuery({
     queryKey: ['recruitment', 'bulk-import-candidates-pool'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       const url = new URL('/api/recruitment/candidates', window.location.origin);
-      const res = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(url.toString());
       const json = await res.json();
       return json.success ? (json.data as Candidate[]) : [];
-    },
-  });
+    } });
 
   const [newCandidates, legacyCandidates] = useMemo(() => {
     const legacy = allCandidates.filter((c) => c.isLegacy);
@@ -63,8 +60,7 @@ export default function RecruitmentBulkImportPage() {
 function CandidatesPreviewTable({
   title,
   rows,
-  emptyText,
-}: {
+  emptyText }: {
   title: string;
   rows: Candidate[];
   emptyText: string;

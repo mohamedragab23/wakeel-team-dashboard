@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import { useMutation } from '@tanstack/react-query'
@@ -11,15 +12,11 @@ export default function SyncPage() {
 
   const syncMutation = useMutation({
     mutationFn: async (type: string) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/sync', {
+      const res = await authFetch('/api/sync', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ type }),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ type }) });
       return res.json();
     },
     onSuccess: (data) => {
@@ -31,8 +28,7 @@ export default function SyncPage() {
     },
     onError: (error: any) => {
       notify.error(` خطأ: ${error.message}`);
-    },
-  });
+    } });
 
   const handleSync = () => {
     if (confirm(`هل تريد مزامنة ${syncType === 'all' ? 'جميع البيانات' : syncType}؟`)) {

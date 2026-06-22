@@ -1,4 +1,5 @@
 import { cache, CACHE_KEYS } from './cache';
+import { redisCacheDelete, redisCacheGet, redisCacheSet } from './redisCache.optional';
 import {
   getMainSpreadsheetId,
   getSheetsClientFor,
@@ -20,12 +21,19 @@ export async function getSheetData(
 ): Promise<any[][]> {
   const range = rangeOverride ?? `${sheetName}!A:Z`;
   const cacheKey = rangeOverride ? `${CACHE_KEYS.sheetData(sheetName)}::${range}` : CACHE_KEYS.sheetData(sheetName);
+  const sheetTtlMs = 15 * 60 * 1000;
 
   // Check server-side cache first
   if (useCache) {
     const cached = cache.get<any[][]>(cacheKey);
     if (cached) {
       return cached;
+    }
+
+    const fromRedis = await redisCacheGet<any[][]>(cacheKey);
+    if (fromRedis) {
+      cache.set(cacheKey, fromRedis, sheetTtlMs);
+      return fromRedis;
     }
   }
 
@@ -46,7 +54,8 @@ export async function getSheetData(
     
     // Cache the data for 15 minutes (optimized for mobile performance)
     if (useCache) {
-      cache.set(cacheKey, data, 15 * 60 * 1000);
+      cache.set(cacheKey, data, sheetTtlMs);
+      void redisCacheSet(cacheKey, data, sheetTtlMs);
     }
     
     return data;

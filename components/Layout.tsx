@@ -11,8 +11,11 @@ import {
   isGrantingAdmin,
 } from '@/lib/adminFeatureAccess';
 import { hasRecruitmentAccess } from '@/lib/recruitment/recruitmentAuth';
+import { hasTicketingAccess } from '@/lib/ticketing/ticketingAuth';
 import RecruitmentNotificationBell from '@/components/recruitment/RecruitmentNotificationBell';
+import TicketingNotificationBell from '@/components/ticketing/TicketingNotificationBell';
 import { authFetch, clearClientSession } from '@/lib/authFetch';
+import { getStoredUser, setStoredUser } from '@/lib/clientSession';
 
 const RECRUITMENT_MENU = [
   { href: '/recruitment', label: 'لوحة التعيين', icon: '📊' },
@@ -42,14 +45,6 @@ export default function Layout({ children }: LayoutProps) {
     let cancelled = false;
 
     async function guardSession() {
-      const token = localStorage.getItem('token');
-      const userStr = localStorage.getItem('user');
-
-      if (!token) {
-        router.push('/');
-        return;
-      }
-
       try {
         const res = await authFetch('/api/auth/verify');
         if (!res.ok) {
@@ -58,44 +53,46 @@ export default function Layout({ children }: LayoutProps) {
           router.push('/');
           return;
         }
-      } catch {
-        // Network blip — keep local session; data fetches will surface errors.
-      }
 
-      if (cancelled) return;
+        const verified = (await res.json()) as User;
+        if (cancelled) return;
 
-      if (userStr) {
-        try {
-          const parsedUser = JSON.parse(userStr) as User;
-          setUser(parsedUser);
+        setStoredUser(verified);
+        setUser(verified);
 
-          if (
-            pathname?.startsWith('/admin') &&
-            parsedUser?.role !== 'admin' &&
-            !(parsedUser?.role === 'supervisor' && pathname?.startsWith('/admin/rider-strategic-profiles'))
-          ) {
-            clearClientSession();
-            router.push('/');
-            return;
-          }
-          if (parsedUser?.role === 'recruitment_manager' && pathname?.startsWith('/admin')) {
-            router.push('/recruitment');
-            return;
-          }
-          if (
-            pathname?.startsWith('/recruitment') &&
-            !hasRecruitmentAccess(parsedUser as { role?: string; permissions?: string })
-          ) {
-            router.push(parsedUser?.role === 'admin' ? '/admin/dashboard' : '/dashboard');
-            return;
-          }
-        } catch {
+        if (
+          pathname?.startsWith('/admin') &&
+          verified?.role !== 'admin' &&
+          !(verified?.role === 'supervisor' && pathname?.startsWith('/admin/rider-strategic-profiles'))
+        ) {
           clearClientSession();
           router.push('/');
+          return;
         }
-      } else if (pathname?.startsWith('/admin')) {
-        clearClientSession();
-        router.push('/');
+        if (verified?.role === 'recruitment_manager' && pathname?.startsWith('/admin')) {
+          router.push('/recruitment');
+          return;
+        }
+        if (
+          pathname?.startsWith('/recruitment') &&
+          !hasRecruitmentAccess(verified as { role?: string; permissions?: string })
+        ) {
+          router.push(verified?.role === 'admin' ? '/admin/dashboard' : '/dashboard');
+          return;
+        }
+        if (
+          pathname?.startsWith('/ticketing') &&
+          !hasTicketingAccess(verified as { role?: string; permissions?: string })
+        ) {
+          router.push(verified?.role === 'admin' ? '/admin/dashboard' : '/dashboard');
+          return;
+        }
+      } catch {
+        const cached = getStoredUser();
+        if (cached) setUser(cached);
+        else if (pathname?.startsWith('/admin')) {
+          router.push('/');
+        }
       }
     }
 
@@ -145,6 +142,8 @@ export default function Layout({ children }: LayoutProps) {
         { href: '/performance', label: 'الأداء', icon: '📈' },
         { href: '/salary', label: 'الراتب', icon: '💰' },
         { href: '/shifts', label: 'الشفتات', icon: '🕒' },
+        { href: '/ticketing/my', label: 'التذاكر التشغيلية', icon: '🎫' },
+        { href: '/ticketing/new', label: 'طلب تشغيلي جديد', icon: '➕' },
       ];
     }
   };
@@ -188,6 +187,9 @@ export default function Layout({ children }: LayoutProps) {
               {(user?.role === 'recruitment_manager' ||
                 (user?.role === 'admin' && adminCanAccessRecruitment(user?.permissions))) && (
                 <RecruitmentNotificationBell />
+              )}
+              {hasTicketingAccess(user as { role?: string; permissions?: string }) && (
+                <TicketingNotificationBell />
               )}
             </div>
 

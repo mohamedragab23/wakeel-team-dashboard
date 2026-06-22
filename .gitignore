@@ -14,9 +14,11 @@
 
 # production
 /build
+/exports/
 
 # misc
 .DS_Store
+.data/
 *.pem
 
 # debug

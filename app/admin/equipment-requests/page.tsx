@@ -1,5 +1,7 @@
 'use client';
 
+import { getStoredUser } from '@/lib/clientSession';
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Layout from '@/components/Layout';
@@ -60,14 +62,13 @@ export default function AdminEquipmentRequestsPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const userStr = localStorage.getItem('user');
-    if (!token || !userStr) {
+    const u = getStoredUser();
+    if (!u) {
       router.replace('/');
       return;
     }
     try {
-      const u = JSON.parse(userStr) as { role?: string; permissions?: string };
+      const u = getStoredUser() as { role?: string; permissions?: string };
       if (u.role !== 'admin') {
         router.replace('/dashboard');
         return;
@@ -84,66 +85,52 @@ export default function AdminEquipmentRequestsPage() {
     queryKey: ['equipment-deliveries', statusFilter],
     enabled: authChecked,
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       const url = new URL('/api/equipment-deliveries', window.location.origin);
       if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
-      const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+      const res = await authFetch(url.toString());
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل التحميل');
       return data.data as DeliveryReq[];
-    },
-  });
+    } });
 
   const returnsQuery = useQuery({
     queryKey: ['equipment-returns', statusFilter],
     enabled: authChecked,
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       const url = new URL('/api/equipment-returns', window.location.origin);
       if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
-      const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+      const res = await authFetch(url.toString());
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل التحميل');
       return data.data as ReturnReq[];
-    },
-  });
+    } });
 
   const allDeliveriesQuery = useQuery({
     queryKey: ['equipment-deliveries', 'all-summary'],
     enabled: authChecked && tab === 'summary',
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/equipment-deliveries?status=', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/equipment-deliveries?status=');
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
       return data.data as DeliveryReq[];
-    },
-  });
+    } });
 
   const allReturnsQuery = useQuery({
     queryKey: ['equipment-returns', 'all-summary'],
     enabled: authChecked && tab === 'summary',
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/equipment-returns?status=', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/equipment-returns?status=');
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
       return data.data as ReturnReq[];
-    },
-  });
+    } });
 
   const approveDel = useMutation({
     mutationFn: async ({ id, action, rejectReason }: { id: number; action: 'approve' | 'reject'; rejectReason?: string }) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/equipment-deliveries', {
+      const res = await authFetch('/api/equipment-deliveries', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ requestId: id, action, rejectReason }),
-      });
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: id, action, rejectReason }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
       return data;
@@ -151,17 +138,14 @@ export default function AdminEquipmentRequestsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['equipment-deliveries'] });
       queryClient.invalidateQueries({ queryKey: ['equipment-pending-count'] });
-    },
-  });
+    } });
 
   const approveRet = useMutation({
     mutationFn: async ({ id, action, rejectReason }: { id: number; action: 'approve' | 'reject'; rejectReason?: string }) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/equipment-returns', {
+      const res = await authFetch('/api/equipment-returns', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ requestId: id, action, rejectReason }),
-      });
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: id, action, rejectReason }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
       return data;
@@ -169,8 +153,7 @@ export default function AdminEquipmentRequestsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['equipment-returns'] });
       queryClient.invalidateQueries({ queryKey: ['equipment-pending-count'] });
-    },
-  });
+    } });
 
   const summaryRows = useMemo(() => {
     const d = allDeliveriesQuery.data || [];
@@ -337,8 +320,7 @@ export default function AdminEquipmentRequestsPage() {
                                   { id: row.id, action: 'approve' },
                                   {
                                     onError: (e: Error) => alert(e.message),
-                                    onSuccess: () => alert('تمت الموافقة'),
-                                  }
+                                    onSuccess: () => alert('تمت الموافقة') }
                                 )
                               }
                             >
@@ -354,8 +336,7 @@ export default function AdminEquipmentRequestsPage() {
                                   { id: row.id, action: 'reject', rejectReason: reason },
                                   {
                                     onError: (e: Error) => alert(e.message),
-                                    onSuccess: () => alert('تم الرفض'),
-                                  }
+                                    onSuccess: () => alert('تم الرفض') }
                                 );
                               }}
                             >
@@ -423,8 +404,7 @@ export default function AdminEquipmentRequestsPage() {
                                   { id: row.id, action: 'approve' },
                                   {
                                     onError: (e: Error) => alert(e.message),
-                                    onSuccess: () => alert('تمت الموافقة'),
-                                  }
+                                    onSuccess: () => alert('تمت الموافقة') }
                                 )
                               }
                             >
@@ -440,8 +420,7 @@ export default function AdminEquipmentRequestsPage() {
                                   { id: row.id, action: 'reject', rejectReason: reason },
                                   {
                                     onError: (e: Error) => alert(e.message),
-                                    onSuccess: () => alert('تم الرفض'),
-                                  }
+                                    onSuccess: () => alert('تم الرفض') }
                                 );
                               }}
                             >

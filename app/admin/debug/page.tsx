@@ -1,5 +1,7 @@
 'use client';
 
+import { getStoredUser } from '@/lib/clientSession';
+import { authFetch } from '@/lib/authFetch';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Layout from '@/components/Layout';
@@ -19,15 +21,14 @@ export default function AdminDebugPage() {
   const [resetResult, setResetResult] = useState<any>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const userStr = localStorage.getItem('user');
-    if (!token || !userStr) {
+    const u = getStoredUser();
+    if (!u) {
       router.replace('/');
       setAuthChecked(true);
       return;
     }
     try {
-      const u = JSON.parse(userStr) as { role?: string };
+      const u = getStoredUser() as { role?: string };
       if (u.role !== 'admin') {
         router.replace('/dashboard');
         setAuthChecked(true);
@@ -44,28 +45,18 @@ export default function AdminDebugPage() {
   const { data: debugData, isLoading, refetch } = useQuery({
     queryKey: ['admin', 'debug', action, supervisorCode, startDate, endDate],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       let url = `/api/admin/debug?action=${action}`;
       if (action === 'supervisor' && supervisorCode) {
         url += `&supervisorCode=${supervisorCode}&startDate=${startDate}&endDate=${endDate}`;
       }
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(url);
       const data = await res.json();
       return data;
     },
     enabled:
-      adminOk && (action === 'performance' || (action === 'supervisor' && !!supervisorCode)),
-  });
+      adminOk && (action === 'performance' || (action === 'supervisor' && !!supervisorCode)) });
 
   const runSystemReset = async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      notify.error(' لم يتم العثور على رمز الدخول. يرجى تسجيل الدخول مرة أخرى.');
-      return;
-    }
-
     const firstConfirm = confirm(
       '⚠️ تهيئة النظام ستقوم بتصفير البيانات التشغيلية (المناديب/الأداء/الطلبات/الديون/الخصومات...). هل تريد المتابعة؟'
     );
@@ -79,14 +70,10 @@ export default function AdminDebugPage() {
     setResetLoading(true);
     setResetResult(null);
     try {
-      const res = await fetch('/api/admin/system/reset', {
+      const res = await authFetch('/api/admin/system/reset', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ target: 'all', keepHeaderRow: true }),
-      });
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: 'all', keepHeaderRow: true }) });
 
       const data = await res.json();
       setResetResult(data);

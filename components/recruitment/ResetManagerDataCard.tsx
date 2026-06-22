@@ -1,5 +1,7 @@
 'use client';
 
+import { getStoredUser } from '@/lib/clientSession';
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Card from '@/components/ui-v2/Card';
@@ -20,7 +22,7 @@ export default function ResetManagerDataCard() {
 
   useEffect(() => {
     try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const user = getStoredUser() || {};
       setIsAdmin(user.role === 'admin');
     } catch {
       setIsAdmin(false);
@@ -37,14 +39,10 @@ export default function ResetManagerDataCard() {
     queryKey: ['recruitment', 'managers-list'],
     enabled: isAdmin,
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/managers', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/recruitment/managers');
       const json = await res.json();
       return json.success ? (json.data as Array<{ code: string; name: string }>) : [];
-    },
-  });
+    } });
 
   if (!isAdmin) return null;
 
@@ -64,15 +62,11 @@ export default function ResetManagerDataCard() {
     setLoading(true);
     setSummary('');
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/reset-manager-data', {
+      const res = await authFetch('/api/recruitment/reset-manager-data', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ managerCode, clearAll }),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ managerCode, clearAll }) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل تصفير البيانات');
       const data = json.data as {
@@ -87,8 +81,7 @@ export default function ResetManagerDataCard() {
       await queryClient.invalidateQueries({ queryKey: ['recruitment'] });
       setToast({
         type: 'success',
-        text: clearAll ? 'تم مسح كل داتا التعيينات بنجاح' : 'تم تصفير بيانات مسؤول التعيينات بنجاح',
-      });
+        text: clearAll ? 'تم مسح كل داتا التعيينات بنجاح' : 'تم تصفير بيانات مسؤول التعيينات بنجاح' });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'حدث خطأ';
       setToast({ type: 'error', text: msg });

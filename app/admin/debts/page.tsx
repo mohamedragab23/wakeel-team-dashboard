@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import Layout from '@/components/Layout';
 import { useQuery } from '@tanstack/react-query';
 import { TableSkeleton } from '@/components/SkeletonLoader';
@@ -8,14 +9,10 @@ export default function AdminDebtsPage() {
   const { data: debts = [], isLoading } = useQuery({
     queryKey: ['admin', 'debts'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/debts', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/debts');
       const data = await res.json();
       return data.success ? data.data : [];
-    },
-  });
+    } });
 
   const totalDebts = debts.reduce((sum: number, debt: any) => sum + (debt.amount || 0), 0);
 

@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState, useEffect } from 'react';
 import Button from '@/components/ui-v2/Button';
 import type { Candidate } from '@/lib/recruitment/types';
@@ -10,8 +11,7 @@ import {
   EQUIPMENT_STATUS_VALUES,
   HIRING_DECISION_VALUES,
   LECTURE_ATTENDANCE_VALUES,
-  VEHICLE_TYPE_VALUES,
-} from '@/lib/recruitment/types';
+  VEHICLE_TYPE_VALUES } from '@/lib/recruitment/types';
 import { ZONE_OPTIONS } from '@/lib/zones';
 
 type Props = {
@@ -39,15 +39,11 @@ export default function CandidateEditModal({ candidate, open, onClose, onSaved }
     setLoading(true);
     setError('');
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/recruitment/candidates/${candidate.id}`, {
+      const res = await authFetch(`/api/recruitment/candidates/${candidate.id}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(form),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify(form) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل الحفظ');
       onSaved();
@@ -344,8 +340,7 @@ export default function CandidateEditModal({ candidate, open, onClose, onSaved }
 function Field({
   label,
   children,
-  className = '',
-}: {
+  className = '' }: {
   label: string;
   children: React.ReactNode;
   className?: string;

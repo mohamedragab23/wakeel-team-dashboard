@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useMemo, useState, type ReactNode } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery } from '@tanstack/react-query';
@@ -11,8 +12,7 @@ import type { StrategicOpsReport } from '@/lib/strategicOps/buildReport';
 import {
   exportStrategicOpsExcel,
   exportStrategicOpsPdf,
-  copyStrategicOpsText,
-} from '@/lib/strategicOps/clientExport';
+  copyStrategicOpsText } from '@/lib/strategicOps/clientExport';
 import {
   Bar,
   BarChart,
@@ -26,8 +26,7 @@ import {
   ResponsiveContainer,
   Tooltip,
   XAxis,
-  YAxis,
-} from 'recharts';
+  YAxis } from 'recharts';
 
 const BUCKET_COLORS = ['#64748b', '#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#8b5cf6'];
 
@@ -58,8 +57,7 @@ function RiskBadge({ level }: { level: 'green' | 'yellow' | 'red' }) {
   const colors = {
     green: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
     yellow: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-    red: 'bg-red-500/20 text-red-300 border-red-500/40',
-  };
+    red: 'bg-red-500/20 text-red-300 border-red-500/40' };
   const labels = { green: 'منخفض', yellow: 'متوسط', red: 'مرتفع' };
   return <span className={`px-2 py-0.5 rounded-full text-xs border ${colors[level]}`}>{labels[level]}</span>;
 }
@@ -106,8 +104,7 @@ function TalabatKpiCard({
   label,
   value,
   sub,
-  trace,
-}: {
+  trace }: {
   label: string;
   value: string | number;
   sub?: string;
@@ -174,41 +171,32 @@ export default function StrategicOpsCenterPage() {
   const { data: supervisorsList } = useQuery({
     queryKey: ['admin', 'supervisors-list'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/supervisors', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/supervisors');
       const json = await res.json();
       if (!json.success) return [];
       return (json.data ?? []) as Array<{ code: string; name: string; region: string }>;
     },
-    staleTime: 5 * 60 * 1000,
-  });
+    staleTime: 5 * 60 * 1000 });
 
   const { data: report, isLoading, isFetching, error } = useQuery({
     queryKey: ['admin', 'strategic-ops', requestFilters],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       const q = new URLSearchParams({
         startDate: requestFilters!.startDate,
         endDate: requestFilters!.endDate,
         zone: requestFilters!.zone,
-        supervisorCode: requestFilters!.supervisorCode,
-      });
+        supervisorCode: requestFilters!.supervisorCode });
       if (requestFilters!.talabatActive) q.set('talabatActive', requestFilters!.talabatActive);
       if (requestFilters!.talabatNoShow) q.set('talabatNoShow', requestFilters!.talabatNoShow);
       if (requestFilters!.talabatHours) q.set('talabatHours', requestFilters!.talabatHours);
       if (requestFilters!.talabatAchievement) q.set('talabatAchievement', requestFilters!.talabatAchievement);
-      const res = await fetch(`/api/admin/strategic-ops?${q}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`/api/admin/strategic-ops?${q}`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل تحميل التقرير');
       return json.data as StrategicOpsReport;
     },
     enabled: !!requestFilters,
-    staleTime: 2 * 60 * 1000,
-  });
+    staleTime: 2 * 60 * 1000 });
 
   const supervisorsFiltered = useMemo(() => {
     if (!supervisorsList) return [];
@@ -235,8 +223,7 @@ export default function StrategicOpsCenterPage() {
       talabatActive: talabatActive.trim() || undefined,
       talabatNoShow: talabatNoShow.trim() || undefined,
       talabatHours: talabatHours.trim() || undefined,
-      talabatAchievement: talabatAchievement.trim() || undefined,
-    });
+      talabatAchievement: talabatAchievement.trim() || undefined });
   };
 
   const loading = isLoading || isFetching;

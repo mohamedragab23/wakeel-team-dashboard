@@ -1,5 +1,7 @@
 'use client';
 
+import { getStoredUser } from '@/lib/clientSession';
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useMemo, useState } from 'react';
 import Layout from '@/components/Layout';
 import SupervisorTableSection from '@/components/SupervisorTableSection';
@@ -17,8 +19,7 @@ import {
   ResponsiveContainer,
   Tooltip,
   XAxis,
-  YAxis,
-} from 'recharts';
+  YAxis } from 'recharts';
 
 type ShiftsTab = 'upload' | 'overview' | 'hours' | 'unassigned' | 'supervisors';
 
@@ -90,7 +91,7 @@ export default function ShiftsPage() {
 
   useEffect(() => {
     try {
-      const u = JSON.parse(localStorage.getItem('user') || 'null');
+      const u = getStoredUser();
       setIsAdmin(u?.role === 'admin');
     } catch {
       setIsAdmin(false);
@@ -101,10 +102,7 @@ export default function ShiftsPage() {
     if (!isAdmin) return;
     (async () => {
       try {
-        const token = localStorage.getItem('token');
-        const res = await fetch('/api/admin/supervisor-zone-map', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await authFetch('/api/admin/supervisor-zone-map');
         const j = await res.json();
         if (j.success) setZoneMap(Array.isArray(j.data) ? j.data : []);
       } catch {
@@ -170,7 +168,6 @@ export default function ShiftsPage() {
     setLoading(true);
     setMessage(null);
     try {
-      const token = localStorage.getItem('token');
       const fd = new FormData();
       for (const f of selectedFiles) fd.append('files', f);
 
@@ -181,11 +178,9 @@ export default function ShiftsPage() {
       }
       for (const d of pickedDates) q.append('dates', d);
 
-      const res = await fetch(`/api/shifts/legacy-analyze?${q.toString()}`, {
+      const res = await authFetch(`/api/shifts/legacy-analyze?${q.toString()}`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
+        body: fd });
       const data = await res.json();
       if (!data.success) {
         setMessage({ type: 'err', text: data.error || 'فشل التحليل' });
@@ -386,8 +381,7 @@ export default function ShiftsPage() {
                       data={datesUsed.map((d) => ({
                         date: d,
                         assigned: displayMetricsByDate?.[d]?.booked ?? 0,
-                        unassigned: displayMetricsByDate?.[d]?.notBooked ?? 0,
-                      }))}
+                        unassigned: displayMetricsByDate?.[d]?.notBooked ?? 0 }))}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                       <XAxis dataKey="date" stroke="rgba(234,240,255,0.6)" />
@@ -583,8 +577,7 @@ export default function ShiftsPage() {
                           الحاجزين: String(r.booked),
                           'غير الحاجزين': String(r.notBooked),
                           'نسبة الحاجزين': `${Number(r.pct || 0).toFixed(1)}%`,
-                          'إجمالي ساعات الحاجزين': Number(r.totalBookedHours || 0).toFixed(2),
-                        }))
+                          'إجمالي ساعات الحاجزين': Number(r.totalBookedHours || 0).toFixed(2) }))
                       }
                       exportDisabled={
                         !(displayReports.supervisorSummaryByDate?.[activeScope]?.length)

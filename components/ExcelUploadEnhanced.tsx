@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 
@@ -21,8 +22,7 @@ export default function ExcelUploadEnhanced({ type, performanceDate, onSuccess, 
 
   const typeLabels = {
     riders: { label: 'المناديب', accept: '.xlsx,.xls', template: '/templates/riders-template.xlsx' },
-    performance: { label: 'بيانات الأداء', accept: '.xlsx,.xls', template: '/templates/performance-template.xlsx' },
-  };
+    performance: { label: 'بيانات الأداء', accept: '.xlsx,.xls', template: '/templates/performance-template.xlsx' } };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -38,8 +38,7 @@ export default function ExcelUploadEnhanced({ type, performanceDate, onSuccess, 
     setPreview({
       name: selectedFile.name,
       size: selectedFile.size > 1024 * 1024 ? `${fileSizeMB} MB` : `${fileSizeKB} KB`,
-      type: selectedFile.type,
-    });
+      type: selectedFile.type });
   }, []);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -128,8 +127,7 @@ export default function ExcelUploadEnhanced({ type, performanceDate, onSuccess, 
         jsonData = XLSX.utils.sheet_to_json(worksheet, {
           header: 1,
           defval: '',
-          raw: true,
-        }) as any[][];
+          raw: true }) as any[][];
 
         // Only log for large files
         if (jsonData.length > 1000) {
@@ -145,36 +143,16 @@ export default function ExcelUploadEnhanced({ type, performanceDate, onSuccess, 
       }
 
       setUploadProgress(30); // File processed
-
-      const token = localStorage.getItem('token');
-      
-      if (!token) {
-        const errorMsg = 'لم يتم العثور على رمز المصادقة. يرجى تسجيل الخروج ثم الدخول مرة أخرى.';
-        setResult({ success: false, error: errorMsg });
-        onError?.(errorMsg);
-        setUploading(false);
-        // Redirect to login after 2 seconds
-        setTimeout(() => {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          window.location.href = '/';
-        }, 2000);
-        return;
-      }
-
       setUploadProgress(50); // Data prepared
 
       // Riders: send full file in one request (header must be row 0; chunking would break column detection)
       if (type === 'riders') {
         try {
-          const response = await fetch('/api/admin/upload', {
+          const response = await authFetch('/api/admin/upload', {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ type: 'riders', data: jsonData }),
-          });
+              'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'riders', data: jsonData }) });
           const data = await response.json();
           setUploadProgress(100);
           if (!response.ok) {
@@ -182,8 +160,7 @@ export default function ExcelUploadEnhanced({ type, performanceDate, onSuccess, 
               success: false,
               error: data.error || 'فشل رفع الملف',
               errors: data.errors || [],
-              warnings: data.warnings || [],
-            });
+              warnings: data.warnings || [] });
             onError?.(data.error || 'فشل رفع الملف');
             return;
           }
@@ -193,8 +170,7 @@ export default function ExcelUploadEnhanced({ type, performanceDate, onSuccess, 
             added: data.added ?? 0,
             failed: data.failed ?? 0,
             warnings: data.warnings || [],
-            errors: data.errors || [],
-          });
+            errors: data.errors || [] });
           onSuccess?.(data);
           if (data.success !== false && data.added > 0) {
             setTimeout(() => { setFile(null); setPreview(null); }, 3000);
@@ -231,21 +207,17 @@ export default function ExcelUploadEnhanced({ type, performanceDate, onSuccess, 
           isLastChunk: chunkIndex === totalChunks - 1,
           ...(type === 'performance' && performanceDate && performanceDate.trim() !== ''
             ? { performanceDate: performanceDate.trim() }
-            : {}),
-        };
+            : {}) };
 
         const chunkProgress = 50 + Math.floor((chunkIndex / totalChunks) * 40);
         setUploadProgress(chunkProgress);
 
         try {
-          const response = await fetch('/api/admin/upload', {
+          const response = await authFetch('/api/admin/upload', {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(requestBody),
-          });
+              'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody) });
 
           if (!response.ok) {
             const errorData = await response.json().catch(() => ({ error: 'خطأ غير معروف' }));
@@ -285,8 +257,7 @@ export default function ExcelUploadEnhanced({ type, performanceDate, onSuccess, 
         added: totalProcessed,
         failed: 0,
         warnings: allWarnings,
-        errors: [] as string[],
-      };
+        errors: [] as string[] };
       const data = response;
       setUploadProgress(100);
 
@@ -297,8 +268,7 @@ export default function ExcelUploadEnhanced({ type, performanceDate, onSuccess, 
           added: data.added || data.rows || 0,
           failed: data.failed || 0,
           warnings: data.warnings || [],
-          errors: data.errors || [],
-        });
+          errors: data.errors || [] });
         onSuccess?.(data);
         setTimeout(() => { setFile(null); setPreview(null); }, 3000);
       } else {
@@ -306,8 +276,7 @@ export default function ExcelUploadEnhanced({ type, performanceDate, onSuccess, 
           success: false,
           error: 'فشل رفع الملف',
           errors: data.errors || [],
-          warnings: data.warnings || [],
-        });
+          warnings: data.warnings || [] });
         onError?.('فشل رفع الملف');
       }
     } catch (error: any) {

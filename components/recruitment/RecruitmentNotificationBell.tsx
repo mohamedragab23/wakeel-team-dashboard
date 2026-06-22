@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -11,30 +12,22 @@ export default function RecruitmentNotificationBell() {
   const { data } = useQuery({
     queryKey: ['recruitment', 'notifications'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/notifications', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/recruitment/notifications');
       const json = await res.json();
       if (!json.success) return { data: [], unread: 0 };
       return { data: json.data, unread: json.unread ?? 0 };
     },
-    refetchInterval: 2 * 60 * 1000,
-  });
+    refetchInterval: 2 * 60 * 1000 });
 
   const unread = data?.unread ?? 0;
   const items = data?.data ?? [];
 
   const markRead = async (id: string) => {
-    const token = localStorage.getItem('token');
-    await fetch('/api/recruitment/notifications', {
+    await authFetch('/api/recruitment/notifications', {
       method: 'PATCH',
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ id }),
-    });
+        'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }) });
     queryClient.invalidateQueries({ queryKey: ['recruitment', 'notifications'] });
   };
 

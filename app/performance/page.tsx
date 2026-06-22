@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import PerformanceChart from '@/components/PerformanceChart';
@@ -23,13 +24,8 @@ export default function PerformancePage() {
   const { data: performanceStats, isLoading } = useQuery({
     queryKey: ['supervisor', 'performance', startDate, endDate],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch(
-        `/api/performance?startDate=${startDate}&endDate=${endDate}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const res = await authFetch(
+        `/api/performance?startDate=${startDate}&endDate=${endDate}`);
       const data = await res.json();
       if (data.success && data.data) {
         return {
@@ -43,8 +39,7 @@ export default function PerformancePage() {
           totalAbsences: data.data.totalAbsences || 0,
           totalBreaks: data.data.totalBreaks || 0,
           bestDay: data.data.bestDay || null,
-          target: data.data.target || null,
-        };
+          target: data.data.target || null };
       }
       return {
         labels: [],
@@ -56,8 +51,7 @@ export default function PerformancePage() {
         totalAbsences: 0,
         totalBreaks: 0,
         bestDay: null,
-        target: null,
-      };
+        target: null };
     },
     enabled: !!startDate && !!endDate,
     staleTime: 10 * 60 * 1000, // 10 minutes (optimized for mobile)
@@ -77,8 +71,7 @@ export default function PerformancePage() {
   const bestDay = bestDayIndex !== undefined && bestDayIndex >= 0 && performanceStats?.labels?.[bestDayIndex] ? {
     date: performanceStats.labels[bestDayIndex],
     orders: performanceStats.orders[bestDayIndex],
-    hours: performanceStats.hours?.[bestDayIndex] || 0,
-  } : null;
+    hours: performanceStats.hours?.[bestDayIndex] || 0 } : null;
 
   return (
     <Layout>

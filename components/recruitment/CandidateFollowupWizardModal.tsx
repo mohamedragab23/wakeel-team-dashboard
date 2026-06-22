@@ -1,5 +1,7 @@
 'use client';
 
+import { getStoredUser } from '@/lib/clientSession';
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Button from '@/components/ui-v2/Button';
@@ -8,8 +10,7 @@ import {
   CONFIRMATION_VALUES,
   EQUIPMENT_STATUS_VALUES,
   HIRING_DECISION_VALUES,
-  OFFICE_MANAGER_ASSIGNMENT_OPTION,
-} from '@/lib/recruitment/types';
+  OFFICE_MANAGER_ASSIGNMENT_OPTION } from '@/lib/recruitment/types';
 import { ZONE_OPTIONS } from '@/lib/zones';
 
 type Props = {
@@ -45,22 +46,17 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
     riderCode: '',
     riderName: '',
     zone: (ZONE_OPTIONS[0] as string) || '',
-    supervisorCode: '',
-  });
+    supervisorCode: '' });
   const canManageFinalAssignment = userRole === 'admin' || userRole === 'recruitment_manager';
 
   const { data: supervisors = [] } = useQuery({
     queryKey: ['recruitment', 'operational-supervisors'],
     enabled: open,
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/supervisors', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/recruitment/supervisors');
       const json = await res.json();
       return json.success ? (json.data as Array<{ code: string; name: string }>) : [];
-    },
-  });
+    } });
 
   useEffect(() => {
     if (candidate) {
@@ -77,10 +73,9 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
         supervisorCode:
           candidate.finalAssignedSupervisorCode ||
           candidate.assignedSupervisorCode ||
-          '',
-      });
+          '' });
       try {
-        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        const user = getStoredUser() || {};
         setUserRole(String(user.role ?? ''));
       } catch {
         setUserRole('');
@@ -126,18 +121,15 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
         {
           key: 'decision',
           label: 'قرار التشغيل',
-          state: (step > 1 ? 'done' : step === 1 ? 'current' : 'upcoming') as ProgressState,
-        },
+          state: (step > 1 ? 'done' : step === 1 ? 'current' : 'upcoming') as ProgressState },
         {
           key: 'lecture',
           label: 'المحاضرة',
-          state: (step > 2 ? 'done' : step === 2 ? 'current' : 'upcoming') as ProgressState,
-        },
+          state: (step > 2 ? 'done' : step === 2 ? 'current' : 'upcoming') as ProgressState },
         {
           key: 'activation',
           label: 'التفعيل',
-          state: (step > 3 ? 'done' : step === 3 ? 'current' : 'upcoming') as ProgressState,
-        },
+          state: (step > 3 ? 'done' : step === 3 ? 'current' : 'upcoming') as ProgressState },
         {
           key: 'adminRequest',
           label: 'طلب الأدمن',
@@ -145,13 +137,11 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
             ? 'done'
             : activationDone && step >= 3
               ? 'current'
-              : 'blocked') as ProgressState,
-        },
+              : 'blocked') as ProgressState },
         {
           key: 'equipment',
           label: 'الاستلام',
-          state: (step === 4 ? 'current' : step > 4 ? 'done' : 'upcoming') as ProgressState,
-        },
+          state: (step === 4 ? 'current' : step > 4 ? 'done' : 'upcoming') as ProgressState },
       ] as Array<{ key: string; label: string; state: ProgressState }>,
     [activationDone, requestSuccess, step]
   );
@@ -167,15 +157,11 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
         const reasonText = `سبب عدم التفعيل: ${activationRejectReason.trim()}`;
         payload.notes = [form.notes?.trim(), reasonText].filter(Boolean).join(' | ');
       }
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/recruitment/candidates/${candidate.id}`, {
+      const res = await authFetch(`/api/recruitment/candidates/${candidate.id}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify(payload) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل الحفظ');
       onSaved();
@@ -200,22 +186,17 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
     setRequestError('');
     setRequestSuccess('');
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/assignment-requests', {
+      const res = await authFetch('/api/assignment-requests', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+          'Content-Type': 'application/json' },
         body: JSON.stringify({
           riderCode,
           riderName,
           zone,
           supervisorCode,
           source: 'recruitment',
-          candidateId: candidate.id,
-        }),
-      });
+          candidateId: candidate.id }) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل إرسال طلب التعيين');
       setRequestSuccess('تم إرسال الطلب للإدارة بنجاح. سيظهر في صفحة طلبات التعيين لدى الأدمن.');
@@ -527,8 +508,7 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
 
 function Field({
   label,
-  children,
-}: {
+  children }: {
   label: string;
   children: React.ReactNode;
 }) {
@@ -541,8 +521,7 @@ function Field({
 }
 
 function WizardProgress({
-  stages,
-}: {
+  stages }: {
   stages: Array<{ key: string; label: string; state: ProgressState }>;
 }) {
   const cls = (state: ProgressState) => {

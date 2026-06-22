@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import PerformanceManualImport from '@/components/admin/PerformanceManualImport';
@@ -15,17 +16,13 @@ export default function AdminPerformancePage() {
   const { data: performanceStats } = useQuery({
     queryKey: ['admin', 'performance-stats'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/performance/stats', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/performance/stats');
       const data = await res.json();
       return data.success ? data.data : null;
     },
     staleTime: 10 * 60 * 1000, // 10 minutes (optimized for mobile)
     gcTime: 30 * 60 * 1000, // 30 minutes
-    refetchOnMount: false,
-  });
+    refetchOnMount: false });
 
   return (
     <Layout>
@@ -72,15 +69,11 @@ export default function AdminPerformancePage() {
                 if (!confirmed) return;
                 setDeletingDay(true);
                 try {
-                  const token = localStorage.getItem('token');
-                  const res = await fetch('/api/admin/performance/delete-day', {
+                  const res = await authFetch('/api/admin/performance/delete-day', {
                     method: 'POST',
                     headers: {
-                      'Content-Type': 'application/json',
-                      Authorization: `Bearer ${token}`,
-                    },
-                    body: JSON.stringify({ date: performanceDate }),
-                  });
+                      'Content-Type': 'application/json' },
+                    body: JSON.stringify({ date: performanceDate }) });
                   const text = await res.text();
                   const data = (() => {
                     try {
@@ -136,13 +129,8 @@ export default function AdminPerformancePage() {
 
               setClearing(true);
               try {
-                const token = localStorage.getItem('token');
-                const response = await fetch('/api/admin/performance/clear', {
-                  method: 'POST',
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                  },
-                });
+                const response = await authFetch('/api/admin/performance/clear', {
+                  method: 'POST' });
 
                 const data = await response.json();
 

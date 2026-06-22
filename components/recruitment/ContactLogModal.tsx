@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState } from 'react';
 import Button from '@/components/ui-v2/Button';
 import type { Candidate } from '@/lib/recruitment/types';
@@ -61,13 +62,10 @@ export default function ContactLogModal({ candidate, open, onClose, onSaved }: P
     setLoading(true);
     setError('');
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/recruitment/candidates/${candidate.id}/contact`, {
+      const res = await authFetch(`/api/recruitment/candidates/${candidate.id}/contact`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+          'Content-Type': 'application/json' },
         body: JSON.stringify({
           contactStatus,
           contactDate,
@@ -75,9 +73,7 @@ export default function ContactLogModal({ candidate, open, onClose, onSaved }: P
           hiringDecision,
           notHiredReason,
           lecturePlannedDate,
-          notes,
-        }),
-      });
+          notes }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل التسجيل');
       onSaved();

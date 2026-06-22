@@ -1,5 +1,7 @@
 'use client';
 
+import { getStoredUser } from '@/lib/clientSession';
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Layout from '@/components/Layout';
@@ -8,8 +10,7 @@ import Button from '@/components/ui-v2/Button';
 import {
   ARABIC_MONTH_NAMES,
   DEDUCTION_CYCLE_LABELS,
-  type DeductionCycleKey,
-} from '@/lib/equipmentSheetConstants';
+  type DeductionCycleKey } from '@/lib/equipmentSheetConstants';
 
 const CYCLE_OPTIONS: { key: DeductionCycleKey; label: string }[] = (
   Object.entries(DEDUCTION_CYCLE_LABELS) as [DeductionCycleKey, string][]
@@ -33,13 +34,12 @@ export default function AdminDeductionsReconcilePage() {
   const yearOptions = Array.from({ length: 8 }, (_, i) => String(new Date().getFullYear() - 2 + i));
 
   useEffect(() => {
-    const userStr = localStorage.getItem('user');
-    if (!userStr) {
+    const u = getStoredUser();
+    if (!u) {
       router.replace('/');
       return;
     }
     try {
-      const u = JSON.parse(userStr) as { role?: string; permissions?: string };
       if (u.role !== 'admin') {
         router.replace('/dashboard');
         return;
@@ -56,34 +56,29 @@ export default function AdminDeductionsReconcilePage() {
     setLoading(true);
     setResult(null);
     try {
-      const token = localStorage.getItem('token');
       const fd = new FormData();
       fd.append('file', file);
       fd.append('deductionCycle', deductionCycle);
       fd.append('month', month);
       fd.append('year', year);
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
-      const res = await fetch(`${origin}/api/admin/deductions-reconcile`, {
+      const res = await authFetch(`${origin}/api/admin/deductions-reconcile`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
         credentials: 'same-origin',
-        body: fd,
-      });
+        body: fd });
       const data = await res.json();
       if (!data.success) {
         setResult({
           ok: false,
           text: data.error || 'فشل',
-          warnings: data.details,
-        });
+          warnings: data.details });
         return;
       }
       setResult({
         ok: true,
         text: data.message || 'تم',
         stats: data.stats,
-        warnings: data.parseWarnings,
-      });
+        warnings: data.parseWarnings });
       setFile(null);
     } catch (err: any) {
       setResult({ ok: false, text: err.message || 'خطأ' });

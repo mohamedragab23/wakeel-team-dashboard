@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertLimitedAdminGlobalWriteDenied } from '@/lib/adminZoneScope';
 import { clearSheetData } from '@/lib/googleSheets';
 import { invalidateSupervisorCaches, notifySupervisorsOfChange } from '@/lib/realtimeSync';
 import { cache } from '@/lib/cache';
@@ -23,6 +24,8 @@ export async function POST(request: NextRequest) {
 
     const pc = assertAdminApiAccess(decoded, 'performance_upload');
     if (pc) return pc;
+    const globalDeny = assertLimitedAdminGlobalWriteDenied(decoded);
+    if (globalDeny) return globalDeny;
 
     console.log(`[ClearPerformance] Admin ${decoded.code} requested to clear all performance data`);
 

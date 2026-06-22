@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertLimitedAdminGlobalWriteDenied } from '@/lib/adminZoneScope';
 import { getSheetData } from '@/lib/googleSheets';
 import { invalidateSupervisorCaches, notifySupervisorsOfChange } from '@/lib/realtimeSync';
 import { cache, CACHE_KEYS } from '@/lib/cache';
@@ -107,6 +108,8 @@ export async function POST(request: NextRequest) {
 
     const deny = assertAdminApiAccess(decoded, 'performance_upload');
     if (deny) return deny;
+    const globalDeny = assertLimitedAdminGlobalWriteDenied(decoded);
+    if (globalDeny) return globalDeny;
 
     const body = (await request.json().catch(() => ({}))) as any;
     const dateIso = (body?.date ?? '').toString().trim();

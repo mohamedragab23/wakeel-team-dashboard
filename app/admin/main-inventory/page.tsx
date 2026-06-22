@@ -1,5 +1,7 @@
 'use client';
 
+import { getStoredUser } from '@/lib/clientSession';
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Layout from '@/components/Layout';
@@ -26,19 +28,17 @@ export default function AdminMainInventoryPage() {
     bicyclePouch: 0,
     tshirt: 0,
     jacket: 0,
-    helmet: 0,
-  });
+    helmet: 0 });
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const userStr = localStorage.getItem('user');
-    if (!token || !userStr) {
+    const u = getStoredUser();
+    if (!u) {
       router.replace('/');
       return;
     }
     try {
-      const u = JSON.parse(userStr) as { role?: string; permissions?: string };
+      const u = getStoredUser() as { role?: string; permissions?: string };
       if (u.role !== 'admin') {
         router.replace('/dashboard');
         return;
@@ -57,10 +57,7 @@ export default function AdminMainInventoryPage() {
       setLoading(true);
       setMessage(null);
       try {
-        const token = localStorage.getItem('token');
-        const res = await fetch('/api/admin/main-inventory', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await authFetch('/api/admin/main-inventory');
         const data = await res.json();
         if (!data.success) throw new Error(data.error || 'فشل التحميل');
         setCounts(data.data);
@@ -77,15 +74,11 @@ export default function AdminMainInventoryPage() {
     setSaving(true);
     setMessage(null);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/main-inventory', {
+      const res = await authFetch('/api/admin/main-inventory', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(counts),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify(counts) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل الحفظ');
       setMessage({ type: 'ok', text: data.message || 'تم الحفظ' });

@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState, useMemo, useCallback } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -11,15 +12,13 @@ import {
   defaultAbsenceFilter,
   type TextFilterState,
   type NumFilterState,
-  type AbsenceFilterState,
-} from '@/components/RidersExcelColumnMenu';
+  type AbsenceFilterState } from '@/components/RidersExcelColumnMenu';
 import {
   applyAdminPerfFilters,
   ADMIN_PERF_NUM_KEYS,
   type AdminPerfFilters,
   type AdminPerfNumKey,
-  type AdminPerfSort,
-} from '@/lib/adminRidersPerformanceTableFilter';
+  type AdminPerfSort } from '@/lib/adminRidersPerformanceTableFilter';
 import { collectAdminPerfColumnValues } from '@/lib/adminRidersPerfColumnValues';
 
 interface Rider {
@@ -68,8 +67,7 @@ export default function AdminRidersPage() {
     orders: defaultNumFilter(),
     acceptance: defaultNumFilter(),
     debt: defaultNumFilter(),
-    absence: defaultAbsenceFilter(),
-  }));
+    absence: defaultAbsenceFilter() }));
   const [perfSort, setPerfSort] = useState<AdminPerfSort>({ col: null, dir: 'asc' });
   const [perfOpenMenu, setPerfOpenMenu] = useState<string | null>(null);
 
@@ -103,8 +101,7 @@ export default function AdminRidersPage() {
       orders: defaultNumFilter(),
       acceptance: defaultNumFilter(),
       debt: defaultNumFilter(),
-      absence: defaultAbsenceFilter(),
-    });
+      absence: defaultAbsenceFilter() });
     setPerfSort({ col: null, dir: 'asc' });
     setPerfOpenMenu(null);
   };
@@ -120,62 +117,48 @@ export default function AdminRidersPage() {
     region: '',
     supervisorCode: '',
     phone: '',
-    status: 'نشط',
-  });
+    status: 'نشط' });
 
   const queryClient = useQueryClient();
 
   const { data: riders = [], isLoading: ridersLoading } = useQuery({
     queryKey: ['admin', 'riders'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       // Add timestamp to force refresh when needed
-      const res = await fetch(`/api/admin/riders?refresh=true&t=${Date.now()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`/api/admin/riders?refresh=true&t=${Date.now()}`);
       const data = await res.json();
       return data.success ? data.data : [];
     },
     staleTime: 2 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
-    refetchOnMount: true,
-  });
+    refetchOnMount: true });
 
   const { data: supervisors = [] } = useQuery({
     queryKey: ['admin', 'supervisors'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/supervisors', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/supervisors');
       const data = await res.json();
       return data.success ? data.data : [];
-    },
-  });
+    } });
 
   const {
     data: perfRows = [],
     isLoading: perfLoading,
     isFetching: perfFetching,
-    error: perfError,
-  } = useQuery({
+    error: perfError } = useQuery({
     queryKey: ['admin', 'riders-performance', perfStart, perfEnd],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       const url = new URL('/api/admin/riders-performance', window.location.origin);
       url.searchParams.set('startDate', perfStart);
       url.searchParams.set('endDate', perfEnd);
-      const res = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(url.toString());
       const data = await res.json();
       if (!data.success) {
         throw new Error(data.error || 'فشل تحميل أداء المناديب');
       }
       return data.data as RiderPerformanceRow[];
     },
-    enabled: Boolean(perfStart && perfEnd),
-  });
+    enabled: Boolean(perfStart && perfEnd) });
 
   const filteredPerfRows = useMemo(
     () => applyAdminPerfFilters(perfRows, perfFilters, perfSort),
@@ -206,59 +189,43 @@ export default function AdminRidersPage() {
 
   const addMutation = useMutation({
     mutationFn: async (rider: Rider) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/riders', {
+      const res = await authFetch('/api/admin/riders', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(rider),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify(rider) });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'riders'] });
       setShowAddModal(false);
       setFormData({ code: '', name: '', region: '', supervisorCode: '', phone: '', status: 'نشط' });
-    },
-  });
+    } });
 
   const updateMutation = useMutation({
     mutationFn: async ({ code, ...updates }: Partial<Rider> & { code: string }) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/riders', {
+      const res = await authFetch('/api/admin/riders', {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ code, ...updates }),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, ...updates }) });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'riders'] });
       setEditingRider(null);
       setFormData({ code: '', name: '', region: '', supervisorCode: '', phone: '', status: 'نشط' });
-    },
-  });
+    } });
 
   const deleteMutation = useMutation({
     mutationFn: async (code: string) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/riders?code=${code}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const res = await authFetch(`/api/admin/riders?code=${code}`, {
+        method: 'DELETE' });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'riders'] });
-    },
-  });
+    } });
 
   const handleEdit = (rider: Rider) => {
     setEditingRider(rider);
@@ -268,8 +235,7 @@ export default function AdminRidersPage() {
       region: rider.region,
       supervisorCode: rider.supervisorCode,
       phone: rider.phone || '',
-      status: rider.status || 'نشط',
-    });
+      status: rider.status || 'نشط' });
   };
 
   const handleDelete = (code: string) => {

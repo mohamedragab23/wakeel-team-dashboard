@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState, memo } from 'react';
 import dynamic from 'next/dynamic';
 
@@ -12,8 +13,7 @@ const LazyChart = dynamic(() => import('./LazyChart'), {
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[color:var(--v2-accent-cyan)]"></div>
       </div>
     </div>
-  ),
-});
+  ) });
 
 interface PerformanceChartProps {
   startDate?: string;
@@ -31,16 +31,12 @@ const PerformanceChart = memo(function PerformanceChart({ startDate, endDate }: 
   const fetchPerformanceData = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
       const url = new URL('/api/performance', window.location.origin);
       if (startDate) url.searchParams.append('startDate', startDate);
       if (endDate) url.searchParams.append('endDate', endDate);
 
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await authFetch(url.toString(), {
+        headers: { } });
 
       const data = await response.json();
 
@@ -48,8 +44,7 @@ const PerformanceChart = memo(function PerformanceChart({ startDate, endDate }: 
         const chartData = data.data.labels.map((label: string, index: number) => ({
           name: label,
           طلبات: data.data.orders[index] || 0,
-          ساعات: data.data.hours[index] || 0,
-        }));
+          ساعات: data.data.hours[index] || 0 }));
         setPerformanceData(chartData);
       } else {
         // Clear data if request failed or no data

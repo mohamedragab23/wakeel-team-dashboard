@@ -3,6 +3,8 @@ import './globals.css';
 import ErrorBoundaryWrapper from '@/components/ErrorBoundaryWrapper';
 import QueryProvider from '@/lib/providers/QueryProvider';
 import { ToastProvider } from '@/lib/providers/ToastProvider';
+import { SpeedInsights } from '@vercel/speed-insights/next';
+import { Analytics } from '@vercel/analytics/next';
 
 export const metadata: Metadata = {
   title: 'نظام إدارة المشرفين - Wakeel Team',
@@ -40,6 +42,8 @@ export default function RootLayout({
             <ToastProvider>{children}</ToastProvider>
           </QueryProvider>
         </ErrorBoundaryWrapper>
+        <SpeedInsights />
+        <Analytics />
       </body>
     </html>
   );

@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState, useCallback, useEffect } from 'react';
 import Layout from '@/components/Layout';
 import SupervisorTableSection from '@/components/SupervisorTableSection';
@@ -80,10 +81,7 @@ export default function SalaryPage() {
   const { data: salaryData, isLoading, error, isFetching } = useQuery({
     queryKey: ['salary', confirmedStartDate, confirmedEndDate],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/salary/calculate?startDate=${confirmedStartDate}&endDate=${confirmedEndDate}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`/api/salary/calculate?startDate=${confirmedStartDate}&endDate=${confirmedEndDate}`);
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل تحميل البيانات');
       return data.data as SalaryCalculation;
@@ -91,8 +89,7 @@ export default function SalaryPage() {
     staleTime: 10 * 60 * 1000, // 10 minutes (optimized for mobile)
     gcTime: 30 * 60 * 1000, // 30 minutes garbage collection
     refetchOnMount: false, // Don't refetch if data is fresh
-    refetchOnWindowFocus: false,
-  });
+    refetchOnWindowFocus: false });
 
 
   const formatCurrency = (amount: number) => {
@@ -453,8 +450,7 @@ export default function SalaryPage() {
                   const row: Record<string, string | number> = {
                     التاريخ: day.date,
                     الطلبات: day.orders,
-                    الساعات: Number((day.hours || 0).toFixed(1)),
-                  };
+                    الساعات: Number((day.hours || 0).toFixed(1)) };
                   if (salaryData.salaryMethod === 'commission_type1') {
                     row['ج.م/طلب'] = Number((day.multiplier || 0).toFixed(2));
                     row['عمولة يومية'] = Number(day.dailyCommission.toFixed(2));
@@ -513,8 +509,7 @@ export default function SalaryPage() {
                   المندوب: r.name,
                   الكود: r.code,
                   الساعات: Number(r.totalHours.toFixed(1)),
-                  الطلبات: r.totalOrders,
-                }))
+                  الطلبات: r.totalOrders }))
               }
             >
             <div className="overflow-x-auto">

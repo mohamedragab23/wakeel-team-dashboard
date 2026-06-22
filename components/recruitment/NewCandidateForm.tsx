@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Button from '@/components/ui-v2/Button';
@@ -8,8 +9,7 @@ import { ZONE_OPTIONS } from '@/lib/zones';
 import {
   HIRING_DECISION_VALUES,
   OFFICE_MANAGER_ASSIGNMENT_OPTION,
-  VEHICLE_TYPE_VALUES,
-} from '@/lib/recruitment/types';
+  VEHICLE_TYPE_VALUES } from '@/lib/recruitment/types';
 
 type Props = {
   onCreated: () => void;
@@ -22,14 +22,10 @@ export default function NewCandidateForm({ onCreated }: Props) {
   const { data: supervisors = [] } = useQuery({
     queryKey: ['recruitment', 'operational-supervisors'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/supervisors', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/recruitment/supervisors');
       const json = await res.json();
       return json.success ? (json.data as Array<{ code: string; name: string }>) : [];
-    },
-  });
+    } });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -46,8 +42,7 @@ export default function NewCandidateForm({ onCreated }: Props) {
     hiringDecision: 'قيد المراجعة' as 'قيد المراجعة' | 'هيشتغل' | 'لن يشتغل',
     notHiredReason: '',
     lecturePlannedDate: '',
-    notes: '',
-  });
+    notes: '' });
 
   const canSubmit = useMemo(() => {
     if (!form.fullName.trim() || !form.phone.trim() || !form.governorate.trim()) return false;
@@ -61,15 +56,11 @@ export default function NewCandidateForm({ onCreated }: Props) {
     setError('');
     setOk('');
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/candidates', {
+      const res = await authFetch('/api/recruitment/candidates', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(form),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify(form) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل الإضافة');
       setOk('تم إضافة بيانات التعيين الجديدة بنجاح');
@@ -85,8 +76,7 @@ export default function NewCandidateForm({ onCreated }: Props) {
         hiringDecision: 'قيد المراجعة',
         notHiredReason: '',
         lecturePlannedDate: '',
-        notes: '',
-      });
+        notes: '' });
       onCreated();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'خطأ');
@@ -185,8 +175,7 @@ export default function NewCandidateForm({ onCreated }: Props) {
 function Field({
   label,
   children,
-  className = '',
-}: {
+  className = '' }: {
   label: string;
   children: React.ReactNode;
   className?: string;

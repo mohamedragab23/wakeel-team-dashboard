@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import Layout from '@/components/Layout';
 import SupervisorTableSection from '@/components/SupervisorTableSection';
@@ -11,15 +12,13 @@ import {
   defaultAbsenceFilter,
   type TextFilterState,
   type NumFilterState,
-  type AbsenceFilterState,
-} from '@/components/RidersExcelColumnMenu';
+  type AbsenceFilterState } from '@/components/RidersExcelColumnMenu';
 import {
   applyRiderTableFilters,
   type RiderColumnFilters,
   type RiderSortState,
   RIDER_NUM_FILTER_KEYS,
-  type RiderNumFilterKey,
-} from '@/lib/ridersTableFilter';
+  type RiderNumFilterKey } from '@/lib/ridersTableFilter';
 import { collectRiderColumnValues } from '@/lib/ridersTableColumnValues';
 import { normalizeRiderCodeForPerformance } from '@/lib/riderCodeUtils';
 import { useToast } from '@/lib/providers/ToastProvider';
@@ -72,8 +71,7 @@ export default function RidersPage() {
     orders: defaultNumFilter(),
     acceptance: defaultNumFilter(),
     debt: defaultNumFilter(),
-    absence: defaultAbsenceFilter(),
-  }));
+    absence: defaultAbsenceFilter() }));
   const [sort, setSort] = useState<RiderSortState>({ col: null, dir: 'asc' });
   const [openMenu, setOpenMenu] = useState<string | null>(null);
 
@@ -100,11 +98,7 @@ export default function RidersPage() {
 
   const fetchPendingTerminations = async () => {
     try {
-      const token = localStorage.getItem('token');
-      if (!token) return;
-      const res = await fetch('/api/termination-requests?status=pending', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/termination-requests?status=pending');
       const data = await res.json();
       if (data.success && Array.isArray(data.data)) {
         const codes = new Set<string>(
@@ -147,8 +141,7 @@ export default function RidersPage() {
       orders: defaultNumFilter(),
       acceptance: defaultNumFilter(),
       debt: defaultNumFilter(),
-      absence: defaultAbsenceFilter(),
-    });
+      absence: defaultAbsenceFilter() });
     setSort({ col: null, dir: 'asc' });
     setOpenMenu(null);
   };
@@ -158,7 +151,6 @@ export default function RidersPage() {
   const fetchRiders = async (forceRefresh: boolean = false) => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
       const url = new URL('/api/riders', window.location.origin);
       if (startDate && endDate) {
         url.searchParams.append('startDate', startDate);
@@ -169,11 +161,8 @@ export default function RidersPage() {
         url.searchParams.append('t', Date.now().toString());
       }
       
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await authFetch(url.toString(), {
+        headers: { } });
 
       const data = await response.json();
 
@@ -204,8 +193,7 @@ export default function RidersPage() {
         'الغياب': r.absence ?? '',
         'الطلبات': Number.isFinite(r.orders) ? Number(r.orders) : 0,
         'نسبة القبول %': Number.isFinite(r.acceptance) ? Number(r.acceptance) : 0,
-        'المديونية': Number.isFinite(r.debt) ? Number(r.debt) : 0,
-      }));
+        'المديونية': Number.isFinite(r.debt) ? Number(r.debt) : 0 }));
 
       const worksheet = XLSX.utils.json_to_sheet(rows, {
         header: [
@@ -220,8 +208,7 @@ export default function RidersPage() {
           'الطلبات',
           'نسبة القبول %',
           'المديونية',
-        ],
-      });
+        ] });
 
       worksheet['!cols'] = [
         { wch: 14 },
@@ -282,29 +269,18 @@ export default function RidersPage() {
     try {
       setTerminationLoading(true);
       setError(''); // Clear previous errors
-      const token = localStorage.getItem('token');
-      
-      if (!token) {
-        setError('غير مصرح - يرجى تسجيل الدخول مرة أخرى');
-        return;
-      }
-      
+
       console.log('[TerminationRequest] Submitting request:', {
         riderCode: selectedRider.code,
-        reason: terminationReason,
-      });
+        reason: terminationReason });
       
-      const response = await fetch('/api/termination-requests', {
+      const response = await authFetch('/api/termination-requests', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+          'Content-Type': 'application/json' },
         body: JSON.stringify({
           riderCode: selectedRider.code?.toString().trim(),
-          reason: terminationReason.trim(),
-        }),
-      });
+          reason: terminationReason.trim() }) });
 
       const data = await response.json();
       

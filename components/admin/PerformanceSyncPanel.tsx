@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -21,10 +22,7 @@ export default function PerformanceSyncPanel() {
   const { data, isLoading } = useQuery({
     queryKey: ['admin', 'performance-sync'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/performance-sync', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/performance-sync');
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'فشل التحميل');
       return j.data as {
@@ -33,17 +31,14 @@ export default function PerformanceSyncPanel() {
         tableauConfigured: boolean;
         cloudflareAccessConfigured: boolean;
       };
-    },
-  });
+    } });
 
   const syncMutation = useMutation({
     mutationFn: async (params: { action: string; date: string }) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/performance-sync', {
+      const res = await authFetch('/api/admin/performance-sync', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(params),
-      });
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params) });
       const j = await res.json();
       if (!j.success && j.result?.status !== 'pending') throw new Error(j.error || j.result?.message || 'فشل');
       return j;
@@ -52,28 +47,23 @@ export default function PerformanceSyncPanel() {
       const r = j.result;
       setMsg({
         type: r?.status === 'failed' ? 'err' : 'ok',
-        text: r?.message || j.message || 'تم',
-      });
+        text: r?.message || j.message || 'تم' });
       queryClient.invalidateQueries({ queryKey: ['admin', 'performance-sync'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'performance-stats'] });
       queryClient.invalidateQueries({ queryKey: ['riders'] });
     },
-    onError: (e: Error) => setMsg({ type: 'err', text: e.message }),
-  });
+    onError: (e: Error) => setMsg({ type: 'err', text: e.message }) });
 
   const codMutation = useMutation({
     mutationFn: async () => {
       const d = codDate || syncDate || data?.suggestedDate || '';
       if (!codFile || !d) throw new Error('اختر التاريخ وملف COD');
-      const token = localStorage.getItem('token');
       const fd = new FormData();
       fd.append('file', codFile);
       fd.append('date', d);
-      const res = await fetch('/api/admin/cod-snapshot', {
+      const res = await authFetch('/api/admin/cod-snapshot', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
+        body: fd });
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'فشل رفع COD');
       return j;
@@ -82,8 +72,7 @@ export default function PerformanceSyncPanel() {
       setMsg({ type: 'ok', text: j.message || 'تم حفظ المديونية' });
       setCodFile(null);
     },
-    onError: (e: Error) => setMsg({ type: 'err', text: e.message }),
-  });
+    onError: (e: Error) => setMsg({ type: 'err', text: e.message }) });
 
   const suggested = data?.suggestedDate || '';
   const dateVal = syncDate || suggested;

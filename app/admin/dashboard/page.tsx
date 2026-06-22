@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery } from '@tanstack/react-query';
@@ -15,76 +16,56 @@ export default function AdminDashboardPage() {
   const [stats, setStats] = useState<Stats>({
     totalSupervisors: 0,
     totalRiders: 0,
-    activeRiders: 0,
-  });
+    activeRiders: 0 });
 
   const { data: supervisorsData, isLoading: supervisorsLoading } = useQuery({
     queryKey: ['admin', 'supervisors'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/supervisors', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/supervisors');
       const data = await res.json();
       return data.success ? data.data : [];
     },
     staleTime: 10 * 60 * 1000, // 10 minutes (optimized for mobile)
     gcTime: 30 * 60 * 1000, // 30 minutes
     refetchOnMount: false,
-    refetchOnWindowFocus: false,
-  });
+    refetchOnWindowFocus: false });
 
   const { data: ridersData, isLoading: ridersLoading } = useQuery({
     queryKey: ['admin', 'riders'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/riders', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/riders');
       const data = await res.json();
       return data.success ? data.data : [];
     },
     staleTime: 10 * 60 * 1000, // 10 minutes (optimized for mobile)
     gcTime: 30 * 60 * 1000, // 30 minutes
     refetchOnMount: false,
-    refetchOnWindowFocus: false,
-  });
+    refetchOnWindowFocus: false });
 
   const { data: assignmentRequestsData } = useQuery({
     queryKey: ['assignment-requests', 'pending'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/assignment-requests?status=pending', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/assignment-requests?status=pending');
       const data = await res.json();
       return data.success ? data.data : [];
     },
     staleTime: 2 * 60 * 1000, // 2 minutes - refresh more often for requests
-    gcTime: 10 * 60 * 1000,
-  });
+    gcTime: 10 * 60 * 1000 });
 
   const { data: terminationRequestsData } = useQuery({
     queryKey: ['termination-requests', 'pending'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/termination-requests?status=pending', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/termination-requests?status=pending');
       const data = await res.json();
       return data.success ? data.data : [];
     },
     staleTime: 2 * 60 * 1000, // 2 minutes
-    gcTime: 10 * 60 * 1000,
-  });
+    gcTime: 10 * 60 * 1000 });
 
   const { data: equipmentDeliveriesPending } = useQuery({
     queryKey: ['equipment-deliveries', 'pending', 'dashboard'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/equipment-deliveries?status=pending', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/equipment-deliveries?status=pending');
       const data = await res.json();
       if (!data.success) return [];
       return data.data as unknown[];
@@ -93,16 +74,12 @@ export default function AdminDashboardPage() {
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchInterval: 2 * 60 * 1000,
-    retry: false,
-  });
+    retry: false });
 
   const { data: equipmentReturnsPending } = useQuery({
     queryKey: ['equipment-returns', 'pending', 'dashboard'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/equipment-returns?status=pending', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/equipment-returns?status=pending');
       const data = await res.json();
       if (!data.success) return [];
       return data.data as unknown[];
@@ -111,16 +88,12 @@ export default function AdminDashboardPage() {
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchInterval: 2 * 60 * 1000,
-    retry: false,
-  });
+    retry: false });
 
   const { data: deductionsImportLog } = useQuery({
     queryKey: ['deductions-import-log', 'dashboard'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/deductions-import-log?limit=10', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/deductions-import-log?limit=10');
       const data = await res.json();
       if (!data.success) return [];
       return data.data as {
@@ -135,8 +108,7 @@ export default function AdminDashboardPage() {
     },
     staleTime: 60 * 1000,
     refetchOnWindowFocus: true,
-    refetchInterval: 90 * 1000,
-  });
+    refetchInterval: 90 * 1000 });
 
   useEffect(() => {
     if (supervisorsData && ridersData) {
@@ -145,8 +117,7 @@ export default function AdminDashboardPage() {
       setStats({
         totalSupervisors: supervisorsData.length,
         totalRiders: ridersData.length,
-        activeRiders,
-      });
+        activeRiders });
     }
   }, [supervisorsData, ridersData]);
 
@@ -157,20 +128,17 @@ export default function AdminDashboardPage() {
       label: 'إجمالي المشرفين',
       value: stats.totalSupervisors,
       icon: '👔',
-      color: 'bg-blue-500',
-    },
+      color: 'bg-blue-500' },
     {
       label: 'إجمالي المناديب',
       value: stats.totalRiders,
       icon: '👥',
-      color: 'bg-green-500',
-    },
+      color: 'bg-green-500' },
     {
       label: 'المناديب النشطين',
       value: stats.activeRiders,
       icon: '✅',
-      color: 'bg-purple-500',
-    },
+      color: 'bg-purple-500' },
   ];
 
   return (

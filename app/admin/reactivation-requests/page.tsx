@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -28,14 +29,12 @@ export default function AdminReactivationRequestsPage() {
   const { data: requests = [], isLoading } = useQuery({
     queryKey: ['reactivation-requests-admin', statusFilter],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       const url = new URL('/api/reactivation-requests', window.location.origin);
       if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
-      const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+      const res = await authFetch(url.toString());
       const data = await res.json();
       return data.success ? (data.data as ReactivationRequest[]) : [];
-    },
-  });
+    } });
 
   const handleDone = () => {
     queryClient.invalidateQueries({ queryKey: ['reactivation-requests-admin'] });
@@ -47,15 +46,11 @@ export default function AdminReactivationRequestsPage() {
 
   const approveMutation = useMutation({
     mutationFn: async (requestId: number) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/reactivation-requests', {
+      const res = await authFetch('/api/reactivation-requests', {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ requestId, action: 'approve' }),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, action: 'approve' }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل الموافقة');
       return data;
@@ -64,20 +59,15 @@ export default function AdminReactivationRequestsPage() {
       handleDone();
       showSuccess('تمت الموافقة على إعادة التفعيل');
     },
-    onError: (e: any) => showError(e.message || 'فشل الموافقة'),
-  });
+    onError: (e: any) => showError(e.message || 'فشل الموافقة') });
 
   const rejectMutation = useMutation({
     mutationFn: async (requestId: number) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/reactivation-requests', {
+      const res = await authFetch('/api/reactivation-requests', {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ requestId, action: 'reject' }),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, action: 'reject' }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل الرفض');
       return data;
@@ -86,15 +76,13 @@ export default function AdminReactivationRequestsPage() {
       handleDone();
       showSuccess('تم رفض الطلب');
     },
-    onError: (e: any) => showError(e.message || 'فشل الرفض'),
-  });
+    onError: (e: any) => showError(e.message || 'فشل الرفض') });
 
   const counts = {
     all: requests.length,
     pending: requests.filter((r) => r.status === 'pending').length,
     approved: requests.filter((r) => r.status === 'approved').length,
-    rejected: requests.filter((r) => r.status === 'rejected').length,
-  };
+    rejected: requests.filter((r) => r.status === 'rejected').length };
 
   return (
     <Layout>

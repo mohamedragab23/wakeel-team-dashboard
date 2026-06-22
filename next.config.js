@@ -16,6 +16,7 @@ const nextConfig = {
   experimental: {
     // optimizeCss: true, // Disabled - requires 'critters' package
     optimizePackageImports: ['@tanstack/react-query', 'recharts'], // Tree-shake unused exports
+    instrumentationHook: true,
     serverActions: {
       bodySizeLimit: '4mb', // Maximum 4MB (Vercel limit is 4.5MB)
     },

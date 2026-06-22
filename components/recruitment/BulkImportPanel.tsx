@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState } from 'react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -21,8 +22,7 @@ function parseTextLines(text: string): CandidateInput[] {
         fullName: parts[0] || '',
         phone: parts[1] || '',
         jobAd: parts[2] || 'غير محدد',
-        appliedDate: parts[3] || '',
-      };
+        appliedDate: parts[3] || '' };
     });
 }
 
@@ -40,8 +40,7 @@ function sheetRowsToCandidates(rows: Record<string, unknown>[]): CandidateInput[
       fullName: find('اسم', 'name', 'full') || String(row[keys[0]] ?? ''),
       phone: find('هاتف', 'phone', 'mobile') || String(row[keys[1]] ?? ''),
       jobAd: find('إعلان', 'job', 'ad') || 'غير محدد',
-      appliedDate: find('تاريخ', 'date') || '',
-    };
+      appliedDate: find('تاريخ', 'date') || '' };
   });
 }
 
@@ -63,15 +62,11 @@ export default function BulkImportPanel({ isLegacy, title, description, onImport
     setError('');
     setResult(null);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/candidates/bulk', {
+      const res = await authFetch('/api/recruitment/candidates/bulk', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ rows, isLegacy }),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows, isLegacy }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل الاستيراد');
       setResult(data.data);
@@ -101,8 +96,7 @@ export default function BulkImportPanel({ isLegacy, title, description, onImport
               return;
             }
             uploadRows(parsed);
-          },
-        });
+          } });
         return;
       }
       const wb = XLSX.read(buf, { type: 'array' });

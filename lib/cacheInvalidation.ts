@@ -1,4 +1,5 @@
 import { cache, CACHE_KEYS } from '@/lib/cache';
+import { redisCacheDelete } from '@/lib/redisCache.optional';
 import { invalidateSupervisorCaches, notifySupervisorsOfChange } from '@/lib/realtimeSync';
 
 export interface RiderCacheInvalidationOptions {
@@ -37,7 +38,9 @@ export async function invalidateRiderWorkflowCaches(
     ...extraSheets,
   ]);
   for (const sheet of sheetsToClear) {
-    cache.clear(CACHE_KEYS.sheetData(sheet));
+    const key = CACHE_KEYS.sheetData(sheet);
+    cache.clear(key);
+    void redisCacheDelete(key);
   }
 
   const allKeys = cache.keys();

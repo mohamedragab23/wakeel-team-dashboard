@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -50,29 +51,21 @@ export default function SalaryConfigPage() {
   const { data: supervisors = [] } = useQuery({
     queryKey: ['admin', 'supervisors'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/supervisors', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/supervisors');
       const data = await res.json();
       return data.success ? data.data : [];
-    },
-  });
+    } });
 
   // Fetch existing config when supervisor selected
   const { data: existingConfig } = useQuery({
     queryKey: ['salary-config', selectedSupervisor],
     queryFn: async () => {
       if (!selectedSupervisor) return null;
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/admin/salary/config?supervisorId=${selectedSupervisor}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`/api/admin/salary/config?supervisorId=${selectedSupervisor}`);
       const data = await res.json();
       return data.success ? data.data : null;
     },
-    enabled: !!selectedSupervisor,
-  });
+    enabled: !!selectedSupervisor });
 
   // عند تغيير المشرف: إعادة تعيين مؤقتة حتى لا تُعرض نطاقات مشرف آخر
   useEffect(() => {
@@ -105,15 +98,11 @@ export default function SalaryConfigPage() {
   // Save config mutation
   const saveMutation = useMutation({
     mutationFn: async (config: SalaryConfig) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/salary/config', {
+      const res = await authFetch('/api/admin/salary/config', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(config),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify(config) });
       const data = await res.json();
       if (!data.success) {
         throw new Error(data.error || 'فشل حفظ الإعدادات');
@@ -126,8 +115,7 @@ export default function SalaryConfigPage() {
     },
     onError: (err: Error) => {
       alert(err.message || 'حدث خطأ أثناء الحفظ');
-    },
-  });
+    } });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,8 +127,7 @@ export default function SalaryConfigPage() {
 
     const config: SalaryConfig = {
       supervisorId: selectedSupervisor,
-      salaryMethod,
-    };
+      salaryMethod };
 
     if (salaryMethod === 'fixed') {
       if (!fixedSalary || fixedSalary <= 0) {

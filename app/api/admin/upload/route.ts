@@ -8,6 +8,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { extractBearerToken } from '@/lib/requestAuth';
+import { checkApiRateLimit, rateLimitResponse } from '@/lib/apiRateLimit';
+import {
+  assertLimitedAdminGlobalWriteDenied,
+  assertRiderUploadRowsInAdminScope,
+  filterPerformanceRowsByAdminScope,
+} from '@/lib/adminZoneScope';
 import { readExcelFromBuffer } from '@/lib/excelProcessorServer';
 import { processRidersExcel, processPerformanceExcel } from '@/lib/excelProcessor';
 import { bulkAddRiders, getAllRiders } from '@/lib/adminService';
@@ -159,6 +165,11 @@ export async function POST(request: NextRequest) {
       }, { status: 401 });
     }
 
+    const limited = checkApiRateLimit('admin-upload', String(decoded.code ?? 'admin'), 8, 60_000);
+    if (!limited.allowed) {
+      return NextResponse.json(rateLimitResponse(limited.retryAfterSec), { status: 429 });
+    }
+
     // Support both JSON (new method) and FormData (legacy)
     const contentType = request.headers.get('content-type') || '';
     let rawData: any[][];
@@ -257,6 +268,9 @@ export async function POST(request: NextRequest) {
         supervisorCode: r.supervisorCode,
       }));
 
+      const zoneRiders = await assertRiderUploadRowsInAdminScope(decoded, ridersToAdd);
+      if (zoneRiders) return zoneRiders;
+
       const result = await bulkAddRiders(ridersToAdd);
 
       // Log summary only
@@ -347,15 +361,23 @@ export async function POST(request: NextRequest) {
         ];
       });
 
-      // Log summary only (not every row)
-      const uploadedDates = new Set(performanceData.map(row => row[0]));
-      console.log(`[Upload] Writing ${performanceData.length} rows to Google Sheets. Dates: ${Array.from(uploadedDates).slice(0, 5).join(', ')}${uploadedDates.size > 5 ? '...' : ''}`);
+      const allRiders = await getAllRiders(false);
+      const riderToSupervisor = new Map(
+        allRiders.map((r) => [String(r.code ?? '').trim(), String(r.supervisorCode ?? '').trim()])
+      );
+      const scoped = await filterPerformanceRowsByAdminScope(decoded, performanceData, riderToSupervisor);
+      if (scoped.denied) return scoped.denied;
+      const scopedPerformanceData = scoped.rows;
 
-      await appendToSheet('البيانات اليومية', performanceData);
+      // Log summary only (not every row)
+      const uploadedDates = new Set(scopedPerformanceData.map((row) => row[0]));
+      console.log(`[Upload] Writing ${scopedPerformanceData.length} rows to Google Sheets. Dates: ${Array.from(uploadedDates).slice(0, 5).join(', ')}${uploadedDates.size > 5 ? '...' : ''}`);
+
+      await appendToSheet('البيانات اليومية', scopedPerformanceData);
 
       // Sync "المديونية" into طلبات_الإقالة
       try {
-        const syncRes = await syncTerminationDebtsFromPerformanceRows(performanceData);
+        const syncRes = await syncTerminationDebtsFromPerformanceRows(scopedPerformanceData);
         console.log(`[Upload] Synced termination debts: updated ${syncRes.updated} rows`);
       } catch (e: any) {
         console.warn('[Upload] Failed to sync termination debts:', e?.message || e);
@@ -371,7 +393,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         message: 'تم رفع بيانات الأداء بنجاح',
-        rows: performanceData.length,
+        rows: scopedPerformanceData.length,
+        skippedOutOfScope: scoped.skipped > 0 ? scoped.skipped : undefined,
         warnings: processed.warnings,
       });
     }

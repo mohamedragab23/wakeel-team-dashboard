@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Card from '@/components/ui-v2/Card';
@@ -9,8 +10,7 @@ import {
   HIRING_DECISION_VALUES,
   OFFICE_MANAGER_ASSIGNMENT_OPTION,
   VEHICLE_TYPE_VALUES,
-  type OutreachLead,
-} from '@/lib/recruitment/types';
+  type OutreachLead } from '@/lib/recruitment/types';
 import { ZONE_OPTIONS } from '@/lib/zones';
 
 const inputClass =
@@ -30,8 +30,7 @@ export default function OutreachLeadsTable() {
     hiringDecision: 'قيد المراجعة' as 'قيد المراجعة' | 'هيشتغل' | 'لن يشتغل',
     notHiredReason: '',
     lecturePlannedDate: '',
-    notes: '',
-  });
+    notes: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -45,26 +44,18 @@ export default function OutreachLeadsTable() {
   const { data: leads = [], isLoading } = useQuery({
     queryKey: ['recruitment', 'outreach-leads'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/outreach', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/recruitment/outreach');
       const json = await res.json();
       return json.success ? (json.data as OutreachLead[]) : [];
-    },
-  });
+    } });
 
   const { data: supervisors = [] } = useQuery({
     queryKey: ['recruitment', 'operational-supervisors'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/supervisors', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/recruitment/supervisors');
       const json = await res.json();
       return json.success ? (json.data as Array<{ code: string; name: string }>) : [];
-    },
-  });
+    } });
 
   const refetch = () => queryClient.invalidateQueries({ queryKey: ['recruitment', 'outreach-leads'] });
   const showToast = (type: ToastMessage['type'], text: string) => setToast({ type, text });
@@ -73,15 +64,11 @@ export default function OutreachLeadsTable() {
     setLoading(true);
     setError('');
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/outreach', {
+      const res = await authFetch('/api/recruitment/outreach', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(form),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify(form) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل الحفظ');
       setForm({
@@ -96,8 +83,7 @@ export default function OutreachLeadsTable() {
         hiringDecision: 'قيد المراجعة',
         notHiredReason: '',
         lecturePlannedDate: '',
-        notes: '',
-      });
+        notes: '' });
       refetch();
       showToast('success', 'تمت إضافة داتا العرض بنجاح');
     } catch (e: unknown) {
@@ -110,15 +96,12 @@ export default function OutreachLeadsTable() {
   };
 
   const updateDecision = async (lead: OutreachLead, decision: OutreachLead['hiringDecision']) => {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/recruitment/outreach/${lead.id}`, {
+    const res = await authFetch(`/api/recruitment/outreach/${lead.id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         hiringDecision: decision,
-        notHiredReason: decision === 'لن يشتغل' ? lead.notHiredReason : '',
-      }),
-    });
+        notHiredReason: decision === 'لن يشتغل' ? lead.notHiredReason : '' }) });
     const json = await res.json();
     if (!json.success) {
       showToast('error', json.error || 'فشل تحديث قرار التشغيل');
@@ -129,11 +112,9 @@ export default function OutreachLeadsTable() {
   };
 
   const convertToCandidate = async (id: string) => {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/recruitment/outreach/${id}/convert`, {
+    const res = await authFetch(`/api/recruitment/outreach/${id}/convert`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+       });
     const json = await res.json();
     if (!json.success) {
       showToast('error', json.error || 'فشل التحويل');

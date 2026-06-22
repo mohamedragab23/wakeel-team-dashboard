@@ -199,7 +199,12 @@ export async function aggregateSupervisorDailyPerformance(
   supervisorCode: string,
   startDate: Date,
   endDate: Date,
-  options?: { useCache?: boolean; riders?: Awaited<ReturnType<typeof getSupervisorRiders>> }
+  options?: {
+    useCache?: boolean;
+    riders?: Awaited<ReturnType<typeof getSupervisorRiders>>;
+    /** Optional: avoid repeated full-sheet reads in multi-supervisor loops */
+    preloadedDailySheet?: unknown[][];
+  }
 ): Promise<{
   records: SupervisorDailyAggRecord[];
   totalOrders: number;
@@ -253,7 +258,8 @@ export async function aggregateSupervisorDailyPerformance(
     };
   }
 
-  const allData = await getSheetData('البيانات اليومية', useCache);
+  const allData =
+    options?.preloadedDailySheet ?? (await getSheetData('البيانات اليومية', useCache));
   const normalizedStartDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
   const normalizedEndDate = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
 

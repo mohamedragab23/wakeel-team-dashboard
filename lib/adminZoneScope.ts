@@ -138,3 +138,81 @@ export async function filterRowsBySupervisorInZoneScope<
   if (!allowed) return rows;
   return rows.filter((r) => adminScopeHasSupervisorCode(allowed, String(r.supervisorCode ?? '').trim()));
 }
+
+/** Block limited-scope admins from system-wide performance writes (sync, import apply, clear, delete-day). */
+export function assertLimitedAdminGlobalWriteDenied(decoded: AdminDataScopeJwt): NextResponse | null {
+  if (!isLimitedAdminDataScopeActive(decoded)) return null;
+  return NextResponse.json(
+    {
+      success: false,
+      error:
+        'هذه العملية تؤثر على بيانات على مستوى النظام ولا تتوفر لحساب الأدمن المحدود. تواصل مع المدير العام.',
+      code: 'GLOBAL_WRITE_DENIED_FOR_LIMITED_ADMIN',
+    },
+    { status: 403 }
+  );
+}
+
+/** Reject rider bulk upload when any row targets a supervisor outside the admin scope. */
+export async function assertRiderUploadRowsInAdminScope(
+  decoded: AdminDataScopeJwt,
+  riders: Array<{ supervisorCode?: string }>
+): Promise<NextResponse | null> {
+  if (!isLimitedAdminDataScopeActive(decoded)) return null;
+  const allowed = await getSupervisorCodesInAdminDataScope(decoded);
+  if (!allowed) return null;
+  const outOfScope = riders.filter(
+    (r) => !adminScopeHasSupervisorCode(allowed, String(r.supervisorCode ?? '').trim())
+  );
+  if (outOfScope.length === 0) return null;
+  return NextResponse.json(
+    {
+      success: false,
+      error: `لا يمكن رفع ${outOfScope.length} مندوب خارج نطاق صلاحياتك`,
+      code: 'RIDER_OUT_OF_ZONE_SCOPE',
+    },
+    { status: 403 }
+  );
+}
+
+/** Keep performance upload rows whose rider belongs to a supervisor in admin scope. */
+export async function filterPerformanceRowsByAdminScope(
+  decoded: AdminDataScopeJwt,
+  performanceRows: any[][],
+  riderToSupervisor: Map<string, string>
+): Promise<{ rows: any[][]; skipped: number; denied: NextResponse | null }> {
+  if (!isLimitedAdminDataScopeActive(decoded)) {
+    return { rows: performanceRows, skipped: 0, denied: null };
+  }
+  const allowed = await getSupervisorCodesInAdminDataScope(decoded);
+  if (!allowed) return { rows: performanceRows, skipped: 0, denied: null };
+
+  const kept: any[][] = [];
+  let skipped = 0;
+  for (const row of performanceRows) {
+    const riderCode = String(row?.[1] ?? '').trim();
+    const sup = riderToSupervisor.get(riderCode) ?? '';
+    if (adminScopeHasSupervisorCode(allowed, sup)) {
+      kept.push(row);
+    } else {
+      skipped++;
+    }
+  }
+
+  if (kept.length === 0) {
+    return {
+      rows: [],
+      skipped,
+      denied: NextResponse.json(
+        {
+          success: false,
+          error: 'جميع صفوف الأداء خارج نطاق صلاحياتك',
+          code: 'PERFORMANCE_OUT_OF_ZONE_SCOPE',
+        },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { rows: kept, skipped, denied: null };
+}

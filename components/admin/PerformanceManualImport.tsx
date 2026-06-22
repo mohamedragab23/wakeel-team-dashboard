@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -45,7 +46,6 @@ export default function PerformanceManualImport({ date }: PerformanceManualImpor
     setLoading(true);
     setMsg(null);
     try {
-      const token = localStorage.getItem('token');
       const fd = new FormData();
       fd.append('action', action);
       fd.append('date', dateIso);
@@ -54,11 +54,9 @@ export default function PerformanceManualImport({ date }: PerformanceManualImpor
       if (forceReplace) fd.append('forceReplace', '1');
       if (skipQuality) fd.append('skipQualityBlock', '1');
 
-      const res = await fetch('/api/admin/performance-import', {
+      const res = await authFetch('/api/admin/performance-import', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
+        body: fd });
       const j = await res.json();
       if (!res.ok || !j.success) throw new Error(j.error || 'فشلت العملية');
 

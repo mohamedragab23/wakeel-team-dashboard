@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -18,8 +19,7 @@ const defaultPricing: EquipmentPricing = {
   bicycleBox: 550,
   tshirt: 100,
   jacket: 200,
-  helmet: 150,
-};
+  helmet: 150 };
 
 export default function EquipmentPricingPage() {
   const notify = usePageNotify();
@@ -30,14 +30,10 @@ export default function EquipmentPricingPage() {
   const { data: existingPricing, isLoading } = useQuery({
     queryKey: ['equipment-pricing'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/equipment-pricing', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/equipment-pricing');
       const data = await res.json();
       return data.success ? data.data : defaultPricing;
-    },
-  });
+    } });
 
   useEffect(() => {
     if (existingPricing) {
@@ -48,15 +44,11 @@ export default function EquipmentPricingPage() {
   // Save pricing
   const saveMutation = useMutation({
     mutationFn: async (newPricing: EquipmentPricing) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/equipment-pricing', {
+      const res = await authFetch('/api/admin/equipment-pricing', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(newPricing),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify(newPricing) });
       return res.json();
     },
     onSuccess: (data) => {
@@ -69,8 +61,7 @@ export default function EquipmentPricingPage() {
     },
     onError: (error) => {
       alert('❌ حدث خطأ: ' + error.message);
-    },
-  });
+    } });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,8 +74,7 @@ export default function EquipmentPricingPage() {
     bicycleBoxes: 0,
     tshirts: 2,
     jackets: 1,
-    helmets: 0,
-  };
+    helmets: 0 };
   
   const exampleTotal = 
     (exampleCalculation.motorcycleBoxes * pricing.motorcycleBox) +

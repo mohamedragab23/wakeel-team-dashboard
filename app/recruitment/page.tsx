@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useQuery } from '@tanstack/react-query';
 import RecruitmentStatsCards from '@/components/recruitment/RecruitmentStatsCards';
 import ResetManagerDataCard from '@/components/recruitment/ResetManagerDataCard';
@@ -11,14 +12,10 @@ export default function RecruitmentDashboardPage() {
   const { data: stats, isLoading } = useQuery({
     queryKey: ['recruitment', 'stats'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/stats', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/recruitment/stats');
       const json = await res.json();
       return json.success ? (json.data as RecruitmentStats) : null;
-    },
-  });
+    } });
 
   const defaultStats: RecruitmentStats = {
     newThisWeek: 0,
@@ -26,8 +23,7 @@ export default function RecruitmentDashboardPage() {
     notContacted: 0,
     attendedLecture: 0,
     equipmentReceived: 0,
-    totalActive: 0,
-  };
+    totalActive: 0 };
 
   return (
     <div className="space-y-6">

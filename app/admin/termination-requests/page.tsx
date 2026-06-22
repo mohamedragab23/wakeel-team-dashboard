@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -64,7 +65,6 @@ export default function TerminationRequestsPage() {
   const { data: requests, isLoading, refetch } = useQuery({
     queryKey: ['termination-requests', statusFilter, statsFrom, statsTo],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       const url = new URL('/api/termination-requests', window.location.origin);
       if (statusFilter !== 'all') {
         url.searchParams.append('status', statusFilter);
@@ -72,42 +72,30 @@ export default function TerminationRequestsPage() {
       url.searchParams.set('statsFrom', statsFrom);
       url.searchParams.set('statsTo', statsTo);
 
-      const res = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(url.toString());
       const data = await res.json();
       return data.success ? (data.data as TerminationRequest[]) : [];
-    },
-  });
+    } });
 
   const { data: supervisors = [] } = useQuery({
     queryKey: ['admin', 'supervisors'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/supervisors', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/supervisors');
       const data = await res.json();
       return data.success ? data.data : [];
-    },
-  });
+    } });
 
   const approveMutation = useMutation({
     mutationFn: async ({ requestId, newSupervisorCode, deleteRider }: { requestId: number; newSupervisorCode?: string; deleteRider?: boolean }) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/termination-requests', {
+      const res = await authFetch('/api/termination-requests', {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+          'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           requestId, 
           action: 'approve',
           newSupervisorCode: newSupervisorCode || undefined,
-          deleteRider: deleteRider || false,
-        }),
-      });
+          deleteRider: deleteRider || false }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل الموافقة');
       return data;
@@ -121,20 +109,15 @@ export default function TerminationRequestsPage() {
     },
     onError: (error: any) => {
       showError(error.message || 'فشل الموافقة على الطلب');
-    },
-  });
+    } });
 
   const rejectMutation = useMutation({
     mutationFn: async (requestId: number) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/termination-requests', {
+      const res = await authFetch('/api/termination-requests', {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ requestId, action: 'reject' }),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, action: 'reject' }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل الرفض');
       return data;
@@ -145,8 +128,7 @@ export default function TerminationRequestsPage() {
     },
     onError: (error: any) => {
       showError(error.message || 'فشل رفض الطلب');
-    },
-  });
+    } });
 
   const pendingRequests = requests?.filter((r) => r.status === 'pending') || [];
   const approvedRequests = requests?.filter((r) => r.status === 'approved') || [];
@@ -184,18 +166,15 @@ export default function TerminationRequestsPage() {
     let ok = 0;
     const failures: string[] = [];
     try {
-      const token = localStorage.getItem('token');
       for (const requestId of ids) {
-        const res = await fetch('/api/termination-requests', {
+        const res = await authFetch('/api/termination-requests', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             requestId,
             action: 'approve',
             newSupervisorCode: newSupervisorCode || undefined,
-            deleteRider: !!deleteRider,
-          }),
-        });
+            deleteRider: !!deleteRider }) });
         const data = await res.json();
         if (!data.success) {
           failures.push(`#${requestId}: ${data.error || 'فشل'}`);
@@ -227,13 +206,11 @@ export default function TerminationRequestsPage() {
     if (!confirm(`رفض ${ids.length} طلب؟`)) return;
     setBulkLoading(true);
     try {
-      const token = localStorage.getItem('token');
       for (const requestId of ids) {
-        const res = await fetch('/api/termination-requests', {
+        const res = await authFetch('/api/termination-requests', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ requestId, action: 'reject' }),
-        });
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId, action: 'reject' }) });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || 'فشل الرفض');
       }
@@ -464,8 +441,7 @@ export default function TerminationRequestsPage() {
                           ? new Date(request.requestDate).toLocaleDateString('ar-EG', {
                               year: 'numeric',
                               month: 'short',
-                              day: 'numeric',
-                            })
+                              day: 'numeric' })
                           : '-'}
                       </td>
                       <td className="py-4 px-6 text-sm">
@@ -516,8 +492,7 @@ export default function TerminationRequestsPage() {
                                 {new Date(request.approvalDate).toLocaleDateString('ar-EG', {
                                   year: 'numeric',
                                   month: 'short',
-                                  day: 'numeric',
-                                })}
+                                  day: 'numeric' })}
                               </p>
                             )}
                             {request.approvedBy && <p className="mt-1">بواسطة: {request.approvedBy}</p>}
@@ -721,14 +696,12 @@ export default function TerminationRequestsPage() {
                       approveMutation.mutate({
                         requestId: approvalModal.requestId,
                         newSupervisorCode: undefined,
-                        deleteRider: false,
-                      });
+                        deleteRider: false });
                     } else {
                       approveMutation.mutate({
                         requestId: approvalModal.requestId,
                         newSupervisorCode: newSupervisorCode || undefined,
-                        deleteRider: deleteRider || undefined,
-                      });
+                        deleteRider: deleteRider || undefined });
                     }
                   }}
                   disabled={approveMutation.isPending}

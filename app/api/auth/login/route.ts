@@ -68,9 +68,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (result.success) {
-      const response = NextResponse.json(result);
-      if (result.token) {
-        response.cookies.set(AUTH_COOKIE_NAME, result.token, {
+      const { token, ...sessionPayload } = result;
+      const response = NextResponse.json(sessionPayload);
+      if (token) {
+        response.cookies.set(AUTH_COOKIE_NAME, token, {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
           sameSite: 'lax',

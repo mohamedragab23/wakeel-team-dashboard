@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { v2CssVars } from '@/theme/tokens';
 import { getDefaultAdminHome } from '@/lib/adminFeatureAccess';
+import { setStoredUser } from '@/lib/clientSession';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -31,9 +32,8 @@ export default function LoginPage() {
 
       const data = await response.json();
 
-      if (data.success && data.token) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data));
+      if (data.success) {
+        setStoredUser(data);
         if (data.role === 'admin') {
           router.push(getDefaultAdminHome(data.permissions));
         } else if (data.role === 'recruitment_manager') {

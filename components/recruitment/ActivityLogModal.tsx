@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useQuery } from '@tanstack/react-query';
 import Button from '@/components/ui-v2/Button';
 import type { Candidate } from '@/lib/recruitment/types';
@@ -15,14 +16,10 @@ export default function ActivityLogModal({ candidate, open, onClose }: Props) {
     queryKey: ['recruitment', 'activity', candidate?.id],
     enabled: open && !!candidate?.id,
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/recruitment/activity-log/${candidate!.id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`/api/recruitment/activity-log/${candidate!.id}`);
       const json = await res.json();
       return json.success ? json.data : [];
-    },
-  });
+    } });
 
   if (!open || !candidate) return null;
 

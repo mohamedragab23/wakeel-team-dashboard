@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery } from '@tanstack/react-query'
@@ -53,11 +54,8 @@ export default function SupervisorPerformancePage() {
   const { data, isLoading, isFetching, error } = useQuery({
     queryKey: ['admin', 'supervisor-performance', requestRange?.start, requestRange?.end],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch(
-        `/api/admin/supervisor-performance?start_date=${requestRange!.start}&end_date=${requestRange!.end}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const res = await authFetch(
+        `/api/admin/supervisor-performance?start_date=${requestRange!.start}&end_date=${requestRange!.end}`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل تحميل التقرير');
       return json.data as {
@@ -69,8 +67,7 @@ export default function SupervisorPerformancePage() {
       };
     },
     enabled: !!requestRange?.start && !!requestRange?.end,
-    staleTime: 2 * 60 * 1000,
-  });
+    staleTime: 2 * 60 * 1000 });
 
   const loadReport = () => {
     if (!startDate || !endDate) {

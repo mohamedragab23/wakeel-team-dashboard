@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useMemo, useState } from 'react';
 import Layout from '@/components/Layout';
 import SupervisorTableSection from '@/components/SupervisorTableSection';
@@ -53,16 +54,14 @@ export default function TerminationRequestsViewerPage() {
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['termination-requests-viewer', statusFilter, statsFrom, statsTo],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       const url = new URL('/api/termination-requests', window.location.origin);
       if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
       url.searchParams.set('statsFrom', statsFrom);
       url.searchParams.set('statsTo', statsTo);
-      const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+      const res = await authFetch(url.toString());
       const data = await res.json();
       return (data?.success ? (data.data as TerminationRequestRow[]) : []) ?? [];
-    },
-  });
+    } });
 
   const counts = useMemo(() => {
     const all = rows.length;
@@ -197,8 +196,7 @@ export default function TerminationRequestsViewerPage() {
                   'موافقة / رفض': r.approvalDate
                     ? `${r.approvalDate}${r.approvedBy ? ` · ${r.approvedBy}` : ''}`
                     : '',
-                  الحالة: statusLabel(r.status),
-                }))
+                  الحالة: statusLabel(r.status) }))
               }
             >
             <div className="overflow-x-auto">

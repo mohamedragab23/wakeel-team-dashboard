@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery } from '@tanstack/react-query';
@@ -37,40 +38,32 @@ export default function ReactivationRequestsPage() {
   const { data: rows = [], isLoading, refetch } = useQuery({
     queryKey: ['reactivation-requests-viewer', statusFilter],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       const url = new URL('/api/reactivation-requests', window.location.origin);
       if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
-      const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+      const res = await authFetch(url.toString());
       const data = await res.json();
       return (data?.success ? (data.data as ReactivationRequestRow[]) : []) ?? [];
-    },
-  });
+    } });
 
   const counts = {
     all: rows.length,
     pending: rows.filter((r) => r.status === 'pending').length,
     approved: rows.filter((r) => r.status === 'approved').length,
-    rejected: rows.filter((r) => r.status === 'rejected').length,
-  };
+    rejected: rows.filter((r) => r.status === 'rejected').length };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     setMsg(null);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/reactivation-requests', {
+      const res = await authFetch('/api/reactivation-requests', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+          'Content-Type': 'application/json' },
         body: JSON.stringify({
           riderCode: riderCode.trim(),
           riderName: riderName.trim(),
-          zone: zone.trim(),
-        }),
-      });
+          zone: zone.trim() }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل إرسال الطلب');
       setMsg({ type: 'ok', text: '✅ تم إرسال طلب إعادة التفعيل بنجاح' });

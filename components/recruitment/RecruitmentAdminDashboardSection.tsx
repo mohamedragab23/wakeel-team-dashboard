@@ -1,5 +1,7 @@
 'use client';
 
+import { getStoredUser } from '@/lib/clientSession';
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
@@ -12,7 +14,7 @@ export default function RecruitmentAdminDashboardSection() {
 
   useEffect(() => {
     try {
-      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      const u = getStoredUser() || {};
       if (u.role !== 'admin') {
         setShow(false);
         return;
@@ -28,14 +30,10 @@ export default function RecruitmentAdminDashboardSection() {
     queryKey: ['recruitment', 'stats'],
     enabled: show,
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/stats', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/recruitment/stats');
       const json = await res.json();
       return json.success ? (json.data as RecruitmentStats) : null;
-    },
-  });
+    } });
 
   if (!show) return null;
 

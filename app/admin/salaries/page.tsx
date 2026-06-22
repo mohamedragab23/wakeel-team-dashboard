@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -67,32 +68,22 @@ export default function AdminSalariesPage() {
   const { data: supervisors = [] } = useQuery({
     queryKey: ['admin', 'supervisors'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/supervisors', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/supervisors');
       const data = await res.json();
       return data.success ? data.data : [];
-    },
-  });
+    } });
 
   // Fetch salary calculation
   const { data: salaryData, isLoading } = useQuery({
     queryKey: ['admin', 'salary', selectedSupervisor, startDate, endDate],
     queryFn: async () => {
       if (!selectedSupervisor) return null;
-      const token = localStorage.getItem('token');
-      const res = await fetch(
-        `/api/admin/salary/calculate?supervisorCode=${selectedSupervisor}&startDate=${startDate}&endDate=${endDate}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const res = await authFetch(
+        `/api/admin/salary/calculate?supervisorCode=${selectedSupervisor}&startDate=${startDate}&endDate=${endDate}`);
       const data = await res.json();
       return data.success ? (data.data as SalaryCalculation) : null;
     },
-    enabled: !!selectedSupervisor && !!startDate && !!endDate,
-  });
+    enabled: !!selectedSupervisor && !!startDate && !!endDate });
 
   async function submitAdminDeduction(e: React.FormEvent) {
     e.preventDefault();
@@ -108,33 +99,26 @@ export default function AdminSalariesPage() {
     }
     setAdminDeductionSaving(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/salary/admin-deductions', {
+      const res = await authFetch('/api/admin/salary/admin-deductions', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+          'Content-Type': 'application/json' },
         body: JSON.stringify({
           supervisorCode: selectedSupervisor,
           date: adminDeductionDate,
           reason: adminDeductionReason.trim() || 'خصم إداري',
-          amount,
-        }),
-      });
+          amount }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل الحفظ');
       setAdminDeductionMsg({ type: 'ok', text: 'تم تسجيل الخصم' });
       setAdminDeductionAmount('');
       setAdminDeductionReason('');
       queryClient.invalidateQueries({
-        queryKey: ['admin', 'salary', selectedSupervisor, startDate, endDate],
-      });
+        queryKey: ['admin', 'salary', selectedSupervisor, startDate, endDate] });
     } catch (err: unknown) {
       setAdminDeductionMsg({
         type: 'err',
-        text: err instanceof Error ? err.message : 'خطأ',
-      });
+        text: err instanceof Error ? err.message : 'خطأ' });
     } finally {
       setAdminDeductionSaving(false);
     }
@@ -404,8 +388,7 @@ export default function AdminSalariesPage() {
                             {new Date(day.date).toLocaleDateString('ar-EG', {
                               year: 'numeric',
                               month: 'short',
-                              day: 'numeric',
-                            })}
+                              day: 'numeric' })}
                           </td>
                           <td className="py-3 px-4 text-gray-600">{day.orders}</td>
                           <td className="py-3 px-4 text-gray-600">{day.hours.toFixed(1)}</td>

@@ -1,5 +1,7 @@
 'use client';
 
+import { getStoredUser } from '@/lib/clientSession';
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Button from '@/components/ui-v2/Button';
@@ -11,8 +13,7 @@ import {
   ASSIGNMENT_STATUS_VALUES,
   CONTACT_STATUS_VALUES,
   EQUIPMENT_STATUS_VALUES,
-  LECTURE_ATTENDANCE_VALUES,
-} from '@/lib/recruitment/types';
+  LECTURE_ATTENDANCE_VALUES } from '@/lib/recruitment/types';
 import CandidateEditModal from './CandidateEditModal';
 import ContactLogModal from './ContactLogModal';
 import ActivityLogModal from './ActivityLogModal';
@@ -50,7 +51,7 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
 
   useEffect(() => {
     try {
-      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      const u = getStoredUser() || {};
       setUserRole(String(u.role ?? ''));
       setIsAdmin(u.role === 'admin');
     } catch {
@@ -88,7 +89,6 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
   const { data: candidatesRaw = [], isLoading, refetch } = useQuery({
     queryKey,
     queryFn: async () => {
-      const token = localStorage.getItem('token');
       const url = new URL('/api/recruitment/candidates', window.location.origin);
       if (pipelineStatus) url.searchParams.set('pipelineStatus', pipelineStatus);
       if (debouncedQ) url.searchParams.set('q', debouncedQ);
@@ -103,13 +103,10 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
       if (appliedDateFrom) url.searchParams.set('appliedDateFrom', appliedDateFrom);
       if (appliedDateTo) url.searchParams.set('appliedDateTo', appliedDateTo);
 
-      const res = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(url.toString());
       const json = await res.json();
       return json.success ? (json.data as Candidate[]) : [];
-    },
-  });
+    } });
 
   const candidates = useMemo(() => {
     if (mode !== 'archive') return candidatesRaw;
@@ -144,14 +141,10 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
   const { data: operationalSupervisors = [] } = useQuery({
     queryKey: ['recruitment', 'operational-supervisors'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/recruitment/supervisors', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/recruitment/supervisors');
       const json = await res.json();
       return json.success ? (json.data as Array<{ code: string; name: string }>) : [];
-    },
-  });
+    } });
 
   const supervisorNameByCode = useMemo(
     () => Object.fromEntries(operationalSupervisors.map((s) => [s.code, s.name])),
@@ -168,11 +161,10 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
   };
 
   const exportExcel = () => {
-    const token = localStorage.getItem('token');
     const url = new URL('/api/recruitment/export', window.location.origin);
     if (pipelineStatus) url.searchParams.set('pipelineStatus', pipelineStatus);
     if (debouncedQ) url.searchParams.set('q', debouncedQ);
-    fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
+    authFetch(url.toString())
       .then((r) => r.blob())
       .then((blob) => {
         const a = document.createElement('a');
@@ -183,11 +175,9 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
   };
 
   const reactivate = async (id: string) => {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/recruitment/candidates/${id}/reactivate`, {
+    const res = await authFetch(`/api/recruitment/candidates/${id}/reactivate`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+       });
     const json = await res.json();
     if (json.success) {
       invalidate();
@@ -198,11 +188,9 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
   };
 
   const logInterest = async (id: string) => {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/recruitment/candidates/${id}/interest`, {
+    const res = await authFetch(`/api/recruitment/candidates/${id}/interest`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+       });
     const json = await res.json();
     if (json.success) {
       invalidate();
@@ -217,15 +205,11 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
     patch: Partial<Candidate>,
     failMessage: string
   ): Promise<boolean> => {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/recruitment/candidates/${id}`, {
+    const res = await authFetch(`/api/recruitment/candidates/${id}`, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(patch),
-    });
+        'Content-Type': 'application/json' },
+      body: JSON.stringify(patch) });
     const json = await res.json();
     if (json.success) {
       invalidate();
@@ -270,8 +254,7 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
         finalAssignedSupervisorCode: chosen,
         assignmentStatus: 'تم التعيين',
         assignedAt: new Date().toISOString().slice(0, 10),
-        assignmentNote: 'إسناد فوري من الجدول بواسطة الأدمن',
-      },
+        assignmentNote: 'إسناد فوري من الجدول بواسطة الأدمن' },
       'فشل الإسناد الفوري'
     );
     setAssigningId(null);
@@ -590,8 +573,7 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
                             onChange={(e) =>
                               setRowAssignDraft((prev) => ({
                                 ...prev,
-                                [c.id]: e.target.value,
-                              }))
+                                [c.id]: e.target.value }))
                             }
                           >
                             <option value="">اختر مشرف</option>
@@ -666,8 +648,7 @@ function ActionBtn({
   children,
   onClick,
   disabled = false,
-  title,
-}: {
+  title }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
@@ -693,8 +674,7 @@ function ActionBtn({
 function StatusBadge({
   value,
   kind,
-  hint,
-}: {
+  hint }: {
   value: string;
   kind: 'decision' | 'contact' | 'lecture' | 'activation' | 'equipment';
   hint?: string;

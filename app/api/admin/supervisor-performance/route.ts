@@ -11,6 +11,7 @@ import { getSupervisorRiders } from '@/lib/dataService';
 import { aggregateSupervisorDailyPerformance } from '@/lib/dataFilter';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { adminScopeHasSupervisorCode, getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
+import { getSheetData } from '@/lib/googleSheets';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,12 +92,15 @@ export async function GET(request: NextRequest) {
     let grandAcceptanceSum = 0;
     let grandAcceptanceCount = 0;
 
+    const preloadedDailySheet = await getSheetData('البيانات اليومية', false);
+
     for (const sup of supervisors) {
       const code = String(sup.code ?? '').trim();
       const riders = await getSupervisorRiders(code, false);
       const agg = await aggregateSupervisorDailyPerformance(code, startDate, endDate, {
         riders,
         useCache: false,
+        preloadedDailySheet,
       });
 
       let totalOrders = agg.totalOrders;

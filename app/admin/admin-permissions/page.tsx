@@ -1,5 +1,7 @@
 'use client';
 
+import { getStoredUser } from '@/lib/clientSession';
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -7,14 +9,12 @@ import {
   ADMIN_FEATURE_LABELS_AR,
   ALL_ADMIN_FEATURE_KEYS,
   isGrantingAdmin,
-  type AdminFeatureKey,
-} from '@/lib/adminFeatureAccess';
+  type AdminFeatureKey } from '@/lib/adminFeatureAccess';
 import { RECRUITMENT_MANAGER_PERMISSION } from '@/lib/authConstants';
 import { ZONE_OPTIONS, parseAdminAllowedZonesList } from '@/lib/zones';
 import {
   LIMITED_PRESET_REGIONAL_MANAGER,
-  LIMITED_PRESET_ZONE_MANAGER,
-} from '@/lib/adminOrgPresets';
+  LIMITED_PRESET_ZONE_MANAGER } from '@/lib/adminOrgPresets';
 import { buildDescendantSupervisorCodesMulti } from '@/lib/orgHierarchy';
 
 type SupervisorPickerRow = {
@@ -45,8 +45,7 @@ function listOperationalSupervisorsUnderRoots(
       email: '',
       password: '',
       parentCode: s.parentCode,
-      orgRole: (s.orgRole as 'supervisor' | 'zone_manager' | 'regional_manager') || 'supervisor',
-    })),
+      orgRole: (s.orgRole as 'supervisor' | 'zone_manager' | 'regional_manager') || 'supervisor' })),
     rootCodes
   );
   const roots = new Set(rootCodes.map((c) => c.trim()));
@@ -78,7 +77,7 @@ export default function AdminPermissionsPage() {
 
   useEffect(() => {
     try {
-      const u = JSON.parse(localStorage.getItem('user') || 'null');
+      const u = getStoredUser();
       setCanGrant(isGrantingAdmin(u));
     } catch {
       setCanGrant(false);
@@ -88,10 +87,7 @@ export default function AdminPermissionsPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['admin-permissions-list'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/admin-permissions', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/admin-permissions');
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'فشل التحميل');
       return j.data as {
@@ -119,37 +115,28 @@ export default function AdminPermissionsPage() {
         };
       };
     },
-    enabled: !!canGrant,
-  });
+    enabled: !!canGrant });
 
   const { data: supervisorChoices = [] } = useQuery({
     queryKey: ['admin-supervisors-picker'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/supervisors?refresh=true', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/supervisors?refresh=true');
       const j = await res.json();
       if (!j.success) return [];
       return j.data as SupervisorPickerRow[];
     },
-    enabled: !!canGrant,
-  });
+    enabled: !!canGrant });
 
   const { data: hierarchyAudit } = useQuery({
     queryKey: ['admin-hierarchy-audit'],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/admin/hierarchy-audit', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/admin/hierarchy-audit');
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'فشل تدقيق الهرمية');
       return j.data as { issueCount: number; issues: Array<{ code: string; name: string; detail: string }> };
     },
     enabled: !!canGrant,
-    staleTime: 60_000,
-  });
+    staleTime: 60_000 });
 
   const selected = data?.admins?.find((a) => a.code === selectedCode);
 
@@ -203,11 +190,10 @@ export default function AdminPermissionsPage() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const token = localStorage.getItem('token');
       const permissions = buildPermissionsString();
-      const res = await fetch('/api/admin/admin-permissions', {
+      const res = await authFetch('/api/admin/admin-permissions', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           targetCode: selectedCode,
           permissions,
@@ -219,9 +205,7 @@ export default function AdminPermissionsPage() {
           syncZoneManagersToRegional,
           regionalManagerSupervisorCode: adminPositionSheet.includes('منطقة')
             ? (showCreateForm ? newAdmin.code : selectedCode).trim()
-            : '',
-        }),
-      });
+            : '' }) });
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'فشل الحفظ');
       return j;
@@ -242,24 +226,21 @@ export default function AdminPermissionsPage() {
       const extra = parts.length ? ` — ${parts.join('، ')}.` : '';
       setMsg({
         type: 'ok',
-        text: `تم الحفظ.${extra} يجب على المستخدم تسجيل الخروج ثم الدخول مجدداً.`,
-      });
+        text: `تم الحفظ.${extra} يجب على المستخدم تسجيل الخروج ثم الدخول مجدداً.` });
       queryClient.invalidateQueries({ queryKey: ['admin-permissions-list'] });
       queryClient.invalidateQueries({ queryKey: ['admin-supervisors-picker'] });
       queryClient.invalidateQueries({ queryKey: ['admin-hierarchy-audit'] });
     },
     onError: (e: any) => {
       setMsg({ type: 'err', text: e?.message || 'فشل الحفظ' });
-    },
-  });
+    } });
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const token = localStorage.getItem('token');
       const permissions = buildPermissionsString();
-      const res = await fetch('/api/admin/admin-permissions', {
+      const res = await authFetch('/api/admin/admin-permissions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code: newAdmin.code.trim(),
           name: newAdmin.name.trim(),
@@ -271,9 +252,7 @@ export default function AdminPermissionsPage() {
           useAdminCodeAsLink,
           autoCreateSupervisorRows,
           syncZoneManagersToRegional,
-          regionalManagerSupervisorCode: adminPositionSheet.includes('منطقة') ? newAdmin.code.trim() : '',
-        }),
-      });
+          regionalManagerSupervisorCode: adminPositionSheet.includes('منطقة') ? newAdmin.code.trim() : '' }) });
       const j = await res.json();
       if (!j.success) throw new Error(j.error || 'فشل الإنشاء');
       return j;
@@ -286,16 +265,14 @@ export default function AdminPermissionsPage() {
       }
       setMsg({
         type: 'ok',
-        text: `تم إنشاء حساب المستخدم.${parts.length ? ` ${parts.join('، ')}.` : ''}`,
-      });
+        text: `تم إنشاء حساب المستخدم.${parts.length ? ` ${parts.join('، ')}.` : ''}` });
       setShowCreateForm(false);
       setNewAdmin({ code: '', name: '', password: '' });
       queryClient.invalidateQueries({ queryKey: ['admin-permissions-list'] });
       queryClient.invalidateQueries({ queryKey: ['admin-supervisors-picker'] });
       queryClient.invalidateQueries({ queryKey: ['admin-hierarchy-audit'] });
     },
-    onError: (e: any) => setMsg({ type: 'err', text: e?.message || 'فشل الإنشاء' }),
-  });
+    onError: (e: any) => setMsg({ type: 'err', text: e?.message || 'فشل الإنشاء' }) });
 
   const isRegionalPosition = adminPositionSheet.includes('منطقة');
   const isZonePosition = adminPositionSheet.includes('زون');

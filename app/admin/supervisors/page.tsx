@@ -10,8 +10,7 @@ import {
   isAllowedZone,
   parseAdminAllowedZonesList,
   serializeAdminAllowedZones,
-  type ZoneOption,
-} from '@/lib/zones';
+  type ZoneOption } from '@/lib/zones';
 import type { SupervisorOrgRole } from '@/lib/orgHierarchy';
 
 interface Supervisor {
@@ -53,8 +52,7 @@ export default function AdminSupervisorsPage() {
     salaryType: 'commission_type1',
     target: 0,
     orgRole: 'supervisor',
-    parentCode: '',
-  });
+    parentCode: '' });
 
   const queryClient = useQueryClient();
 
@@ -62,8 +60,7 @@ export default function AdminSupervisorsPage() {
     queryKey: ['admin', 'supervisors'],
     queryFn: async () => {
       const res = await authFetch(`/api/admin/supervisors?refresh=true&_t=${Date.now()}`, {
-        cache: 'no-store',
-      });
+        cache: 'no-store' });
       if (res.status === 401) {
         clearClientSession();
         throw new Error('انتهت الجلسة أو لا تملك صلاحية الأدمن. يرجى تسجيل الدخول مرة أخرى.');
@@ -74,35 +71,25 @@ export default function AdminSupervisorsPage() {
       }
       return {
         list: (data.data || []) as Supervisor[],
-        managers: (data.managerOptions || data.data || []) as Supervisor[],
-      };
+        managers: (data.managerOptions || data.data || []) as Supervisor[] };
     },
     staleTime: 2 * 60 * 1000,
     gcTime: 10 * 60 * 1000, // Don't cache
     refetchOnMount: true, // Always refetch on mount
-    refetchOnWindowFocus: false,
-  });
+    refetchOnWindowFocus: false });
 
   const supervisors = supervisorsPayload?.list ?? [];
   const hierarchyManagers = supervisorsPayload?.managers ?? supervisors;
 
   const addMutation = useMutation({
     mutationFn: async (supervisor: Supervisor) => {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('غير مصرح - يرجى تسجيل الدخول');
-      }
-      const res = await fetch('/api/admin/supervisors', {
+      const res = await authFetch('/api/admin/supervisors', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(supervisor),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify(supervisor) });
       if (res.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+        clearClientSession();
         throw new Error('غير مصرح. يرجى تسجيل الدخول كأدمن.');
       }
       const data = await res.json();
@@ -131,32 +118,22 @@ export default function AdminSupervisorsPage() {
         salaryType: 'commission_type1',
         target: 0,
         orgRole: 'supervisor',
-        parentCode: '',
-      });
+        parentCode: '' });
       notify.success(' تم إضافة المشرف بنجاح');
     },
     onError: (error: any) => {
       notify.error(` خطأ: ${error.message || 'فشل إضافة المشرف'}`);
-    },
-  });
+    } });
 
   const updateMutation = useMutation({
     mutationFn: async ({ code, updates }: { code: string; updates: Partial<Supervisor> }) => {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('غير مصرح - يرجى تسجيل الدخول');
-      }
-      const res = await fetch('/api/admin/supervisors', {
+      const res = await authFetch('/api/admin/supervisors', {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ code, ...updates }),
-      });
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, ...updates }) });
       if (res.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+        clearClientSession();
         throw new Error('غير مصرح. يرجى تسجيل الدخول كأدمن.');
       }
       const data = await res.json();
@@ -179,28 +156,20 @@ export default function AdminSupervisorsPage() {
         salaryType: 'commission_type1',
         target: 0,
         orgRole: 'supervisor',
-        parentCode: '',
-      });
+        parentCode: '' });
       notify.success(' تم تحديث المشرف بنجاح');
     },
     onError: (error: any) => {
       notify.error(` خطأ: ${error.message || 'فشل تحديث المشرف'}`);
-    },
-  });
+    } });
 
   const deleteMutation = useMutation({
     mutationFn: async (code: string) => {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('غير مصرح - يرجى تسجيل الدخول');
-      }
-      const res = await fetch(`/api/admin/supervisors?code=${code}`, {
+      const res = await authFetch(`/api/admin/supervisors?code=${code}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
+         });
       if (res.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+        clearClientSession();
         throw new Error('غير مصرح. يرجى تسجيل الدخول كأدمن.');
       }
       const data = await res.json();
@@ -216,8 +185,7 @@ export default function AdminSupervisorsPage() {
     },
     onError: (error: any) => {
       notify.error(` خطأ: ${error.message || 'فشل حذف المشرف'}`);
-    },
-  });
+    } });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -242,8 +210,7 @@ export default function AdminSupervisorsPage() {
     setFormData({
       ...supervisor,
       orgRole: supervisor.orgRole ?? 'supervisor',
-      parentCode: supervisor.parentCode ?? '',
-    });
+      parentCode: supervisor.parentCode ?? '' });
     setSelectedZones(parseAdminAllowedZonesList(supervisor.region));
     setShowAddModal(true);
   };
@@ -289,8 +256,7 @@ export default function AdminSupervisorsPage() {
                 salaryType: 'commission_type1',
                 target: 0,
                 orgRole: 'supervisor',
-                parentCode: '',
-              });
+                parentCode: '' });
               setShowAddModal(true);
             }}
             className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
@@ -445,8 +411,7 @@ export default function AdminSupervisorsPage() {
                           ...formData,
                           orgRole: e.target.value as SupervisorOrgRole,
                           parentCode:
-                            e.target.value === 'regional_manager' ? '' : formData.parentCode,
-                        })
+                            e.target.value === 'regional_manager' ? '' : formData.parentCode })
                       }
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                     >

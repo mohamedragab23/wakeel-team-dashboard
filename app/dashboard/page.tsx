@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState } from 'react'
 import { usePageNotify } from '@/lib/usePageNotify';
 import Layout from '@/components/Layout';
@@ -71,12 +72,8 @@ export default function DashboardPage() {
 
   const fetchPendingRequestsCount = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/assignment-requests?status=pending', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await authFetch('/api/assignment-requests?status=pending', {
+        headers: { } });
 
       const data = await response.json();
       if (data.success) {
@@ -91,17 +88,12 @@ export default function DashboardPage() {
     try {
       setLoading(true);
       setError('');
-      const token = localStorage.getItem('token');
       let url = '/api/dashboard';
       if (mode === 'range' && start && end) {
         url = `/api/dashboard?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}`;
       }
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        cache: 'no-store',
-      });
+      const response = await authFetch(url, {
+        cache: 'no-store' });
 
       const data = await response.json();
 
@@ -141,19 +133,14 @@ export default function DashboardPage() {
     setAssignmentMessage(null);
 
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/assignment-requests', {
+      const response = await authFetch('/api/assignment-requests', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+          'Content-Type': 'application/json' },
         body: JSON.stringify({
           riderCode: riderCode.trim(),
           riderName: riderName.trim(),
-          zone: zone.trim(),
-        }),
-      });
+          zone: zone.trim() }) });
 
       const data = await response.json();
 
@@ -384,19 +371,16 @@ export default function DashboardPage() {
                               weekday: 'long',
                               year: 'numeric',
                               month: 'long',
-                              day: 'numeric',
-                            })} ← ${new Date(dashboardData.rangeEnd + 'T12:00:00').toLocaleDateString('ar-EG', {
+                              day: 'numeric' })} ← ${new Date(dashboardData.rangeEnd + 'T12:00:00').toLocaleDateString('ar-EG', {
                               weekday: 'long',
                               year: 'numeric',
                               month: 'long',
-                              day: 'numeric',
-                            })}`
+                              day: 'numeric' })}`
                           : new Date(dashboardData.lastUploadDate).toLocaleDateString('ar-EG', {
                               weekday: 'long',
                               year: 'numeric',
                               month: 'long',
-                              day: 'numeric',
-                            })}
+                              day: 'numeric' })}
                       </p>
                     </div>
                     <div className="text-5xl opacity-80">📅</div>
@@ -662,19 +646,16 @@ export default function DashboardPage() {
                             weekday: 'long',
                             year: 'numeric',
                             month: 'long',
-                            day: 'numeric',
-                          })} ← ${new Date(dashboardData.rangeEnd + 'T12:00:00').toLocaleDateString('ar-EG', {
+                            day: 'numeric' })} ← ${new Date(dashboardData.rangeEnd + 'T12:00:00').toLocaleDateString('ar-EG', {
                             weekday: 'long',
                             year: 'numeric',
                             month: 'long',
-                            day: 'numeric',
-                          })}`
+                            day: 'numeric' })}`
                         : new Date(dashboardData.lastUploadDate).toLocaleDateString('ar-EG', {
                             weekday: 'long',
                             year: 'numeric',
                             month: 'long',
-                            day: 'numeric',
-                          })}
+                            day: 'numeric' })}
                     </p>
                   </div>
                   <div className="text-5xl opacity-80">📅</div>

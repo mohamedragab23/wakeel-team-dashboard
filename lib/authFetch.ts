@@ -1,16 +1,12 @@
-/** Client-side fetch that always sends session cookie + Bearer token when available. */
+import { clearStoredUser } from '@/lib/clientSession';
+
+/** Session uses httpOnly cookie (`wakeel_auth_token`). No JWT in localStorage. */
 export function getClientAuthToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  const token = localStorage.getItem('token')?.trim();
-  return token || null;
+  return null;
 }
 
 export function getClientAuthHeaders(extra?: HeadersInit): HeadersInit {
-  const token = getClientAuthToken();
-  return {
-    ...(extra || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
+  return { ...(extra || {}) };
 }
 
 export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
@@ -23,7 +19,5 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
 }
 
 export function clearClientSession(): void {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem('token');
-  localStorage.removeItem('user');
+  clearStoredUser();
 }

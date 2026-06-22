@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/authFetch';
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import Card from '@/components/ui-v2/Card';
@@ -45,10 +46,9 @@ export default function EquipmentDeliveryPage() {
     setMessage(null);
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/equipment-deliveries', {
+      const res = await authFetch('/api/equipment-deliveries', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           riderCode,
           riderName,
@@ -59,9 +59,7 @@ export default function EquipmentDeliveryPage() {
           tshirt,
           jacket,
           helmet,
-          photoData: photoData || undefined,
-        }),
-      });
+          photoData: photoData || undefined }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل الإرسال');
       setMessage({ type: 'ok', text: data.message || 'تم إرسال الطلب' });
