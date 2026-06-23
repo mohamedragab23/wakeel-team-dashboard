@@ -114,17 +114,28 @@ Google Sheets data is never modified by mirror sync (read-only from Sheets).
 
 ## Post-deploy verification
 
-_Section updated after production deploy._
+**Verified at:** 2026-06-23T18:32:00Z  
+**Deployment:** `dpl_GTx3kcPEoRgnbABhYjN8A6Ydgwuw`  
+**Git:** `9916ae5` · tag `release-enterprise-v1`
 
 | Check | Status | Details |
 |-------|--------|---------|
-| Redis | _pending_ | |
-| Sentry | _pending_ | |
-| R2 | _pending_ | |
-| Ticketing | _pending_ | |
-| Backup cron | _pending_ | |
-| Production health | _pending_ | |
-| Build version | _pending_ | |
+| **Redis** | **ACTIVE** | `KV_REST_API_URL` + `KV_REST_API_TOKEN` on production. Read/write/delete OK. L1+L2 cache populated for strategic-ops, riders, salary, dashboard. Hit ratio 67% on probe. |
+| **Sentry** | **ACTIVE** | `NEXT_PUBLIC_SENTRY_DSN` set. SDK flush OK; event `cfda6cf7…` captured via API. Org `wakeel-a9` / project `wakeel-sentry`. |
+| **R2** | **ACTIVE** | `TICKETING_S3_*` configured. Inventory script: 1 object listed (read-only probe). Daily archives path: `backups/daily/{stamp}/`. |
+| **Ticketing** | **ACTIVE** | `TICKETING_DATABASE_URL` on production. `/api/ticketing` → **401** (auth gate, not 503). Neon + R2 wired. |
+| **Backup cron** | **CONFIGURED** | `vercel.json`: `0 3 * * *` → `/api/cron/daily-backup`. Route live → **401** without `CRON_SECRET` (expected). Next run: 03:00 UTC daily. |
+| **Production health** | **OK** | `GET /api/health` → `{"ok":true,"service":"next"}` |
+| **Build version** | `9916ae5` | `release-enterprise-v1` · Vercel deployment `dpl_GTx3kcPEoRgnbABhYjN8A6Ydgwuw` |
+| **Mirror flags (prod)** | **OFF** | No `MIRROR_SYNC_ENABLED` / `NEON_READ_REPLICA_ENABLED` on production |
+
+### Rollback command
+
+```bash
+npx vercel rollback dpl_GTx3kcPEoRgnbABhYjN8A6Ydgwuw -S ragab-team
+```
+
+Or promote a prior deployment from the [Vercel dashboard](https://vercel.com/ragab-team/wakeel-team-dashboard).
 
 ---
 
