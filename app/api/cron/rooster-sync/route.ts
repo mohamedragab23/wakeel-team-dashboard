@@ -2,25 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { analyzeLegacyShifts } from '@/lib/shiftsLegacyAnalyze';
 import { exportRoosterCsv, buildDefaultExportRangeNowCairo } from '@/lib/roosterExport';
 import { notifySupervisorsShiftSummary } from '@/lib/supervisorNotifier';
+import { isCronAuthorized } from '@/lib/cronAuth';
+import { logStructured } from '@/lib/requestTrace';
 
 export const dynamic = 'force-dynamic';
 
-function isAuthorizedCron(req: NextRequest): boolean {
-  // 1) Vercel Cron header
-  const vercelCron = req.headers.get('x-vercel-cron');
-  if (vercelCron) return true;
-
-  // 2) Shared secret (optional, recommended for manual triggering)
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return false;
-
-  const headerSecret = req.headers.get('x-cron-secret')?.trim();
-  return headerSecret === secret;
-}
-
 export async function GET(req: NextRequest) {
   try {
-    if (!isAuthorizedCron(req)) {
+    if (!isCronAuthorized(req)) {
+      logStructured('warn', 'cron_unauthorized', { route: 'rooster-sync' });
       return NextResponse.json({ success: false, error: 'Unauthorized cron' }, { status: 401 });
     }
 

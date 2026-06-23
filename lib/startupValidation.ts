@@ -46,6 +46,14 @@ export function runStartupValidation(): StartupValidationReport {
     warnings.push('TICKETING_DATABASE_URL not set — ticketing module returns 503; Sheets dashboard unaffected');
   }
 
+  if (process.env.NODE_ENV === 'production' && !process.env.CRON_SECRET?.trim()) {
+    warnings.push('CRON_SECRET not set — scheduled cron endpoints will return 401');
+  }
+
+  if (process.env.NODE_ENV === 'production' && process.env.PASSWORD_LEGACY_PLAIN_ENABLED === 'true') {
+    warnings.push('PASSWORD_LEGACY_PLAIN_ENABLED=true — legacy plain-text passwords allowed (disable after bcrypt migration)');
+  }
+
   if (warnings.length > 0) {
     console.warn('[startup] validation warnings:', warnings.join(' | '));
   } else {

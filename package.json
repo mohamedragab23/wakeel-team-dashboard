@@ -15,6 +15,10 @@
     "test:roadmap": "npx --yes tsx --test lib/strategicOps/roadmapCalculation.test.ts",
     "migrate:ticketing": "npx --yes tsx scripts/migrate-ticketing.ts",
     "export:sheets-backup": "npx --yes tsx scripts/export-sheets-backup.ts",
+    "audit:password-hashes": "npx --yes tsx scripts/audit-password-hashes.ts",
+    "verify:neon-url": "npx --yes tsx scripts/verify-neon-url.ts",
+    "activate:ticketing-neon": "npx --yes tsx scripts/activate-ticketing-neon.ts",
+    "sync:ticketing-env": "npx --yes tsx scripts/sync-ticketing-env-local.ts && npx --yes tsx scripts/sync-ticketing-env-vercel.ts",
     "env:pull": "npx --yes vercel@latest env pull .env.vercel.prod --environment=production --yes && node scripts/merge-env-local.mjs"
   },
   "dependencies": {

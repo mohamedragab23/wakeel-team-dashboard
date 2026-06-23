@@ -1,8 +1,10 @@
 import bcrypt from 'bcryptjs';
+import { legacyPlainPasswordLoginAllowed } from '@/lib/passwordMigrationSafety';
+import { logStructured } from '@/lib/requestTrace';
 
 const BCRYPT_PREFIX = '$2';
 
-/** Verify password — supports bcrypt hashes and legacy plain-text (backward compatible). */
+/** Verify password — bcrypt only by default. Legacy plain-text requires PASSWORD_LEGACY_PLAIN_ENABLED=true. */
 export async function verifyPassword(stored: string, input: string): Promise<boolean> {
   const storedNorm = (stored ?? '').trim();
   const inputNorm = (input ?? '').trim();
@@ -16,7 +18,16 @@ export async function verifyPassword(stored: string, input: string): Promise<boo
     }
   }
 
-  return storedNorm === inputNorm;
+  if (legacyPlainPasswordLoginAllowed()) {
+    logStructured('warn', 'legacy_plain_password_login', { action: 'verify' });
+    return storedNorm === inputNorm;
+  }
+
+  logStructured('warn', 'legacy_plain_password_rejected', {
+    action: 'verify',
+    hint: 'Set PASSWORD_LEGACY_PLAIN_ENABLED=true temporarily or rehash password to bcrypt',
+  });
+  return false;
 }
 
 /** Hash password for storage (optional migration tool). */

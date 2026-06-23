@@ -1,21 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runDailyPerformanceSync } from '@/lib/performanceSyncService';
+import { isCronAuthorized } from '@/lib/cronAuth';
+import { logStructured } from '@/lib/requestTrace';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-function isAuthorizedCron(req: NextRequest): boolean {
-  const vercelCron = req.headers.get('x-vercel-cron');
-  if (vercelCron) return true;
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return false;
-  const headerSecret = req.headers.get('x-cron-secret')?.trim();
-  return headerSecret === secret;
-}
-
 export async function GET(req: NextRequest) {
   try {
-    if (!isAuthorizedCron(req)) {
+    if (!isCronAuthorized(req)) {
+      logStructured('warn', 'cron_unauthorized', { route: 'performance-sync' });
       return NextResponse.json({ success: false, error: 'Unauthorized cron' }, { status: 401 });
     }
 

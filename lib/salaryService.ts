@@ -1,6 +1,8 @@
 import { getSheetData, findDataInSheet } from './googleSheets';
 import { getSupervisorRiders } from './dataService';
 import { getAllSupervisors } from './adminService';
+import { CACHE_KEYS } from './cache';
+import { tieredCacheGet, tieredCacheSet } from './tieredCache';
 import {
   aggregateSupervisorDailyPerformance,
   normalizeRiderCodeForPerformance,
@@ -724,6 +726,16 @@ export async function calculateSupervisorSalary(
     startDate = new Date(year, month - 1, 1);
     endDate = new Date(year, month, 0);
   }
+
+  const periodStart = startDate.toISOString().split('T')[0];
+  const periodEnd = endDate.toISOString().split('T')[0];
+  const salaryCacheKey = CACHE_KEYS.salaryCalculation(supervisorCode, periodStart, periodEnd);
+  const SALARY_TTL_MS = 10 * 60 * 1000;
+  const cachedSalary = await tieredCacheGet(salaryCacheKey, SALARY_TTL_MS);
+  if (cachedSalary) {
+    return cachedSalary;
+  }
+
   try {
     const [supervisors, riders, configData] = await Promise.all([
       getAllSupervisors(),
@@ -929,7 +941,7 @@ export async function calculateSupervisorSalary(
 
     const showCommissionBlock = salaryMethod !== 'fixed' && salaryMethod !== 'legacy_multiplier';
 
-    return {
+    const salaryResult = {
       supervisorId: supervisorCode,
       period: {
         startDate: startDate.toISOString().split('T')[0],
@@ -974,6 +986,9 @@ export async function calculateSupervisorSalary(
       breakdown,
       riderPerformance,
     };
+
+    await tieredCacheSet(salaryCacheKey, salaryResult, SALARY_TTL_MS);
+    return salaryResult;
   } catch (error) {
     console.error('Error calculating supervisor salary:', error);
     throw error;

@@ -3,32 +3,30 @@
  */
 
 import { cache, CACHE_KEYS } from './cache';
+import { tieredCacheDelete, tieredCacheDeleteByPrefix } from './tieredCache';
 
 /**
  * Clear all supervisor-related caches when manager makes changes
  * This ensures supervisors see updated data immediately
  */
 export function invalidateSupervisorCaches(supervisorCode?: string) {
-  // Clear general caches
   cache.clear('admin:supervisors');
   cache.clear('admin:riders');
-  cache.clear(CACHE_KEYS.sheetData('المشرفين'));
-  cache.clear(CACHE_KEYS.sheetData('المناديب'));
-  cache.clear(CACHE_KEYS.sheetData('الديون'));
-  cache.clear(CACHE_KEYS.sheetData('البيانات اليومية'));
-  for (const key of cache.keys()) {
-    if (key.startsWith('performance:')) cache.clear(key);
+  void tieredCacheDelete('admin:supervisors');
+  void tieredCacheDelete('admin:riders');
+
+  const sheetTabs = ['المشرفين', 'المناديب', 'الديون', 'البيانات اليومية'] as const;
+  for (const sheet of sheetTabs) {
+    void tieredCacheDelete(CACHE_KEYS.sheetData(sheet));
   }
 
-  // Clear specific supervisor caches if code provided
+  void tieredCacheDeleteByPrefix('performance:');
+
   if (supervisorCode) {
     const c = supervisorCode.trim();
-    cache.clear(CACHE_KEYS.supervisorRiders(c));
-    const dashPrefix = `dashboard:${c}:`;
-    for (const k of cache.keys()) {
-      if (k.startsWith(dashPrefix)) cache.clear(k);
-    }
-    cache.clear(CACHE_KEYS.ridersData(c));
+    void tieredCacheDelete(CACHE_KEYS.supervisorRiders(c));
+    void tieredCacheDelete(CACHE_KEYS.ridersData(c));
+    void tieredCacheDeleteByPrefix(`dashboard:${c}:`);
   }
 }
 
@@ -37,8 +35,5 @@ export function invalidateSupervisorCaches(supervisorCode?: string) {
  * This can be extended with WebSocket or Server-Sent Events in the future
  */
 export function notifySupervisorsOfChange(changeType: 'riders' | 'debts' | 'performance' | 'supervisors') {
-  // For now, we just clear caches
-  // In production, you might want to use WebSocket or SSE for real-time updates
   invalidateSupervisorCaches();
 }
-

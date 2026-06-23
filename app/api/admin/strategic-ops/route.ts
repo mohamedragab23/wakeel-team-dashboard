@@ -4,6 +4,8 @@ import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { buildStrategicOpsReport } from '@/lib/strategicOps/buildReport';
 import { checkApiRateLimit, rateLimitResponse } from '@/lib/apiRateLimit';
+import { CACHE_KEYS } from '@/lib/cache';
+import { tieredCacheGet, tieredCacheSet } from '@/lib/tieredCache';
 import {
   adminScopeHasSupervisorCode,
   getSupervisorCodesInAdminDataScope,
@@ -75,6 +77,32 @@ export async function GET(request: NextRequest) {
       // Zone-limited admins: if only one supervisor in scope, no change; filtering happens in report by supervisors list
     }
 
+    const talabatActive = searchParams.get('talabatActive');
+    const talabatNoShow = searchParams.get('talabatNoShow');
+    const talabatHours = searchParams.get('talabatHours');
+    const talabatAchievement = searchParams.get('talabatAchievement');
+    const scopeKey = allowed ? [...allowed].sort().join(',') : 'all';
+    const talabatKey = [talabatActive, talabatNoShow, talabatHours, talabatAchievement]
+      .map((v) => v ?? '')
+      .join('|');
+
+    const reportCacheKey = CACHE_KEYS.strategicOpsReport({
+      startDate,
+      endDate,
+      zone,
+      supervisorCode,
+      scopeKey,
+      talabatKey,
+    });
+    const STRATEGIC_OPS_TTL_MS = 10 * 60 * 1000;
+    const cachedReport = await tieredCacheGet<Awaited<ReturnType<typeof buildStrategicOpsReport>>>(
+      reportCacheKey,
+      STRATEGIC_OPS_TTL_MS
+    );
+    if (cachedReport) {
+      return NextResponse.json({ success: true, data: cachedReport });
+    }
+
     const report = await buildStrategicOpsReport({
       startDate,
       endDate,
@@ -82,10 +110,10 @@ export async function GET(request: NextRequest) {
       supervisorCode,
       allowedSupervisorCodes: allowed ?? null,
       talabatBenchmark: {
-        active: parseOptionalNum(searchParams.get('talabatActive')),
-        noShow: parseOptionalNum(searchParams.get('talabatNoShow')),
-        hours: parseOptionalNum(searchParams.get('talabatHours')),
-        achievement: parseOptionalNum(searchParams.get('talabatAchievement')),
+        active: parseOptionalNum(talabatActive),
+        noShow: parseOptionalNum(talabatNoShow),
+        hours: parseOptionalNum(talabatHours),
+        achievement: parseOptionalNum(talabatAchievement),
       },
     });
 
@@ -104,6 +132,8 @@ export async function GET(request: NextRequest) {
         report.supervisorPerformance.worstSupervisor = rows.length ? rows[rows.length - 1] : null;
       }
     }
+
+    await tieredCacheSet(reportCacheKey, report, STRATEGIC_OPS_TTL_MS);
 
     return NextResponse.json({ success: true, data: report });
   } catch (error: unknown) {

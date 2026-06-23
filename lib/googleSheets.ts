@@ -1,5 +1,7 @@
 import { cache, CACHE_KEYS } from './cache';
 import { redisCacheDelete, redisCacheGet, redisCacheSet } from './redisCache.optional';
+import { invalidateAfterSheetWrite } from './cacheInvalidation';
+import { logStructured } from './requestTrace';
 import {
   getMainSpreadsheetId,
   getSheetsClientFor,
@@ -59,9 +61,16 @@ export async function getSheetData(
     }
     
     return data;
-  } catch (error: any) {
-    console.error(`Error fetching sheet ${sheetName}:`, error);
-    // Return empty array instead of throwing to prevent crashes
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logStructured('error', 'google_sheets_get_failed', {
+      sheetName,
+      range,
+      useCache,
+      errorName: err.name,
+      errorMessage: err.message,
+    });
+    // Return empty array instead of throwing to prevent crashes (business behavior unchanged)
     return [];
   }
 }
@@ -118,7 +127,7 @@ export async function appendToSheet(sheetName: string, values: any[][], useCache
     }
 
     // Clear cache after successful write
-    cache.clear(CACHE_KEYS.sheetData(sheetName));
+    await invalidateAfterSheetWrite(sheetName);
 
     return true;
   } catch (error: any) {
@@ -262,18 +271,9 @@ export async function updateSheetRange(
     });
     
     // Clear cache after successful write - clear ALL related caches
-    cache.clear(CACHE_KEYS.sheetData(sheetName));
+    await invalidateAfterSheetWrite(sheetName);
     
-    // Also clear all supervisor rider caches (we don't know which supervisors are affected)
-    // This is a bit aggressive but ensures data consistency
-    const cacheKeys = cache.keys();
-    for (const key of cacheKeys) {
-      if (key.includes('supervisor-riders') || key.includes('riders-data')) {
-        cache.clear(key);
-      }
-    }
-    
-    console.log(`[UpdateSheetRange] Cleared all caches for ${sheetName} and related rider caches`);
+    console.log(`[UpdateSheetRange] Cleared caches for ${sheetName}`);
     
     return true;
   } catch (error: any) {
@@ -304,11 +304,7 @@ export async function updateSheetRow(
       },
     });
     
-    const sheetKey = CACHE_KEYS.sheetData(sheetName);
-    cache.clear(sheetKey);
-    for (const key of cache.keys()) {
-      if (key.startsWith(`${sheetKey}::`)) cache.clear(key);
-    }
+    await invalidateAfterSheetWrite(sheetName);
 
     return true;
   } catch (error) {
@@ -397,7 +393,7 @@ export async function deleteSheetRow(sheetName: string, rowNumber: number): Prom
     console.log(`[GoogleSheets] Deleted row ${rowNumber} from ${sheetName}`);
     
     // Clear cache after successful deletion
-    cache.clear(CACHE_KEYS.sheetData(sheetName));
+    await invalidateAfterSheetWrite(sheetName);
     
     return true;
   } catch (error: any) {
@@ -461,15 +457,7 @@ export async function clearSheetData(sheetName: string, keepHeaderRow: boolean =
     console.log(`[GoogleSheets] Successfully cleared data from ${sheetName}`);
     
     // Clear cache after successful deletion
-    cache.clear(CACHE_KEYS.sheetData(sheetName));
-    
-    // Clear all related caches
-    const cacheKeys = cache.keys();
-    for (const key of cacheKeys) {
-      if (key.includes('performance') || key.includes('dashboard') || key.includes('riders-data')) {
-        cache.clear(key);
-      }
-    }
+    await invalidateAfterSheetWrite(sheetName);
     
     return true;
   } catch (error: any) {
@@ -511,7 +499,7 @@ export async function ensureHeaderRow(sheetName: string, headers: string[]): Pro
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [headers] },
   });
-  cache.clear(CACHE_KEYS.sheetData(sheetName));
+  await invalidateAfterSheetWrite(sheetName);
 }
 
 // Ensure sheet exists, create it if it doesn't
@@ -562,7 +550,7 @@ export async function ensureSheetExists(sheetName: string, headers?: string[]): 
       }
       
       // Clear cache
-      cache.clear(CACHE_KEYS.sheetData(sheetName));
+      await invalidateAfterSheetWrite(sheetName);
     }
     
     return true;

@@ -79,5 +79,16 @@ export const CACHE_KEYS = {
   ridersData: (code: string) => `ridersData:${code}`,
   performanceData: (code: string, start?: string, end?: string) =>
     `performance:${code}:${start || ''}:${end || ''}`,
+  strategicOpsReport: (params: {
+    startDate: string;
+    endDate: string;
+    zone: string;
+    supervisorCode: string;
+    scopeKey: string;
+    talabatKey: string;
+  }) =>
+    `strategic-ops:${params.startDate}:${params.endDate}:${params.zone}:${params.supervisorCode}:${params.scopeKey}:${params.talabatKey}`,
+  salaryCalculation: (supervisorCode: string, startDate: string, endDate: string) =>
+    `salary:${supervisorCode}:${startDate}:${endDate}`,
 };
 

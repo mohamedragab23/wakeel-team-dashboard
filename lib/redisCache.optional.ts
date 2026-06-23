@@ -67,6 +67,24 @@ export async function redisCacheDelete(key: string): Promise<void> {
   await redisCommand(`/del/${encodeURIComponent(key)}`);
 }
 
+/** Delete all Redis keys matching `prefix*` (Upstash REST KEYS + DEL). */
+export async function redisCacheDeleteByPrefix(prefix: string): Promise<number> {
+  if (!redisEnabled() || !prefix) return 0;
+  try {
+    const res = await redisCommand(`/keys/${encodeURIComponent(`${prefix}*`)}`);
+    if (!res?.ok) return 0;
+    const body = (await res.json()) as { result?: string[] | null };
+    const keys = Array.isArray(body.result) ? body.result : [];
+    if (keys.length === 0) return 0;
+    const delPath = `/del/${keys.map((k) => encodeURIComponent(k)).join('/')}`;
+    await redisCommand(delPath);
+    return keys.length;
+  } catch (e) {
+    console.warn('[redisCache] deleteByPrefix failed:', e);
+    return 0;
+  }
+}
+
 export function isRedisCacheConfigured(): boolean {
   return redisEnabled();
 }

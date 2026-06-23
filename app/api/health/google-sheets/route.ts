@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
+import { isCronAuthorized } from '@/lib/cronAuth';
 import { getMainSpreadsheetId, getSheetsClientFor } from '@/lib/googleSheetsAuth';
 
 export const dynamic = 'force-dynamic';
@@ -12,10 +13,7 @@ function safeBool(v: unknown) {
 
 function isAuthorized(request: NextRequest): boolean {
   if (process.env.NODE_ENV !== 'production') return true;
-
-  const cronSecret = process.env.CRON_SECRET?.trim();
-  const headerSecret = request.headers.get('x-cron-secret')?.trim();
-  if (cronSecret && headerSecret === cronSecret) return true;
+  if (isCronAuthorized(request)) return true;
 
   const token = extractBearerToken(request);
   if (!token) return false;

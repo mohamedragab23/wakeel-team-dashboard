@@ -4,8 +4,7 @@ import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { assertLimitedAdminGlobalWriteDenied } from '@/lib/adminZoneScope';
 import { clearSheetData } from '@/lib/googleSheets';
-import { invalidateSupervisorCaches, notifySupervisorsOfChange } from '@/lib/realtimeSync';
-import { cache } from '@/lib/cache';
+import { invalidateAfterPerformanceSync } from '@/lib/cacheInvalidation';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,31 +38,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Clear all caches
-    console.log(`[ClearPerformance] Clearing all caches...`);
-    
-    // Clear all supervisor caches
-    invalidateSupervisorCaches();
-    
-    // Clear all performance-related caches
-    const cacheKeys = cache.keys();
-    let clearedCount = 0;
-    for (const key of cacheKeys) {
-      if (
-        key.includes('performance') ||
-        key.includes('dashboard') ||
-        key.includes('riders-data') ||
-        key.includes('sheet:البيانات اليومية')
-      ) {
-        cache.clear(key);
-        clearedCount++;
-      }
-    }
-    
-    console.log(`[ClearPerformance] Cleared ${clearedCount} cache keys`);
-
-    // Notify all supervisors of the change
-    notifySupervisorsOfChange('performance');
+    await invalidateAfterPerformanceSync();
 
     console.log(`[ClearPerformance] Successfully cleared all performance data`);
 

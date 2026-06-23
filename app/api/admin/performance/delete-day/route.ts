@@ -4,8 +4,7 @@ import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { assertLimitedAdminGlobalWriteDenied } from '@/lib/adminZoneScope';
 import { getSheetData } from '@/lib/googleSheets';
-import { invalidateSupervisorCaches, notifySupervisorsOfChange } from '@/lib/realtimeSync';
-import { cache, CACHE_KEYS } from '@/lib/cache';
+import { invalidateAfterPerformanceSync } from '@/lib/cacheInvalidation';
 import { getMainSpreadsheetId, getSheetsClientFor } from '@/lib/googleSheetsAuth';
 
 export const dynamic = 'force-dynamic';
@@ -136,16 +135,7 @@ export async function POST(request: NextRequest) {
     rowsToDelete.sort((a, b) => b - a);
     const { deleted } = await deleteRowsBatch('البيانات اليومية', rowsToDelete);
 
-    // Clear caches and notify
-    cache.clear(CACHE_KEYS.sheetData('البيانات اليومية'));
-    const allKeys = cache.keys();
-    for (const key of allKeys) {
-      if (key.includes('performance') || key.includes('dashboard') || key.includes('riders-data')) {
-        cache.clear(key);
-      }
-    }
-    invalidateSupervisorCaches();
-    notifySupervisorsOfChange('performance');
+    await invalidateAfterPerformanceSync();
 
     return NextResponse.json({
       success: true,

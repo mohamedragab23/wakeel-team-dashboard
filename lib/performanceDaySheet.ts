@@ -1,7 +1,6 @@
 import { getSheetData, appendToSheet } from '@/lib/googleSheets';
-import { cache, CACHE_KEYS } from '@/lib/cache';
 import { getMainSpreadsheetId, getSheetsClientFor } from '@/lib/googleSheetsAuth';
-import { invalidateSupervisorCaches, notifySupervisorsOfChange } from '@/lib/realtimeSync';
+import { invalidateAfterPerformanceSync } from '@/lib/cacheInvalidation';
 
 const SHEET = 'البيانات اليومية';
 
@@ -106,15 +105,7 @@ export async function appendPerformanceRows(rows: any[][]): Promise<void> {
 export async function replacePerformanceDay(dateIso: string, rows: any[][]): Promise<{ deleted: number; written: number }> {
   const deleted = await deletePerformanceRowsForDate(dateIso);
   await appendPerformanceRows(rows);
-  cache.clear(CACHE_KEYS.sheetData(SHEET));
-  const allKeys = cache.keys();
-  for (const key of allKeys) {
-    if (key.includes('performance') || key.includes('dashboard') || key.includes('riders-data')) {
-      cache.clear(key);
-    }
-  }
-  invalidateSupervisorCaches();
-  notifySupervisorsOfChange('performance');
+  await invalidateAfterPerformanceSync();
   return { deleted, written: rows.length };
 }
 

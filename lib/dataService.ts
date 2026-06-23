@@ -1,6 +1,11 @@
 import { getSheetData, findDataInSheet, isSameDay } from './googleSheets';
-import { cache, CACHE_KEYS } from './cache';
+import { CACHE_KEYS } from './cache';
+import { tieredCacheGet, tieredCacheSet } from './tieredCache';
 import { parseSupervisorRowFromSheet, resolveSupervisorsSheetLayout } from './supervisorsSheetParser';
+
+const RIDERS_TTL_MS = 15 * 60 * 1000;
+const DASHBOARD_TTL_MS = 2 * 60 * 1000;
+const PERFORMANCE_TTL_MS = 15 * 60 * 1000;
 
 export interface Rider {
   code: string;
@@ -66,7 +71,7 @@ export async function getSupervisorRiders(supervisorCode: string, useCache: bool
   
   // Check cache first (2 minutes cache - riders don't change often)
   if (useCache) {
-    const cached = cache.get<Rider[]>(cacheKey);
+    const cached = await tieredCacheGet<Rider[]>(cacheKey, RIDERS_TTL_MS);
     if (cached) {
       return cached;
     }
@@ -107,7 +112,7 @@ export async function getSupervisorRiders(supervisorCode: string, useCache: bool
 
     // Cache for 15 minutes (optimized for mobile performance) - only if useCache is true
     if (useCache) {
-      cache.set(cacheKey, riders, 15 * 60 * 1000);
+      await tieredCacheSet(cacheKey, riders, RIDERS_TTL_MS);
     }
 
     return riders;
@@ -121,7 +126,7 @@ export async function getSupervisorRiders(supervisorCode: string, useCache: bool
 export async function getAllAssignedRiders(useCache: boolean = true): Promise<Rider[]> {
   const cacheKey = 'riders:__all_assigned__';
   if (useCache) {
-    const cached = cache.get<Rider[]>(cacheKey);
+    const cached = await tieredCacheGet<Rider[]>(cacheKey, RIDERS_TTL_MS);
     if (cached) return cached;
   }
   try {
@@ -143,7 +148,7 @@ export async function getAllAssignedRiders(useCache: boolean = true): Promise<Ri
         status: row[7] ? row[7].toString().trim() : 'نشط',
       });
     }
-    if (useCache) cache.set(cacheKey, riders, 15 * 60 * 1000);
+    if (useCache) await tieredCacheSet(cacheKey, riders, RIDERS_TTL_MS);
     return riders;
   } catch (error) {
     console.error('Error fetching all assigned riders:', error);
@@ -347,7 +352,7 @@ export async function getDashboardData(
   }
   const cacheKey = CACHE_KEYS.dashboardData(supTrim, rangeKey);
 
-  const cached = cache.get<DashboardData>(cacheKey);
+  const cached = await tieredCacheGet<DashboardData>(cacheKey, DASHBOARD_TTL_MS);
   if (cached) {
     return cached;
   }
@@ -444,7 +449,7 @@ export async function getDashboardData(
       }
       if (!lastDay) {
         const z = empty();
-        cache.set(cacheKey, z, 15000);
+        await tieredCacheSet(cacheKey, z, DASHBOARD_TTL_MS);
         return z;
       }
       startD = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate(), 0, 0, 0, 0);
@@ -535,7 +540,7 @@ export async function getDashboardData(
       topRiders: topRiders.slice(0, 5),
     };
 
-    cache.set(cacheKey, result, 15000);
+    await tieredCacheSet(cacheKey, result, DASHBOARD_TTL_MS);
 
     return result;
   } catch (error) {
@@ -549,7 +554,7 @@ export async function getRidersData(supervisorCode: string): Promise<RiderData[]
   const cacheKey = CACHE_KEYS.ridersData(supervisorCode);
   
   // Check cache first (1 minute cache)
-  const cached = cache.get<RiderData[]>(cacheKey);
+  const cached = await tieredCacheGet<RiderData[]>(cacheKey, RIDERS_TTL_MS);
   if (cached) {
     return cached;
   }
@@ -615,7 +620,7 @@ export async function getRidersData(supervisorCode: string): Promise<RiderData[]
 
 
     // Cache for 1 minute
-    cache.set(cacheKey, ridersData, 15 * 60 * 1000); // 15 minutes
+    await tieredCacheSet(cacheKey, ridersData, RIDERS_TTL_MS);
 
     return ridersData;
   } catch (error) {
@@ -653,7 +658,12 @@ export async function getPerformanceData(
   );
 
   // Check cache first (2 minutes cache for better performance)
-    const cached = cache.get<{ success: boolean; labels: string[]; orders: number[]; hours: number[] }>(cacheKey);
+    const cached = await tieredCacheGet<{
+      success: boolean;
+      labels: string[];
+      orders: number[];
+      hours: number[];
+    }>(cacheKey, PERFORMANCE_TTL_MS);
     if (cached) {
       return cached;
     }
@@ -795,7 +805,7 @@ export async function getPerformanceData(
     };
 
     // Cache for 2 minutes for better performance
-    cache.set(cacheKey, result, 15 * 60 * 1000); // 15 minutes
+    await tieredCacheSet(cacheKey, result, PERFORMANCE_TTL_MS);
 
     return result;
   } catch (error) {
