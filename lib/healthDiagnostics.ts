@@ -3,6 +3,12 @@ import { isRedisCacheConfigured } from '@/lib/redisCache.optional';
 import { isTicketingDbConfigured } from '@/lib/ticketing/db/client';
 import { isJwtSecretConfigured } from '@/lib/jwtConfig';
 
+function isSentryConfigured(): boolean {
+  return Boolean(
+    process.env.SENTRY_DSN?.trim() || process.env.NEXT_PUBLIC_SENTRY_DSN?.trim()
+  );
+}
+
 export type HealthDiagnosticReport = {
   ok: boolean;
   checkedAt: string;
@@ -12,6 +18,7 @@ export type HealthDiagnosticReport = {
     cronSecret: boolean;
     redisConfigured: boolean;
     neonConfigured: boolean;
+    sentryConfigured: boolean;
   };
   googleSheets: { ok: boolean; error?: string; tabProbe?: string };
   redis: { ok: boolean; skipped?: boolean; error?: string };
@@ -43,8 +50,9 @@ async function probeRedis(): Promise<HealthDiagnosticReport['redis']> {
     return { ok: true, skipped: true };
   }
   try {
-    const url = process.env.UPSTASH_REDIS_REST_URL!.trim().replace(/\/$/, '');
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN!.trim();
+    const { getRedisRestUrl, getRedisRestToken } = await import('@/lib/redisCache.optional');
+    const url = getRedisRestUrl()!.replace(/\/$/, '');
+    const token = getRedisRestToken()!;
     const res = await fetch(`${url}/ping`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -80,6 +88,7 @@ export async function runHealthDiagnostics(): Promise<HealthDiagnosticReport> {
     cronSecret: envPresent('CRON_SECRET'),
     redisConfigured: isRedisCacheConfigured(),
     neonConfigured: isTicketingDbConfigured(),
+    sentryConfigured: isSentryConfigured(),
   };
 
   const [googleSheets, redis, neon] = await Promise.all([

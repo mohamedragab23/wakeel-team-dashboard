@@ -2,6 +2,8 @@ import { cache, CACHE_KEYS } from './cache';
 import { redisCacheDelete, redisCacheGet, redisCacheSet } from './redisCache.optional';
 import { invalidateAfterSheetWrite } from './cacheInvalidation';
 import { logStructured } from './requestTrace';
+import { tryGetMirrorSheetData, mirrorSupportsSheet } from '@/lib/mirror/readAdapter';
+import { isMirrorReadEnabled } from '@/lib/mirror/config';
 import {
   getMainSpreadsheetId,
   getSheetsClientFor,
@@ -36,6 +38,15 @@ export async function getSheetData(
     if (fromRedis) {
       cache.set(cacheKey, fromRedis, sheetTtlMs);
       return fromRedis;
+    }
+
+    if (isMirrorReadEnabled() && mirrorSupportsSheet(sheetName) && !rangeOverride) {
+      const fromMirror = await tryGetMirrorSheetData(sheetName);
+      if (fromMirror && fromMirror.length > 0) {
+        cache.set(cacheKey, fromMirror, sheetTtlMs);
+        void redisCacheSet(cacheKey, fromMirror, sheetTtlMs);
+        return fromMirror;
+      }
     }
   }
 

@@ -11,6 +11,7 @@ import {
 import { createTicket, listTickets } from '@/lib/ticketing/services/ticketService';
 import { createTicketSchema, listTicketsQuerySchema } from '@/lib/ticketing/validators';
 import { saveTicketAttachment } from '@/lib/ticketing/services/attachmentService';
+import * as Sentry from '@sentry/nextjs';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +30,9 @@ export const GET = wrapTicketingHandler(async (request: NextRequest) => {
 
   const isAdmin = hasTicketingAdminAccess(decoded);
   const scope = isSupervisor(decoded!) ? decoded!.code : undefined;
-  const result = await listTickets(parsed.data, scope);
+  const result = await Sentry.startSpan({ name: 'ticketing.listTickets', op: 'db.query' }, () =>
+    listTickets(parsed.data, scope)
+  );
 
   return NextResponse.json({ success: true, ...result });
 });

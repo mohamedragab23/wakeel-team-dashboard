@@ -6,6 +6,7 @@ import { buildStrategicOpsReport } from '@/lib/strategicOps/buildReport';
 import { checkApiRateLimit, rateLimitResponse } from '@/lib/apiRateLimit';
 import { CACHE_KEYS } from '@/lib/cache';
 import { tieredCacheGet, tieredCacheSet } from '@/lib/tieredCache';
+import * as Sentry from '@sentry/nextjs';
 import {
   adminScopeHasSupervisorCode,
   getSupervisorCodesInAdminDataScope,
@@ -103,19 +104,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, data: cachedReport });
     }
 
-    const report = await buildStrategicOpsReport({
-      startDate,
-      endDate,
-      zone,
-      supervisorCode,
-      allowedSupervisorCodes: allowed ?? null,
-      talabatBenchmark: {
-        active: parseOptionalNum(talabatActive),
-        noShow: parseOptionalNum(talabatNoShow),
-        hours: parseOptionalNum(talabatHours),
-        achievement: parseOptionalNum(talabatAchievement),
-      },
-    });
+    const report = await Sentry.startSpan({ name: 'strategic-ops.buildReport', op: 'function' }, () =>
+      buildStrategicOpsReport({
+        startDate,
+        endDate,
+        zone,
+        supervisorCode,
+        allowedSupervisorCodes: allowed ?? null,
+        talabatBenchmark: {
+          active: parseOptionalNum(talabatActive),
+          noShow: parseOptionalNum(talabatNoShow),
+          hours: parseOptionalNum(talabatHours),
+          achievement: parseOptionalNum(talabatAchievement),
+        },
+      })
+    );
 
     if (allowed) {
       report.supervisorPerformance.rows = report.supervisorPerformance.rows.filter((s) =>

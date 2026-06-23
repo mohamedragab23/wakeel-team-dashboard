@@ -9,19 +9,33 @@ type CacheEnvelope<T> = {
   expiresAt: number;
 };
 
-function redisEnabled(): boolean {
-  return Boolean(
-    process.env.UPSTASH_REDIS_REST_URL?.trim() && process.env.UPSTASH_REDIS_REST_TOKEN?.trim()
+function redisRestUrl(): string | undefined {
+  return (
+    process.env.UPSTASH_REDIS_REST_URL?.trim() ||
+    process.env.KV_REST_API_URL?.trim() ||
+    undefined
   );
 }
 
+function redisRestToken(): string | undefined {
+  return (
+    process.env.UPSTASH_REDIS_REST_TOKEN?.trim() ||
+    process.env.KV_REST_API_TOKEN?.trim() ||
+    undefined
+  );
+}
+
+function redisEnabled(): boolean {
+  return Boolean(redisRestUrl() && redisRestToken());
+}
+
 function restBase(): string {
-  return process.env.UPSTASH_REDIS_REST_URL!.trim().replace(/\/$/, '');
+  return redisRestUrl()!.replace(/\/$/, '');
 }
 
 function authHeaders(): HeadersInit {
   return {
-    Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN!.trim()}`,
+    Authorization: `Bearer ${redisRestToken()!}`,
   };
 }
 
@@ -87,4 +101,14 @@ export async function redisCacheDeleteByPrefix(prefix: string): Promise<number> 
 
 export function isRedisCacheConfigured(): boolean {
   return redisEnabled();
+}
+
+/** Resolved REST URL (UPSTASH_* or Vercel KV_* integration vars). */
+export function getRedisRestUrl(): string | undefined {
+  return redisRestUrl();
+}
+
+/** Resolved REST token (UPSTASH_* or Vercel KV_* integration vars). */
+export function getRedisRestToken(): string | undefined {
+  return redisRestToken();
 }

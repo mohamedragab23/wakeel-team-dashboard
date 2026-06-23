@@ -71,3 +71,8 @@ Thumbs.db
 
 
 .vercel
+
+.vercel
+.env*
+
+.env*
