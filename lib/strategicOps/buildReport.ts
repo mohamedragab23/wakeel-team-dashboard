@@ -16,6 +16,10 @@ import { buildOperationalTruthIntelligence, createDisabledOperationalTruthIntell
 import { dualFromPeriod, type DualMetric } from '@/lib/strategicOps/dualMetrics';
 import { computeKpiTrustLevel, type KpiTrustReport } from '@/lib/strategicOps/kpiTrustLevel';
 import { buildJoinDateAudit, type JoinDateAuditReport } from '@/lib/strategicOps/joinDateAudit';
+import {
+  buildMetadataCompletionAudit,
+  type MetadataCompletionAudit,
+} from '@/lib/strategicOps/metadataCompletionAudit';
 import { buildGhostRiderAudit, type GhostRiderAuditReport } from '@/lib/strategicOps/ghostRiderAudit';
 import { buildFinalKpiAccuracyAudit } from '@/lib/strategicOps/finalKpiAccuracyAudit';
 import { buildPostNormalizationValidationReport } from '@/lib/strategicOps/postNormalizationValidation';
@@ -44,6 +48,7 @@ import {
   validateRoadmapRidersAudit,
   type RoadmapRidersAudit,
 } from '@/lib/strategicOps/roadmapCalculation';
+import { buildControlTowerReport, type ControlTowerReport } from '@/lib/strategicOps/controlTower';
 
 export type StrategicOpsFilters = {
   startDate: string;
@@ -368,6 +373,7 @@ export type StrategicOpsReport = {
   kpiTrust: KpiTrustReport;
   ghostRiderAudit: GhostRiderAuditReport;
   joinDateAudit: JoinDateAuditReport;
+  metadataCompletionAudit: MetadataCompletionAudit;
   codeNormalizationAudit: import('@/lib/strategicOps/codeNormalization').CodeNormalizationAuditReport;
   postNormalizationValidation: import('@/lib/strategicOps/postNormalizationValidation').PostNormalizationValidationReport;
   finalKpiAccuracyAudit: import('@/lib/strategicOps/finalKpiAccuracyAudit').FinalKpiAccuracyAudit;
@@ -389,6 +395,7 @@ export type StrategicOpsReport = {
     fastestHourGains: string;
     fullReport: string;
   };
+  controlTower?: ControlTowerReport;
 };
 
 type PerfRec = {
@@ -1008,7 +1015,7 @@ function computeGrowthExpansionMetrics(input: {
   };
 }
 
-function generateInsights(report: Omit<StrategicOpsReport, 'aiInsights'>): StrategicOpsReport['aiInsights'] {
+function generateInsights(report: Omit<StrategicOpsReport, 'aiInsights' | 'controlTower'>): StrategicOpsReport['aiInsights'] {
   const es = report.executiveSummary;
   const lh = report.lostHours;
   const worstSup = report.supervisorPerformance.worstSupervisor;
@@ -1110,6 +1117,12 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
   const kpiQualityGatePassed = kpiTrust.kpiQualityGatePassed;
 
   const joinDateAudit = buildJoinDateAudit(ridersInScope);
+  const metadataCompletionAudit = buildMetadataCompletionAudit(
+    ridersInScope,
+    new Map(
+      supervisorsScoped.map((s) => [String(s.code ?? '').trim(), s.name || String(s.code ?? '').trim()])
+    )
+  );
 
   const ghostRiderAudit = buildGhostRiderAudit({
     ghostRiderList: dataIntegrity.ghostRiderListFull,
@@ -1173,7 +1186,7 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
 
   const sourceDataCoverage = computeSourceDataCoverage(
     dataIntegrity.completenessPercentage,
-    joinDateAudit.joinDateCoveragePercent
+    metadataCompletionAudit.metadataCoveragePercent
   );
   const strategicKpisEnabled = sourceDataCoverage.strategicKpisEnabled;
   const insufficientLabel = sourceDataCoverage.insufficientDataLabelAr;
@@ -1530,12 +1543,12 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
       .sort((a, b) => b.count - a.count)
       .slice(0, 10),
     averageRiderLifetimeDays:
-      strategicKpisEnabled && joinDateAudit.riderLifetimeKpiEnabled && lifetimeDays.length > 0
+      sourceDataCoverage.metadataAnalyticsEnabled && lifetimeDays.length > 0
         ? round2(lifetimeDays.reduce((a, b) => a + b, 0) / lifetimeDays.length)
         : null,
-    riderLifetimeKpiEnabled: strategicKpisEnabled && joinDateAudit.riderLifetimeKpiEnabled,
-    riderLifetimeDisabledReason: !strategicKpisEnabled
-      ? `${insufficientLabel} — تغطية البيانات ${sourceDataCoverage.coverage}%`
+    riderLifetimeKpiEnabled: sourceDataCoverage.metadataAnalyticsEnabled && lifetimeDays.length > 0,
+    riderLifetimeDisabledReason: !sourceDataCoverage.metadataAnalyticsEnabled
+      ? `تغطية البيانات الوصفية ${sourceDataCoverage.metadataCoveragePercent}% أقل من 80% — تم تعطيل KPI متوسط عمر الطيار`
       : joinDateAudit.riderLifetimeDisabledReason,
     attritionTrend: Array.from(trendMap.entries()).map(([period, resignations]) => ({ period, resignations })).sort((a, b) => a.period.localeCompare(b.period)),
   };
@@ -1941,6 +1954,7 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     kpiTrust,
     ghostRiderAudit,
     joinDateAudit,
+    metadataCompletionAudit,
     codeNormalizationAudit: dataIntegrityFinal.codeNormalization,
     postNormalizationValidation,
     finalKpiAccuracyAudit,
@@ -1965,5 +1979,40 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
   const aiInsights = generateInsights({ ...partial, operationalFormulaAudit });
   aiInsights.fullReport = '';
 
-  return { ...partial, operationalFormulaAudit, aiInsights };
+  const supervisorNameByCode = new Map(
+    supervisorsScoped.map((s) => [String(s.code ?? '').trim(), s.name || String(s.code ?? '').trim()])
+  );
+
+  const controlTower = buildControlTowerReport({
+    startDate: filters.startDate,
+    endDate: filters.endDate,
+    operationalPeriodDays,
+    operationalCoveragePercent: sourceDataCoverage.completenessPercentage,
+    metadataCoveragePercent: sourceDataCoverage.metadataCoveragePercent,
+    overallReadinessPercent: sourceDataCoverage.overallReadinessPercent,
+    operationalAnalyticsEnabled: sourceDataCoverage.operationalAnalyticsEnabled,
+    metadataAnalyticsEnabled: sourceDataCoverage.metadataAnalyticsEnabled,
+    dataCoveragePercent: sourceDataCoverage.completenessPercentage,
+    strategicKpisEnabled: sourceDataCoverage.strategicKpisEnabled,
+    fleetTalabat,
+    supervisorRows: supervisorPerformance.rows,
+    riders: aggList.map((agg) => ({
+      code: agg.code,
+      name: agg.name,
+      region: agg.region,
+      supervisorCode: agg.supervisorCode,
+      supervisorName: agg.supervisorName,
+      totalHours: agg.totalHours,
+      totalOrders: agg.totalOrders,
+    })),
+    performance,
+    assignedRiderCodes,
+    fleetDailyTargetHours,
+    headcount: totalRegistered,
+    inactiveRiders,
+    avgHoursPerActiveRider: fleetTalabat.avgHoursPerActiveRider,
+    supervisorNameByCode,
+  });
+
+  return { ...partial, operationalFormulaAudit, aiInsights, controlTower };
 }

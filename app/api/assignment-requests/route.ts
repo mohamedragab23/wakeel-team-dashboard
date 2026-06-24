@@ -13,6 +13,13 @@ import { assertLimitedAdminSupervisorZoneAccess, filterRowsBySupervisorInZoneSco
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { invalidateRiderWorkflowCaches } from '@/lib/cacheInvalidation';
 import { findRiderInSheet } from '@/lib/riderCodeUtils';
+import { validateAssignmentMetadata } from '@/lib/riderMetadata';
+import {
+  appendWorkflowMetadataToRow,
+  extractWorkflowMetadataFromRow,
+  WORKFLOW_METADATA_HEADERS,
+  type WorkflowRequestMetadata,
+} from '@/lib/workflowRequestMetadata';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +37,7 @@ function parseAssignmentRow(row: any[]) {
   const requestDate = (hasZone ? row[6] : row[5])?.toString().trim() || '';
   const approvalDate = (hasZone ? row[7] : row[6])?.toString().trim() || '';
   const approvedBy = (hasZone ? row[8] : row[7])?.toString().trim() || '';
+  const metadata = extractWorkflowMetadataFromRow(row, hasZone);
   return {
     supervisorCode,
     supervisorName,
@@ -41,7 +49,51 @@ function parseAssignmentRow(row: any[]) {
     approvalDate,
     approvedBy,
     hasZone,
+    ...metadata,
   };
+}
+
+async function applyApprovedRiderMetadata(input: {
+  riderCode: string;
+  riderName: string;
+  zone: string;
+  supervisorCode: string;
+  metadata: WorkflowRequestMetadata;
+}) {
+  const ridersData = await getSheetData('المناديب', false);
+  const match = findRiderInSheet(ridersData, input.riderCode);
+  const riderPayload = {
+    joinDate: input.metadata.joinDate,
+    contractType: input.metadata.contractType,
+    contractEndDate: input.metadata.contractEndDate,
+  };
+
+  if (match) {
+    const result = await updateRider(match.actualCode, {
+      supervisorCode: input.supervisorCode,
+      name: input.riderName,
+      region: input.zone,
+      status: 'نشط',
+      ...riderPayload,
+    });
+    if (!result.success) {
+      throw new Error(result.error || 'فشل تعيين المندوب للمشرف');
+    }
+    return;
+  }
+
+  const result = await addRider({
+    code: input.riderCode,
+    name: input.riderName,
+    region: input.zone || '',
+    supervisorCode: input.supervisorCode,
+    phone: '',
+    status: 'نشط',
+    ...riderPayload,
+  });
+  if (!result.success) {
+    throw new Error(result.error || 'فشل إضافة المندوب');
+  }
 }
 
 // Get all assignment requests (admin only) or requests for a supervisor
@@ -128,7 +180,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { riderCode, riderName, zone } = body;
+    const { riderCode, riderName, zone, joinDate, contractType } = body;
 
     let requestSupervisorCode = '';
     let requestSupervisorName = '';
@@ -151,11 +203,19 @@ export async function POST(request: NextRequest) {
       requestSupervisorName = targetSupervisor.name || requestSupervisorCode;
     }
 
-    if (!riderCode || !riderName || !zone) {
+    if (!riderCode || !riderName || !zone || !joinDate || !contractType) {
       return NextResponse.json(
-        { success: false, error: 'كود المندوب واسم المندوب والزون مطلوبة' },
+        { success: false, error: 'كود المندوب واسم المندوب والزون وتاريخ الانضمام ونوع العقد مطلوبة' },
         { status: 400 }
       );
+    }
+
+    const metadataCheck = validateAssignmentMetadata({
+      joinDate: String(joinDate),
+      contractType: String(contractType),
+    });
+    if (!metadataCheck.ok) {
+      return NextResponse.json({ success: false, error: metadataCheck.error }, { status: 400 });
     }
     if (!isAllowedZone(zone)) {
       return NextResponse.json(
@@ -200,6 +260,7 @@ export async function POST(request: NextRequest) {
         'تاريخ الطلب',
         'تاريخ الموافقة',
         'تمت الموافقة بواسطة',
+        ...WORKFLOW_METADATA_HEADERS,
       ]);
     } catch (error: any) {
       console.error('[AssignmentRequest] Error ensuring sheet exists:', error);
@@ -238,17 +299,24 @@ export async function POST(request: NextRequest) {
 
     // Create the request in Google Sheets
     const requestDate = new Date().toISOString().split('T')[0];
-    const requestData = [
-      requestSupervisorCode, // Supervisor Code
-      requestSupervisorName, // Supervisor Name
-      riderCode?.toString().trim() || '', // Rider Code
-      riderName?.toString().trim() || '', // Rider Name
-      zone?.toString().trim() || '', // Zone
-      'pending', // Status
-      requestDate, // Request Date
-      '', // Approval Date
-      '', // Approved By
-    ];
+    const requestData = appendWorkflowMetadataToRow(
+      [
+        requestSupervisorCode,
+        requestSupervisorName,
+        riderCode?.toString().trim() || '',
+        riderName?.toString().trim() || '',
+        zone?.toString().trim() || '',
+        'pending',
+        requestDate,
+        '',
+        '',
+      ],
+      {
+        contractType: metadataCheck.contractType,
+        joinDate: metadataCheck.joinDate,
+        contractEndDate: metadataCheck.contractEndDate,
+      }
+    );
 
     console.log(`[AssignmentRequest] Appending request data:`, requestData);
     
@@ -303,7 +371,7 @@ export async function PUT(request: NextRequest) {
     if (denyPut) return denyPut;
 
     const body = await request.json();
-    const { requestId, action } = body;
+    const { requestId, action, contractEndDate: adminContractEndOverride } = body;
     // action: 'approve' or 'reject'
     
     console.log(`[AssignmentRequest] Received request:`, {
@@ -357,32 +425,52 @@ export async function PUT(request: NextRequest) {
 
     if (action === 'approve') {
       try {
-        const ridersData = await getSheetData('المناديب', false);
-        const match = findRiderInSheet(ridersData, riderCode);
+        let metadata: WorkflowRequestMetadata = {
+          contractType: parsedRow.contractType,
+          joinDate: parsedRow.joinDate,
+          contractEndDate: parsedRow.contractEndDate,
+        };
 
-        if (match) {
-          console.log(`[AssignmentRequest] Updating existing rider "${match.actualCode}" to supervisor "${supervisorCode}"`);
-          const result = await updateRider(match.actualCode, {
-            supervisorCode: supervisorCode,
-          });
-          if (!result.success) {
-            throw new Error(result.error || 'فشل تعيين المندوب للمشرف');
-          }
-        } else {
-          console.log(`[AssignmentRequest] Adding new rider "${riderCode}" to supervisor "${supervisorCode}"`);
-          const result = await addRider({
-            code: riderCode,
-            name: riderName,
-            region: zone || '',
-            supervisorCode: supervisorCode,
-            phone: '',
-            joinDate: new Date().toISOString().split('T')[0],
-            status: 'active',
-          });
-          if (!result.success) {
-            throw new Error(result.error || 'فشل إضافة المندوب');
-          }
+        if (!metadata.joinDate || !metadata.contractType) {
+          return NextResponse.json(
+            { success: false, error: 'الطلب يفتقد بيانات العقد أو تاريخ الانضمام — يرجى رفض الطلب وإعادة إرساله' },
+            { status: 400 }
+          );
         }
+
+        if (adminContractEndOverride) {
+          const overrideCheck = validateAssignmentMetadata({
+            joinDate: metadata.joinDate,
+            contractType: metadata.contractType,
+            contractEndDate: String(adminContractEndOverride),
+            allowCustomEndDate: true,
+          });
+          if (!overrideCheck.ok) {
+            return NextResponse.json({ success: false, error: overrideCheck.error }, { status: 400 });
+          }
+          metadata = {
+            contractType: overrideCheck.contractType,
+            joinDate: overrideCheck.joinDate,
+            contractEndDate: overrideCheck.contractEndDate,
+          };
+        } else if (!metadata.contractEndDate) {
+          const auto = validateAssignmentMetadata({
+            joinDate: metadata.joinDate,
+            contractType: metadata.contractType,
+          });
+          if (!auto.ok) {
+            return NextResponse.json({ success: false, error: auto.error }, { status: 400 });
+          }
+          metadata.contractEndDate = auto.contractEndDate;
+        }
+
+        await applyApprovedRiderMetadata({
+          riderCode,
+          riderName,
+          zone,
+          supervisorCode,
+          metadata,
+        });
       } catch (error: any) {
         console.error('[AssignmentRequest] Error processing rider (before sheet update):', error);
         return NextResponse.json(

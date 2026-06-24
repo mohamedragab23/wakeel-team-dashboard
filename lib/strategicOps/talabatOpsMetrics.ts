@@ -61,7 +61,14 @@ export type KpiAuditTrace = {
 export type SourceDataCoverage = {
   completenessPercentage: number;
   joinDateCoveragePercent: number;
+  operationalCoveragePercent: number;
+  metadataCoveragePercent: number;
+  /** min(operational, metadata) — informational / legacy */
   coverage: number;
+  overallReadinessPercent: number;
+  operationalAnalyticsEnabled: boolean;
+  metadataAnalyticsEnabled: boolean;
+  /** Legacy combined gate — still min(operational, metadata) for non–Control Tower sections */
   strategicKpisEnabled: boolean;
   insufficientDataLabelAr: string;
 };
@@ -275,15 +282,23 @@ export function resolveFleetDailyTargetHours(
 
 export function computeSourceDataCoverage(
   completenessPercentage: number,
-  joinDateCoveragePercent: number
+  metadataCoveragePercent: number
 ): SourceDataCoverage {
-  const coverage = round2(Math.min(completenessPercentage, joinDateCoveragePercent));
-  const strategicKpisEnabled = coverage >= STRATEGIC_KPI_COVERAGE_THRESHOLD;
+  const operational = round2(completenessPercentage);
+  const metadata = round2(metadataCoveragePercent);
+  const overallReadinessPercent = round2(Math.min(operational, metadata));
+  const operationalAnalyticsEnabled = operational >= STRATEGIC_KPI_COVERAGE_THRESHOLD;
+  const metadataAnalyticsEnabled = metadata >= STRATEGIC_KPI_COVERAGE_THRESHOLD;
   return {
-    completenessPercentage: round2(completenessPercentage),
-    joinDateCoveragePercent: round2(joinDateCoveragePercent),
-    coverage,
-    strategicKpisEnabled,
+    completenessPercentage: operational,
+    joinDateCoveragePercent: metadata,
+    operationalCoveragePercent: operational,
+    metadataCoveragePercent: metadata,
+    coverage: overallReadinessPercent,
+    overallReadinessPercent,
+    operationalAnalyticsEnabled,
+    metadataAnalyticsEnabled,
+    strategicKpisEnabled: overallReadinessPercent >= STRATEGIC_KPI_COVERAGE_THRESHOLD,
     insufficientDataLabelAr: 'بيانات غير كافية',
   };
 }

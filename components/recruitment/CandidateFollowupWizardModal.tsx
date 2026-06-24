@@ -12,6 +12,7 @@ import {
   HIRING_DECISION_VALUES,
   OFFICE_MANAGER_ASSIGNMENT_OPTION } from '@/lib/recruitment/types';
 import { ZONE_OPTIONS } from '@/lib/zones';
+import { CONTRACT_TYPE_OPTIONS, computeContractEndDate, parseRiderIsoDate } from '@/lib/riderMetadata';
 
 type Props = {
   candidate: Candidate | null;
@@ -25,6 +26,8 @@ type AssignmentRequestDraft = {
   riderName: string;
   zone: string;
   supervisorCode: string;
+  joinDate: string;
+  contractType: string;
 };
 
 type ProgressState = 'done' | 'current' | 'upcoming' | 'blocked';
@@ -46,7 +49,10 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
     riderCode: '',
     riderName: '',
     zone: (ZONE_OPTIONS[0] as string) || '',
-    supervisorCode: '' });
+    supervisorCode: '',
+    joinDate: '',
+    contractType: '',
+  });
   const canManageFinalAssignment = userRole === 'admin' || userRole === 'recruitment_manager';
 
   const { data: supervisors = [] } = useQuery({
@@ -178,8 +184,10 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
     const riderName = assignmentReq.riderName.trim();
     const zone = assignmentReq.zone.trim();
     const supervisorCode = assignmentReq.supervisorCode.trim();
-    if (!riderCode || !riderName || !zone || !supervisorCode) {
-      setRequestError('اكتب كود واسم المندوب والزون واختر المشرف');
+    const joinDate = assignmentReq.joinDate.trim();
+    const contractType = assignmentReq.contractType.trim();
+    if (!riderCode || !riderName || !zone || !supervisorCode || !joinDate || !contractType) {
+      setRequestError('اكتب كود واسم المندوب والزون واختر المشرف وأدخل تاريخ الانضمام ونوع العقد');
       return;
     }
     setRequestLoading(true);
@@ -195,8 +203,12 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
           riderName,
           zone,
           supervisorCode,
+          joinDate,
+          contractType,
           source: 'recruitment',
-          candidateId: candidate.id }) });
+          candidateId: candidate.id,
+        }),
+      });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل إرسال طلب التعيين');
       setRequestSuccess('تم إرسال الطلب للإدارة بنجاح. سيظهر في صفحة طلبات التعيين لدى الأدمن.');
@@ -421,6 +433,39 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
                           </option>
                         ))}
                       </select>
+                    </Field>
+                    <Field label="نوع العقد *">
+                      <select
+                        className={inputClass}
+                        value={assignmentReq.contractType}
+                        onChange={(e) => setAssignmentReq({ ...assignmentReq, contractType: e.target.value })}
+                      >
+                        <option value="">— اختر —</option>
+                        {CONTRACT_TYPE_OPTIONS.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="تاريخ الانضمام *">
+                      <input
+                        type="date"
+                        className={inputClass}
+                        value={assignmentReq.joinDate}
+                        onChange={(e) => setAssignmentReq({ ...assignmentReq, joinDate: e.target.value })}
+                      />
+                    </Field>
+                    <Field label="تاريخ انتهاء العقد (تلقائي)">
+                      <input
+                        className={inputClass}
+                        readOnly
+                        value={
+                          parseRiderIsoDate(assignmentReq.joinDate)
+                            ? computeContractEndDate(assignmentReq.joinDate)
+                            : '—'
+                        }
+                      />
                     </Field>
                   </div>
                   {requestError ? <p className="text-[#FB7185] text-xs">{requestError}</p> : null}

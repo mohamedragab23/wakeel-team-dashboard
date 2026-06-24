@@ -5,6 +5,7 @@ import { useState } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery } from '@tanstack/react-query';
 import { ZONE_OPTIONS } from '@/lib/zones';
+import RiderMetadataFields from '@/components/RiderMetadataFields';
 
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
 
@@ -32,6 +33,8 @@ export default function ReactivationRequestsPage() {
   const [riderCode, setRiderCode] = useState('');
   const [riderName, setRiderName] = useState('');
   const [zone, setZone] = useState('');
+  const [joinDate, setJoinDate] = useState('');
+  const [contractType, setContractType] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
@@ -63,13 +66,18 @@ export default function ReactivationRequestsPage() {
         body: JSON.stringify({
           riderCode: riderCode.trim(),
           riderName: riderName.trim(),
-          zone: zone.trim() }) });
+          zone: zone.trim(),
+          joinDate: joinDate.trim(),
+          contractType: contractType.trim(),
+        }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'فشل إرسال الطلب');
       setMsg({ type: 'ok', text: '✅ تم إرسال طلب إعادة التفعيل بنجاح' });
       setRiderCode('');
       setRiderName('');
       setZone('');
+      setJoinDate('');
+      setContractType('');
       await refetch();
     } catch (error: any) {
       setMsg({ type: 'err', text: `❌ ${error.message || 'حدث خطأ'}` });
@@ -138,6 +146,12 @@ export default function ReactivationRequestsPage() {
                 ))}
               </select>
             </div>
+            <RiderMetadataFields
+              joinDate={joinDate}
+              contractType={contractType}
+              onJoinDateChange={setJoinDate}
+              onContractTypeChange={setContractType}
+            />
             <button
               type="submit"
               disabled={submitting}

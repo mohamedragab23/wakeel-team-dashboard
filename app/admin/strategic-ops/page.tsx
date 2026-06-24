@@ -9,10 +9,13 @@ import { ZONE_OPTIONS } from '@/lib/zones';
 import { STRATEGIC_OPS_LABELS as L } from '@/lib/strategicOps/labelsAr';
 import { GHOST_CATEGORY_LABELS_AR } from '@/lib/strategicOps/ghostRiderAudit';
 import type { StrategicOpsReport } from '@/lib/strategicOps/buildReport';
+import type { KpiRootCause, ManagementAction } from '@/lib/strategicOps/controlTower/types';
+import { formatKpiTrendSummary } from '@/lib/strategicOps/controlTower/kpiRootCause';
 import {
   exportStrategicOpsExcel,
   exportStrategicOpsPdf,
   copyStrategicOpsText } from '@/lib/strategicOps/clientExport';
+import SupervisorScorecardsSection from '@/components/strategicOps/SupervisorScorecardsSection';
 import {
   Bar,
   BarChart,
@@ -100,22 +103,134 @@ function MiniTable({ headers, rows }: { headers: string[]; rows: ReactNode[][] }
   );
 }
 
+function ActionPriorityBadge({ priority }: { priority: ManagementAction['priority'] }) {
+  const styles = {
+    critical: 'bg-red-500/25 text-red-200 border-red-500/50',
+    high: 'bg-orange-500/25 text-orange-200 border-orange-500/50',
+    medium: 'bg-amber-500/25 text-amber-200 border-amber-500/50',
+    low: 'bg-slate-500/25 text-slate-200 border-slate-500/50',
+  };
+  const labels = {
+    critical: L.priorityCritical,
+    high: L.priorityHigh,
+    medium: L.priorityMedium,
+    low: L.priorityLow,
+  };
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-xs border font-medium ${styles[priority]}`}>
+      {labels[priority]}
+    </span>
+  );
+}
+
+function ImpactBadge({ level }: { level: 'critical' | 'high' | 'medium' | 'low' }) {
+  const colors = {
+    critical: 'text-red-300 border-red-500/40 bg-red-500/15',
+    high: 'text-orange-300 border-orange-500/40 bg-orange-500/15',
+    medium: 'text-amber-300 border-amber-500/40 bg-amber-500/15',
+    low: 'text-slate-300 border-slate-500/40 bg-slate-500/15',
+  };
+  const labels = {
+    critical: L.priorityCritical,
+    high: L.priorityHigh,
+    medium: L.priorityMedium,
+    low: L.priorityLow,
+  };
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-xs border ${colors[level]}`}>{labels[level]}</span>
+  );
+}
+
+function ReliabilityBadge({
+  score,
+  classification,
+  label,
+}: {
+  score: number;
+  classification: 'excellent' | 'good' | 'warning' | 'unreliable';
+  label: string;
+}) {
+  const colors = {
+    excellent: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200',
+    good: 'border-cyan-500/40 bg-cyan-500/15 text-cyan-200',
+    warning: 'border-amber-500/40 bg-amber-500/15 text-amber-200',
+    unreliable: 'border-red-500/40 bg-red-500/15 text-red-200',
+  };
+  return (
+    <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm border ${colors[classification]}`}>
+      <span className="font-bold">{score}/100</span>
+      <span>{label}</span>
+    </span>
+  );
+}
+
 function TalabatKpiCard({
   label,
   value,
   sub,
-  trace }: {
+  trace,
+  rootCause,
+}: {
   label: string;
   value: string | number;
   sub?: string;
   trace?: StrategicOpsReport['talabatOperations']['auditTraces'][number];
+  rootCause?: KpiRootCause;
 }) {
   const [open, setOpen] = useState(false);
+  const [whyOpen, setWhyOpen] = useState(false);
   return (
     <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-4">
       <p className="text-xs text-[#94A3B8] mb-1">{label}</p>
       <p className="text-2xl font-bold text-[#EAF0FF]">{value}</p>
       {sub && <p className="text-xs text-[#64748B] mt-1">{sub}</p>}
+      {rootCause && (
+        <>
+          <button
+            type="button"
+            onClick={() => setWhyOpen((o) => !o)}
+            className="text-xs text-emerald-300/90 mt-2 me-3 hover:underline"
+          >
+            {whyOpen ? `إخفاء ${L.kpiWhy}` : L.kpiWhy}
+          </button>
+          {whyOpen && (
+            <div className="mt-2 text-xs text-[#94A3B8] space-y-2 border-t border-white/10 pt-2">
+              <p className="text-[#CBD5E1]">{rootCause.summaryAr}</p>
+              <p className="text-[#64748B]">{L.trendLabel}: {formatKpiTrendSummary(rootCause.trend)}</p>
+              {rootCause.factors.length > 0 && (
+                <div>
+                  <p className="text-[#64748B] mb-1">{L.topFactors}:</p>
+                  <ul className="space-y-0.5">
+                    {rootCause.factors.map((f) => (
+                      <li key={f.labelAr}>• {f.labelAr}: <strong>{f.value}</strong> — {f.impactAr}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {rootCause.topSupervisors.length > 0 && (
+                <div>
+                  <p className="text-[#64748B] mb-1">{L.topSupervisors}:</p>
+                  <ul className="space-y-0.5">
+                    {rootCause.topSupervisors.slice(0, 3).map((s) => (
+                      <li key={s.code}>• {s.name}: {s.contribution} {s.unit}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {rootCause.topCities.length > 0 && (
+                <div>
+                  <p className="text-[#64748B] mb-1">{L.topCities}:</p>
+                  <ul className="space-y-0.5">
+                    {rootCause.topCities.slice(0, 3).map((c) => (
+                      <li key={c.zone}>• {c.zone}: {c.contribution} {c.unit}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
       {trace && (
         <>
           <button
@@ -205,6 +320,11 @@ export default function StrategicOpsCenterPage() {
       String(s.region ?? '').split(/[|,]/).map((z) => z.trim()).includes(zone)
     );
   }, [supervisorsList, zone]);
+
+  const kpiRootCauseMap = useMemo(() => {
+    if (!report?.controlTower) return new Map<string, KpiRootCause>();
+    return new Map(report.controlTower.kpiRootCauses.map((r) => [r.kpiKey, r]));
+  }, [report?.controlTower]);
 
   const runAnalysis = () => {
     if (!startDate || !endDate) {
@@ -324,6 +444,142 @@ export default function StrategicOpsCenterPage() {
               </div>
             </div>
 
+            {report.controlTower && (
+              <>
+                <Section title={L.reliabilityTitle}>
+                  <div className="flex flex-wrap items-center gap-3 mb-4">
+                    <ReliabilityBadge
+                      score={report.controlTower.reliability.overallScore}
+                      classification={report.controlTower.reliability.classification}
+                      label={report.controlTower.reliability.classificationLabelAr}
+                    />
+                    <span className="text-xs text-[#64748B]">
+                      {L.overallReadiness}: {report.controlTower.overallReadinessPercent}%
+                      {report.controlTower.disabled ? ' — insights gated' : ''}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                    <StatCard
+                      label={L.operationalCoverage}
+                      value={`${report.controlTower.operationalCoveragePercent}%`}
+                      sub={report.controlTower.insightsEnabled ? L.gateOpen : L.gateClosed}
+                    />
+                    <StatCard
+                      label={L.metadataCoverage}
+                      value={`${report.controlTower.metadataCoveragePercent}%`}
+                      sub={report.controlTower.metadataCoveragePercent >= 80 ? L.gateOpen : L.gateClosed}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <StatCard label={L.coverageReliability} value={`${report.controlTower.reliability.coverageScore}/100`} sub={`${report.controlTower.operationalCoveragePercent}% ${L.operationalCoverage}`} />
+                    <StatCard label={L.mappingHealth} value={`${report.controlTower.reliability.mappingHealthScore}/100`} sub={`${report.controlTower.mappingHealth.mappedCount} ${L.mappedRiders} · ${report.controlTower.mappingHealth.unmappedCount} ${L.unmappedRiders}`} />
+                    <StatCard label={L.rootCauseConfidence} value={`${report.controlTower.reliability.rootCauseConfidenceScore}/100`} />
+                    <StatCard label={L.actionReliability} value={`${report.controlTower.reliability.actionReliabilityScore}/100`} sub={`${L.rawRecovery}: ${report.controlTower.executiveFocusAudit.rawRecoveryHoursTotal} · ${L.dedupRecovery}: ${report.controlTower.executiveFocusAudit.deduplicatedRecoveryHoursTotal}`} />
+                  </div>
+                  {report.controlTower.disabled && (
+                    <p className="text-sm text-amber-300/90 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 mb-3">
+                      {report.controlTower.disabledReasonAr ?? L.insightsDisabled}
+                    </p>
+                  )}
+                  {report.controlTower.metadataLimitedReasonAr && (
+                    <p className="text-sm text-cyan-200/90 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-3">
+                      {report.controlTower.metadataLimitedReasonAr}
+                    </p>
+                  )}
+                </Section>
+
+                {report.controlTower.insightsEnabled && (
+                <Section title={L.executiveFocus}>
+                  <p className="text-sm text-[#94A3B8] mb-4">{L.controlTowerSubtitle}</p>
+                  {report.controlTower.executiveFocus.length === 0 ? (
+                    <p className="text-sm text-emerald-300/90">لا توجد إجراءات حرجة — الأداء ضمن النطاق المقبول.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {report.controlTower.executiveFocus.map((action, idx) => (
+                        <div
+                          key={action.id}
+                          className="rounded-xl border border-white/10 bg-white/5 p-4 flex flex-col sm:flex-row sm:items-start gap-3"
+                        >
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-lg font-bold text-[#EAF0FF] w-6">{idx + 1}</span>
+                            <ActionPriorityBadge priority={action.priority} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-[#EAF0FF]">
+                              {action.entityType === 'supervisor' && '🔴 '}
+                              {action.entityName}
+                            </p>
+                            <p className="text-sm text-[#94A3B8] mt-1">{action.problemAr}</p>
+                            <p className="text-sm text-emerald-300/90 mt-2">
+                              <span className="text-[#64748B]">{L.potentialRecovery}: </span>
+                              +{action.deduplicatedRecoveryHours} {L.recoveryPerDay}
+                            </p>
+                            <p className="text-sm text-cyan-200/90 mt-1">
+                              <span className="text-[#64748B]">{L.recommendedAction}: </span>
+                              {action.actionAr}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Section>
+                )}
+
+                {report.controlTower.insightsEnabled && report.controlTower.supervisorScorecards && (
+                  <SupervisorScorecardsSection scorecards={report.controlTower.supervisorScorecards} />
+                )}
+
+                <Section title={L.achievementDecomposition}>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <StatCard label="التحقيق %" value={`${report.controlTower.achievementDecomposition.achievementPercent}%`} />
+                    <StatCard label={L.gapHours} value={report.controlTower.achievementDecomposition.gapHoursDaily} />
+                    <StatCard label={L.gapRiders} value={report.controlTower.achievementDecomposition.gapRidersDaily} />
+                    <StatCard label={L.gapShifts} value={report.controlTower.achievementDecomposition.gapShiftsTotal} />
+                  </div>
+                  <div className="grid lg:grid-cols-2 gap-6">
+                    <div>
+                      <h3 className="text-sm font-medium text-[#94A3B8] mb-2">Top 10 — {L.topSupervisors} (فقدان الهدف)</h3>
+                      <MiniTable
+                        headers={[L.supervisorLabel, 'س/يوم مفقودة']}
+                        rows={report.controlTower.achievementDecomposition.topSupervisorsByLoss.map((s) => [
+                          s.name,
+                          s.lostTargetHoursDaily,
+                        ])}
+                      />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-medium text-[#94A3B8] mb-2">Top 10 — {L.riderLabel} (فقدان الساعات)</h3>
+                      <MiniTable
+                        headers={[L.riderLabel, L.lostHoursCol]}
+                        rows={report.controlTower.achievementDecomposition.topRidersByLoss.map((r) => [
+                          r.name,
+                          r.lostHoursDaily,
+                        ])}
+                      />
+                    </div>
+                  </div>
+                </Section>
+
+                {report.controlTower.insightsEnabled && (
+                <Section title={L.topNegativeRiders}>
+                  <MiniTable
+                    headers={[L.riderLabel, L.supervisorLabel, L.expectedHoursCol, L.actualHoursCol, L.lostHoursCol, L.noShowCol, L.impactCol]}
+                    rows={report.controlTower.topNegativeImpactRiders.map((r) => [
+                      `${r.name} (${r.code})`,
+                      r.supervisorName,
+                      r.expectedHoursDaily,
+                      r.actualHoursDaily,
+                      r.lostHoursDaily,
+                      r.noShowCount,
+                      <ImpactBadge key={r.code} level={r.impactLevel} />,
+                    ])}
+                  />
+                </Section>
+                )}
+              </>
+            )}
+
             <Section title={L.talabatOperations}>
               <div className="flex flex-wrap gap-2 mb-4">
                 <button
@@ -345,14 +601,14 @@ export default function StrategicOpsCenterPage() {
                 </span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <TalabatKpiCard label={L.headcount} value={report.talabatOperations.headcount} trace={report.talabatOperations.auditTraces[0]} />
-                <TalabatKpiCard label={L.activeRiders} value={report.talabatOperations.activeRiders} sub={`تشخيص فريد: ${report.talabatOperations.uniqueActiveRidersInPeriod}`} trace={report.talabatOperations.auditTraces[1]} />
-                <TalabatKpiCard label={L.noShowRiders} value={report.talabatOperations.noShowRiders} trace={report.talabatOperations.auditTraces[2]} />
-                <TalabatKpiCard label={L.actualHours} value={report.talabatOperations.actualHours} sub="متوسط يومي" trace={report.talabatOperations.auditTraces[3]} />
-                <TalabatKpiCard label={L.targetHours} value={report.talabatOperations.targetHours} sub="متوسط يومي" trace={report.talabatOperations.auditTraces[4]} />
-                <TalabatKpiCard label={L.achievementPercent} value={`${report.talabatOperations.achievementPercent}%`} trace={report.talabatOperations.auditTraces[5]} />
+                <TalabatKpiCard label={L.headcount} value={report.talabatOperations.headcount} trace={report.talabatOperations.auditTraces[0]} rootCause={kpiRootCauseMap.get('headcount')} />
+                <TalabatKpiCard label={L.activeRiders} value={report.talabatOperations.activeRiders} sub={`تشخيص فريد: ${report.talabatOperations.uniqueActiveRidersInPeriod}`} trace={report.talabatOperations.auditTraces[1]} rootCause={kpiRootCauseMap.get('activeRiders')} />
+                <TalabatKpiCard label={L.noShowRiders} value={report.talabatOperations.noShowRiders} trace={report.talabatOperations.auditTraces[2]} rootCause={kpiRootCauseMap.get('noShowRiders')} />
+                <TalabatKpiCard label={L.actualHours} value={report.talabatOperations.actualHours} sub="متوسط يومي" trace={report.talabatOperations.auditTraces[3]} rootCause={kpiRootCauseMap.get('actualHours')} />
+                <TalabatKpiCard label={L.targetHours} value={report.talabatOperations.targetHours} sub="متوسط يومي" trace={report.talabatOperations.auditTraces[4]} rootCause={kpiRootCauseMap.get('targetHours')} />
+                <TalabatKpiCard label={L.achievementPercent} value={`${report.talabatOperations.achievementPercent}%`} trace={report.talabatOperations.auditTraces[5]} rootCause={kpiRootCauseMap.get('achievementPercent')} />
                 <TalabatKpiCard label={L.avgHoursPerActiveRider} value={report.talabatOperations.avgHoursPerActiveRider} trace={report.talabatOperations.auditTraces[6]} />
-                <TalabatKpiCard label={L.utilizationRate} value={`${report.talabatOperations.utilizationPercent}%`} trace={report.talabatOperations.auditTraces[7]} />
+                <TalabatKpiCard label={L.utilizationRate} value={`${report.talabatOperations.utilizationPercent}%`} trace={report.talabatOperations.auditTraces[7]} rootCause={kpiRootCauseMap.get('utilizationPercent')} />
               </div>
               <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
                 <p className="text-sm font-semibold text-amber-200/90 mb-3">{L.noShowComparison}</p>
@@ -543,6 +799,27 @@ export default function StrategicOpsCenterPage() {
               {report.ghostRiderAudit.riders.length > 50 && (
                 <p className="text-xs text-[#64748B] mt-2">يعرض ٥٠ من {report.ghostRiderAudit.riders.length} — صدّر Excel للقائمة الكاملة</p>
               )}
+            </Section>
+
+            <Section title={L.metadataCompletionAudit}>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
+                <StatCard label={L.operationalCoverage} value={`${report.sourceDataCoverage.operationalCoveragePercent}%`} sub={report.sourceDataCoverage.operationalAnalyticsEnabled ? L.gateOpen : L.gateClosed} />
+                <StatCard label={L.metadataCoverage} value={`${report.sourceDataCoverage.metadataCoveragePercent}%`} sub={report.sourceDataCoverage.metadataAnalyticsEnabled ? L.gateOpen : L.gateClosed} />
+                <StatCard label={L.overallReadiness} value={`${report.sourceDataCoverage.overallReadinessPercent}%`} />
+                <StatCard label="بدون Join Date" value={report.metadataCompletionAudit.ridersMissingJoinDate} />
+                <StatCard label={L.ridersMissingContract} value={report.metadataCompletionAudit.ridersMissingContractType} />
+              </div>
+              <MiniTable
+                headers={['المشرف', 'الإجمالي', 'Join Date', 'Contract Type', 'Contract End', 'الاكتمال %']}
+                rows={report.metadataCompletionAudit.bySupervisor.slice(0, 25).map((s) => [
+                  s.supervisorName || s.supervisorCode || '—',
+                  s.totalRiders,
+                  s.ridersMissingJoinDate,
+                  s.ridersMissingContractType,
+                  s.ridersMissingContractEndDate,
+                  `${s.metadataCompletionPercent}%`,
+                ])}
+              />
             </Section>
 
             <Section title={L.joinDateAudit}>

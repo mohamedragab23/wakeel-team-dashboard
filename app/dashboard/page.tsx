@@ -14,6 +14,7 @@ import Button from '@/components/ui-v2/Button';
 import Tabs, { type TabItem } from '@/components/ui-v2/Tabs';
 import { v2CssVars } from '@/theme/tokens';
 import { ZONE_OPTIONS } from '@/lib/zones';
+import RiderMetadataFields from '@/components/RiderMetadataFields';
 
 type DashboardPeriodMode = 'last_upload_day' | 'custom_range';
 
@@ -50,6 +51,8 @@ export default function DashboardPage() {
   const [riderCode, setRiderCode] = useState('');
   const [riderName, setRiderName] = useState('');
   const [zone, setZone] = useState('');
+  const [joinDate, setJoinDate] = useState('');
+  const [contractType, setContractType] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [assignmentMessage, setAssignmentMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
@@ -140,7 +143,10 @@ export default function DashboardPage() {
         body: JSON.stringify({
           riderCode: riderCode.trim(),
           riderName: riderName.trim(),
-          zone: zone.trim() }) });
+          zone: zone.trim(),
+          joinDate: joinDate.trim(),
+          contractType: contractType.trim(),
+        }) });
 
       const data = await response.json();
 
@@ -149,6 +155,8 @@ export default function DashboardPage() {
         setRiderCode('');
         setRiderName('');
         setZone('');
+        setJoinDate('');
+        setContractType('');
         setShowAssignmentForm(false);
         fetchPendingRequestsCount(); // Refresh count
         setTimeout(() => setAssignmentMessage(null), 5000);
@@ -282,6 +290,13 @@ export default function DashboardPage() {
                       </select>
                     </div>
                   </div>
+                  <RiderMetadataFields
+                    joinDate={joinDate}
+                    contractType={contractType}
+                    onJoinDateChange={setJoinDate}
+                    onContractTypeChange={setContractType}
+                    className="mt-2"
+                  />
                   <div className="flex gap-3">
                     <button
                       type="submit"
@@ -297,6 +312,8 @@ export default function DashboardPage() {
                         setRiderCode('');
                         setRiderName('');
                         setZone('');
+                        setJoinDate('');
+                        setContractType('');
                         setAssignmentMessage(null);
                       }}
                       className="px-6 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors font-medium"
@@ -570,6 +587,12 @@ export default function DashboardPage() {
                     </select>
                   </div>
                 </div>
+                <RiderMetadataFields
+                  joinDate={joinDate}
+                  contractType={contractType}
+                  onJoinDateChange={setJoinDate}
+                  onContractTypeChange={setContractType}
+                />
                 <div className="flex flex-wrap gap-3">
                   <Button type="submit" disabled={submitting} variant="primary">
                     {submitting ? 'جاري الإرسال...' : 'إرسال الطلب'}
@@ -582,6 +605,8 @@ export default function DashboardPage() {
                       setRiderCode('');
                       setRiderName('');
                       setZone('');
+                      setJoinDate('');
+                      setContractType('');
                       setAssignmentMessage(null);
                     }}
                   >

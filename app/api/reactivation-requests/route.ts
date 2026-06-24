@@ -11,6 +11,13 @@ import {
 import { normalizeRiderCodeForPerformance } from '@/lib/dataFilter';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { invalidateRiderWorkflowCaches } from '@/lib/cacheInvalidation';
+import { validateAssignmentMetadata } from '@/lib/riderMetadata';
+import {
+  appendWorkflowMetadataToRow,
+  extractWorkflowMetadataFromRow,
+  WORKFLOW_METADATA_HEADERS,
+  type WorkflowRequestMetadata,
+} from '@/lib/workflowRequestMetadata';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +35,7 @@ function parseReactivationRow(row: any[]) {
   const requestDate = (hasZone ? row[6] : row[5])?.toString().trim() || '';
   const approvalDate = (hasZone ? row[7] : row[6])?.toString().trim() || '';
   const approvedBy = (hasZone ? row[8] : row[7])?.toString().trim() || '';
+  const metadata = extractWorkflowMetadataFromRow(row, hasZone);
   return {
     supervisorCode,
     supervisorName,
@@ -39,6 +47,7 @@ function parseReactivationRow(row: any[]) {
     approvalDate,
     approvedBy,
     hasZone,
+    ...metadata,
   };
 }
 
@@ -114,12 +123,19 @@ export async function POST(request: NextRequest) {
     const riderCode = String(body?.riderCode ?? '').trim();
     const riderName = String(body?.riderName ?? '').trim();
     const zone = String(body?.zone ?? '').trim();
+    const joinDate = String(body?.joinDate ?? '').trim();
+    const contractType = String(body?.contractType ?? '').trim();
 
-    if (!riderCode || !riderName || !zone) {
+    if (!riderCode || !riderName || !zone || !joinDate || !contractType) {
       return NextResponse.json(
-        { success: false, error: 'كود المندوب واسم المندوب والزون مطلوبة' },
+        { success: false, error: 'كود المندوب واسم المندوب والزون وتاريخ الانضمام ونوع العقد مطلوبة' },
         { status: 400 }
       );
+    }
+
+    const metadataCheck = validateAssignmentMetadata({ joinDate, contractType });
+    if (!metadataCheck.ok) {
+      return NextResponse.json({ success: false, error: metadataCheck.error }, { status: 400 });
     }
     if (!isAllowedZone(zone)) {
       return NextResponse.json(
@@ -138,6 +154,7 @@ export async function POST(request: NextRequest) {
       'تاريخ الطلب',
       'تاريخ الموافقة',
       'تمت الموافقة بواسطة',
+      ...WORKFLOW_METADATA_HEADERS,
     ]);
 
     const reqRows = await getSheetData('طلبات_إعادة_التفعيل', false);
@@ -160,17 +177,24 @@ export async function POST(request: NextRequest) {
     await appendToSheet(
       'طلبات_إعادة_التفعيل',
       [
-        [
-          String(decoded.code ?? '').trim(),
-          String(decoded.name ?? '').trim(),
-          riderCode,
-          riderName,
-          zone,
-          'pending',
-          requestDate,
-          '',
-          '',
-        ],
+        appendWorkflowMetadataToRow(
+          [
+            String(decoded.code ?? '').trim(),
+            String(decoded.name ?? '').trim(),
+            riderCode,
+            riderName,
+            zone,
+            'pending',
+            requestDate,
+            '',
+            '',
+          ],
+          {
+            contractType: metadataCheck.contractType,
+            joinDate: metadataCheck.joinDate,
+            contractEndDate: metadataCheck.contractEndDate,
+          }
+        ),
       ],
       false
     );
@@ -207,6 +231,7 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
     const requestId = parseInt(String(body?.requestId ?? ''), 10);
     const action = String(body?.action ?? '').trim();
+    const adminContractEndOverride = body?.contractEndDate;
 
     if (!requestId || (action !== 'approve' && action !== 'reject')) {
       return NextResponse.json(
@@ -240,11 +265,56 @@ export async function PUT(request: NextRequest) {
     const approvedBy = String(decoded.name ?? decoded.code ?? '').trim();
 
     if (action === 'approve') {
+      let metadata: WorkflowRequestMetadata = {
+        contractType: parsed.contractType,
+        joinDate: parsed.joinDate,
+        contractEndDate: parsed.contractEndDate,
+      };
+
+      if (!metadata.joinDate || !metadata.contractType) {
+        return NextResponse.json(
+          { success: false, error: 'الطلب يفتقد بيانات العقد أو تاريخ الانضمام — يرجى رفض الطلب وإعادة إرساله' },
+          { status: 400 }
+        );
+      }
+
+      if (adminContractEndOverride) {
+        const overrideCheck = validateAssignmentMetadata({
+          joinDate: metadata.joinDate,
+          contractType: metadata.contractType,
+          contractEndDate: String(adminContractEndOverride),
+          allowCustomEndDate: true,
+        });
+        if (!overrideCheck.ok) {
+          return NextResponse.json({ success: false, error: overrideCheck.error }, { status: 400 });
+        }
+        metadata = {
+          contractType: overrideCheck.contractType,
+          joinDate: overrideCheck.joinDate,
+          contractEndDate: overrideCheck.contractEndDate,
+        };
+      } else if (!metadata.contractEndDate) {
+        const auto = validateAssignmentMetadata({
+          joinDate: metadata.joinDate,
+          contractType: metadata.contractType,
+        });
+        if (!auto.ok) {
+          return NextResponse.json({ success: false, error: auto.error }, { status: 400 });
+        }
+        metadata.contractEndDate = auto.contractEndDate;
+      }
+
       const targetNorm = normalizeRiderCodeForPerformance(parsed.riderCode);
       const allRiders = await getAllRiders(false);
       const existing = allRiders.find(
         (r) => normalizeRiderCodeForPerformance(r.code) === targetNorm
       );
+
+      const riderPayload = {
+        joinDate: metadata.joinDate,
+        contractType: metadata.contractType,
+        contractEndDate: metadata.contractEndDate,
+      };
 
       if (existing) {
         const up = await updateRider(existing.code, {
@@ -252,6 +322,7 @@ export async function PUT(request: NextRequest) {
           name: parsed.riderName || existing.name,
           region: parsed.zone || existing.region,
           status: 'نشط',
+          ...riderPayload,
         });
         if (!up.success) {
           return NextResponse.json(
@@ -266,8 +337,8 @@ export async function PUT(request: NextRequest) {
           region: parsed.zone || '',
           supervisorCode: parsed.supervisorCode,
           phone: '',
-          joinDate: new Date().toISOString().split('T')[0],
           status: 'نشط',
+          ...riderPayload,
         });
         if (!add.success) {
           return NextResponse.json(

@@ -138,6 +138,7 @@ export default function Layout({ children }: LayoutProps) {
         { href: '/deductions-upload', label: 'الاستقطاعات (Excel)', icon: '📑' },
         { href: '/termination-requests', label: 'الإقالات', icon: '🚫' },
         { href: '/reactivation-requests', label: 'إعادة التفعيل', icon: '🔄' },
+        { href: '/rider-metadata-audit', label: 'تدقيق بيانات المناديب', icon: '📝' },
         { href: '/admin/rider-strategic-profiles', label: 'إدارة بيانات المناديب', icon: '📋' },
         { href: '/performance', label: 'الأداء', icon: '📈' },
         { href: '/salary', label: 'الراتب', icon: '💰' },

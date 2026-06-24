@@ -41,6 +41,8 @@ export interface Rider {
   phone?: string;
   joinDate?: string;
   status?: string;
+  contractType?: string;
+  contractEndDate?: string;
 }
 
 export interface Debt {
@@ -363,6 +365,8 @@ export async function getAllRiders(useCache: boolean = true): Promise<Rider[]> {
         phone: row[5] ? row[5].toString().trim() : '',
         joinDate: row[6] ? row[6].toString().trim() : '',
         status: row[7] ? row[7].toString().trim() : 'نشط',
+        contractType: row[8] ? row[8].toString().trim() : '',
+        contractEndDate: row[9] ? row[9].toString().trim() : '',
       });
     }
 
@@ -401,6 +405,8 @@ export async function addRider(rider: Rider): Promise<{ success: boolean; error?
       rider.phone || '',
       rider.joinDate || new Date().toISOString().split('T')[0],
       rider.status || 'نشط',
+      rider.contractType || '',
+      rider.contractEndDate || '',
     ];
 
     const success = await appendToSheet('المناديب', [row]);
@@ -424,7 +430,16 @@ export async function addRider(rider: Rider): Promise<{ success: boolean; error?
  */
 export async function updateRider(
   riderCode: string,
-  updates: { supervisorCode?: string; name?: string; region?: string; phone?: string; status?: string }
+  updates: {
+    supervisorCode?: string;
+    name?: string;
+    region?: string;
+    phone?: string;
+    status?: string;
+    joinDate?: string;
+    contractType?: string;
+    contractEndDate?: string;
+  }
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const { getSheetData, updateSheetRange } = await import('./googleSheets');
@@ -455,14 +470,16 @@ export async function updateRider(
     
     // Prepare updated row - use trimmed riderCode
     const updatedRow = [
-      match.actualCode, // preserve sheet code (e.g. leading zeros)
-      updates.name || currentRow[1] || '', // name
-      updates.region !== undefined ? updates.region : (currentRow[2] || ''), // region
-      newSupervisorCode, // supervisorCode
-      newSupervisorName, // supervisorName
-      updates.phone !== undefined ? updates.phone : (currentRow[5] || ''), // phone
-      currentRow[6] || new Date().toISOString().split('T')[0], // joinDate
-      updates.status !== undefined ? updates.status : (currentRow[7] || 'نشط'), // status
+      match.actualCode,
+      updates.name || currentRow[1] || '',
+      updates.region !== undefined ? updates.region : (currentRow[2] || ''),
+      newSupervisorCode,
+      newSupervisorName,
+      updates.phone !== undefined ? updates.phone : (currentRow[5] || ''),
+      updates.joinDate !== undefined ? updates.joinDate : (currentRow[6] || ''),
+      updates.status !== undefined ? updates.status : (currentRow[7] || 'نشط'),
+      updates.contractType !== undefined ? updates.contractType : (currentRow[8] || ''),
+      updates.contractEndDate !== undefined ? updates.contractEndDate : (currentRow[9] || ''),
     ];
     
     console.log(`[UpdateRider] Updated row data:`, {
@@ -475,7 +492,7 @@ export async function updateRider(
     console.log(`[UpdateRider] Updating rider "${riderCodeTrimmed}" at row ${rowIndex}. Old supervisor: "${oldSupervisorCode}", New supervisor: "${newSupervisorCode}"`);
     console.log(`[UpdateRider] Full row data to update:`, updatedRow);
     
-    const updateSuccess = await updateSheetRange('المناديب', `A${rowIndex}:H${rowIndex}`, [updatedRow]);
+    const updateSuccess = await updateSheetRange('المناديب', `A${rowIndex}:J${rowIndex}`, [updatedRow]);
     
     if (!updateSuccess) {
       console.error(`[UpdateRider] Failed to update rider "${riderCodeTrimmed}" in Google Sheets`);
