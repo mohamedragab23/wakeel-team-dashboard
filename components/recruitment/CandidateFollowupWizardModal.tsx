@@ -79,7 +79,10 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
         supervisorCode:
           candidate.finalAssignedSupervisorCode ||
           candidate.assignedSupervisorCode ||
-          '' });
+          '',
+        joinDate: '',
+        contractType: '',
+      });
       try {
         const user = getStoredUser() || {};
         setUserRole(String(user.role ?? ''));

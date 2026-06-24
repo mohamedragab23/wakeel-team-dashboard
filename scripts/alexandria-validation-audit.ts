@@ -143,9 +143,9 @@ Control Tower insights: **${ct?.insightsEnabled ? 'ENABLED' : 'DISABLED'}**
 
 | Module | Status |
 |--------|--------|
-| Executive Focus | ${ct?.executiveFocusCount ?? 0} actions |
-| Root Cause | ${ct?.kpiRootCausesCount ?? 0} KPIs |
-| Rider Impact | ${ct?.topNegativeImpactRidersCount ?? 0} riders |
+| Executive Focus | ${ct?.executiveFocus.length ?? 0} actions |
+| Root Cause | ${ct?.kpiRootCauses.length ?? 0} KPIs |
+| Rider Impact | ${ct?.topNegativeImpactRiders.length ?? 0} riders |
 | Achievement Decomposition | gap ${ct?.achievementDecomposition.gapHoursDaily ?? '—'} h/day |
 
 ---
