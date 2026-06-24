@@ -16,6 +16,10 @@
     {
       "path": "/api/cron/daily-backup",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/rider-metadata-reminder",
+      "schedule": "0 7 * * *"
     }
   ]
 }

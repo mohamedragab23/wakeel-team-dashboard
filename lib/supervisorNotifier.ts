@@ -1,6 +1,7 @@
 import { getSupervisorContacts } from '@/lib/supervisorContacts';
 import { renderSupervisorSummaryPng } from '@/lib/supervisorSummaryImage';
 import { Buffer } from 'buffer';
+import type { SupervisorJoinDateAlert } from '@/lib/riderMetadataNotifications';
 
 export type SupervisorShiftSummary = {
   supervisor: string;
@@ -231,6 +232,100 @@ export async function notifySupervisorsShiftSummary(params: {
       supervisor: row.supervisor,
       error:
         'لا توجد قناة إرسال مفعلة. فعّل WhatsApp (WHATSAPP_TOKEN/WHATSAPP_PHONE_NUMBER_ID) أو Telegram (TELEGRAM_BOT_TOKEN) أو Email (RESEND_*).',
+    });
+  }
+
+  return { sent, skipped, failed };
+}
+
+function buildMissingJoinDateMessage(alert: SupervisorJoinDateAlert): string {
+  const lines = [
+    `*تنبيه: مناديب بدون Join Date*`,
+    `المشرف: ${alert.supervisorName}`,
+    `العدد: ${alert.missingJoinDateCount}`,
+    '',
+  ];
+  const preview = alert.ridersMissingJoinDate.slice(0, 15);
+  for (const r of preview) {
+    lines.push(`• ${r.name} (${r.riderCode})`);
+  }
+  if (alert.ridersMissingJoinDate.length > 15) {
+    lines.push(`… و${alert.ridersMissingJoinDate.length - 15} مناديب آخرين`);
+  }
+  lines.push('', 'يرجى إكمال Join Date و Contract Type من لوحة «تدقيق بيانات المناديب» أو عبر طلب تعيين/إعادة تفعيل.');
+  return lines.join('\n');
+}
+
+export async function notifySupervisorsMissingJoinDate(alerts: SupervisorJoinDateAlert[]) {
+  if (alerts.length === 0) {
+    return { sent: 0, skipped: [], failed: [] };
+  }
+
+  const contacts = await getSupervisorContacts();
+  const byName = new Map(contacts.map((c) => [norm(c.name).toLowerCase(), c]));
+  const title = 'تنبيه: مناديب بدون Join Date';
+
+  const preferWhatsApp = !!(process.env.WHATSAPP_TOKEN?.trim() && process.env.WHATSAPP_PHONE_NUMBER_ID?.trim());
+  const preferTelegram = !!(process.env.TELEGRAM_BOT_TOKEN?.trim());
+  const preferEmail = !!(process.env.RESEND_API_KEY?.trim() && process.env.RESEND_FROM_EMAIL?.trim());
+  const defaultTelegramChatId = process.env.TELEGRAM_DEFAULT_CHAT_ID?.trim();
+
+  let sent = 0;
+  const skipped: Array<{ supervisor: string; reason: string }> = [];
+  const failed: Array<{ supervisor: string; error: string }> = [];
+
+  for (const alert of alerts) {
+    const body = buildMissingJoinDateMessage(alert);
+    const c = byName.get(norm(alert.supervisorName).toLowerCase());
+
+    if (!c) {
+      skipped.push({
+        supervisor: alert.supervisorName,
+        reason: 'المشرف غير موجود في جدول المشرفين أو الاسم غير مطابق',
+      });
+      continue;
+    }
+
+    if (preferWhatsApp && c.phoneE164) {
+      try {
+        await sendViaWhatsAppCloud({ toE164: c.phoneE164, body: `${title}\n\n${body}` });
+        sent += 1;
+        continue;
+      } catch (e: any) {
+        failed.push({ supervisor: alert.supervisorName, error: e?.message || String(e) });
+        continue;
+      }
+    }
+
+    if (preferTelegram) {
+      const chatId = c.telegramChatId || defaultTelegramChatId;
+      if (chatId) {
+        try {
+          await sendViaTelegram({ chatId, text: `${title}\n\n${body}` });
+          sent += 1;
+          continue;
+        } catch (e: any) {
+          failed.push({ supervisor: alert.supervisorName, error: e?.message || String(e) });
+          continue;
+        }
+      }
+    }
+
+    if (preferEmail && c.email) {
+      const html = `<!doctype html><html lang="ar" dir="rtl"><body style="font-family:Arial,sans-serif;white-space:pre-wrap;">${htmlEscape(body.replace(/\*/g, ''))}</body></html>`;
+      try {
+        await sendViaResend({ to: c.email, subject: title, html });
+        sent += 1;
+        continue;
+      } catch (e: any) {
+        failed.push({ supervisor: alert.supervisorName, error: e?.message || String(e) });
+        continue;
+      }
+    }
+
+    skipped.push({
+      supervisor: alert.supervisorName,
+      reason: 'لا توجد قناة إرسال (WhatsApp/Telegram/Email) للمشرف',
     });
   }
 

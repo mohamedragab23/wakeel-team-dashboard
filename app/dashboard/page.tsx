@@ -2,6 +2,7 @@
 
 import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState } from 'react'
+import Link from 'next/link';
 import { usePageNotify } from '@/lib/usePageNotify';
 import Layout from '@/components/Layout';
 import DashboardStats from '@/components/DashboardStats';
@@ -56,6 +57,7 @@ export default function DashboardPage() {
   const [submitting, setSubmitting] = useState(false);
   const [assignmentMessage, setAssignmentMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+  const [metadataAlert, setMetadataAlert] = useState<{ count: number; message: string } | null>(null);
   const [tab, setTab] = useState<'overview' | 'assignment'>('overview');
   /** فلتر اختياري لعرض الفترة (YYYY-MM-DD) — فارغ = آخر يوم محدث في الشيت */
   const [dashStart, setDashStart] = useState('');
@@ -71,7 +73,25 @@ export default function DashboardPage() {
   useEffect(() => {
     void fetchDashboardData('last');
     void fetchPendingRequestsCount();
+    void fetchMetadataAlert();
   }, []);
+
+  const fetchMetadataAlert = async () => {
+    try {
+      const response = await authFetch('/api/rider-metadata-notifications');
+      const data = await response.json();
+      if (data.success && data.data?.missingJoinDateCount > 0) {
+        setMetadataAlert({
+          count: data.data.missingJoinDateCount,
+          message: data.data.message,
+        });
+      } else {
+        setMetadataAlert(null);
+      }
+    } catch {
+      // Silently fail - not critical
+    }
+  };
 
   const fetchPendingRequestsCount = async () => {
     try {
@@ -210,6 +230,15 @@ export default function DashboardPage() {
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-2 break-words">لوحة التحكم</h1>
             <p className="text-gray-600 text-sm sm:text-base break-words">نظرة عامة على الأداء والإحصائيات</p>
           </div>
+
+          {metadataAlert && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">
+              <p className="font-medium">{metadataAlert.message}</p>
+              <Link href="/rider-metadata-audit" className="text-sm text-amber-800 underline mt-1 inline-block">
+                عرض المناديب وإكمال Join Date
+              </Link>
+            </div>
+          )}
 
           {/* Assignment Request Form */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden min-w-0">
@@ -514,6 +543,15 @@ export default function DashboardPage() {
             <Tabs items={tabItems} value={tab} onChange={setTab} />
           </div>
         </div>
+
+        {metadataAlert && (
+          <div className="rounded-[var(--v2-radius-lg)] border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-amber-100">
+            <p className="font-medium">{metadataAlert.message}</p>
+            <Link href="/rider-metadata-audit" className="text-sm text-amber-200 underline mt-1 inline-block">
+              عرض المناديب وإكمال Join Date
+            </Link>
+          </div>
+        )}
 
         {tab === 'assignment' && (
           <Card

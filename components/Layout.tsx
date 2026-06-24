@@ -14,6 +14,7 @@ import { hasRecruitmentAccess } from '@/lib/recruitment/recruitmentAuth';
 import { hasTicketingAccess } from '@/lib/ticketing/ticketingAuth';
 import RecruitmentNotificationBell from '@/components/recruitment/RecruitmentNotificationBell';
 import TicketingNotificationBell from '@/components/ticketing/TicketingNotificationBell';
+import RiderMetadataNotificationBell from '@/components/RiderMetadataNotificationBell';
 import { authFetch, clearClientSession } from '@/lib/authFetch';
 import { getStoredUser, setStoredUser } from '@/lib/clientSession';
 
@@ -192,6 +193,7 @@ export default function Layout({ children }: LayoutProps) {
               {hasTicketingAccess(user as { role?: string; permissions?: string }) && (
                 <TicketingNotificationBell />
               )}
+              {user?.role === 'supervisor' && <RiderMetadataNotificationBell />}
             </div>
 
             <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
