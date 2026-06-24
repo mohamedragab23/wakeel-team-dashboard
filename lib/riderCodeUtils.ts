@@ -47,23 +47,29 @@ export interface RiderSheetMatch {
   row: unknown[];
 }
 
-/** Find rider row in المناديب sheet — exact or normalized code match. */
-export function findRiderInSheet(ridersSheet: unknown[][], riderCode: string): RiderSheetMatch | null {
+/** Find all rider rows matching code (handles duplicate sheet rows). */
+export function findAllRidersInSheet(ridersSheet: unknown[][], riderCode: string): RiderSheetMatch[] {
   const target = riderCode?.toString().trim();
-  if (!target || ridersSheet.length < 2) return null;
+  if (!target || ridersSheet.length < 2) return [];
 
+  const matches: RiderSheetMatch[] = [];
   for (let i = 1; i < ridersSheet.length; i++) {
     const row = ridersSheet[i] || [];
     const sheetCode = row[0]?.toString().trim() || '';
     if (!sheetCode) continue;
     if (sheetCode === target || riderCodesMatch(sheetCode, target)) {
-      return {
+      matches.push({
         dataRowIndex: i,
         sheetRowIndex: i + 1,
         actualCode: sheetCode,
         row,
-      };
+      });
     }
   }
-  return null;
+  return matches;
+}
+
+/** Find rider row in المناديب sheet — exact or normalized code match. */
+export function findRiderInSheet(ridersSheet: unknown[][], riderCode: string): RiderSheetMatch | null {
+  return findAllRidersInSheet(ridersSheet, riderCode)[0] ?? null;
 }

@@ -6,6 +6,7 @@ import { buildMetadataCompletionAudit } from '@/lib/strategicOps/metadataComplet
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
 import { validateAssignmentMetadata } from '@/lib/riderMetadata';
+import { riderCodesMatch } from '@/lib/riderCodeUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,7 @@ async function resolveScopedRider(decoded: AuthUser, riderCode: string) {
   }
 
   const allRiders = await getAllRiders(false);
-  const rider = allRiders.find((r) => String(r.code ?? '').trim() === code);
+  const rider = allRiders.find((r) => riderCodesMatch(r.code, code));
   if (!rider) {
     return { error: NextResponse.json({ success: false, error: 'المندوب غير موجود' }, { status: 404 }) };
   }

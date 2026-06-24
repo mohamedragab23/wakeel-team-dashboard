@@ -12,7 +12,8 @@ import {
   supervisorToRowCells,
   sheetRangeForSupervisorDataRow,
 } from './supervisorsSheetParser';
-import { findRiderInSheet } from '@/lib/riderCodeUtils';
+import { findRiderInSheet, findAllRidersInSheet, normalizeRiderCodeForPerformance, riderCodesMatch } from '@/lib/riderCodeUtils';
+import { formatSheetIsoDateText, isValidContractType, parseRiderIsoDate } from '@/lib/riderMetadata';
 import { invalidateRiderWorkflowCaches } from '@/lib/cacheInvalidation';
 
 export interface Supervisor {
@@ -345,6 +346,32 @@ export async function deleteSupervisor(code: string): Promise<{ success: boolean
 }
 
 /**
+ * Collapse duplicate rider codes — prefer the row with the most complete metadata.
+ */
+function dedupeRidersByCode(riders: Rider[]): Rider[] {
+  const byCode = new Map<string, Rider>();
+
+  const metadataScore = (r: Rider) => {
+    let score = 0;
+    if (parseRiderIsoDate(r.joinDate)) score += 4;
+    if (isValidContractType(r.contractType)) score += 2;
+    if (parseRiderIsoDate(r.contractEndDate)) score += 1;
+    return score;
+  };
+
+  for (const rider of riders) {
+    const key = normalizeRiderCodeForPerformance(rider.code);
+    if (!key) continue;
+    const existing = byCode.get(key);
+    if (!existing || metadataScore(rider) > metadataScore(existing)) {
+      byCode.set(key, rider);
+    }
+  }
+
+  return Array.from(byCode.values());
+}
+
+/**
  * Get all riders
  */
 export async function getAllRiders(useCache: boolean = true): Promise<Rider[]> {
@@ -370,7 +397,7 @@ export async function getAllRiders(useCache: boolean = true): Promise<Rider[]> {
       });
     }
 
-    return riders;
+    return dedupeRidersByCode(riders);
   } catch (error) {
     console.error('Error fetching riders:', error);
     return [];
@@ -448,58 +475,61 @@ export async function updateRider(
     const riderCodeTrimmed = riderCode?.toString().trim();
     console.log(`[UpdateRider] Looking for rider with code: "${riderCodeTrimmed}"`);
 
-    const match = findRiderInSheet(ridersSheet, riderCodeTrimmed);
-    if (!match) {
+    const matches = findAllRidersInSheet(ridersSheet, riderCodeTrimmed);
+    if (!matches.length) {
       console.error(`[UpdateRider] Rider "${riderCodeTrimmed}" not found in sheet`);
       return { success: false, error: `المندوب "${riderCodeTrimmed}" غير موجود` };
     }
 
-    const rowIndex = match.sheetRowIndex;
-    console.log(`[UpdateRider] Found rider at row ${rowIndex} (code: ${match.actualCode})`);
-
-    // Get current rider data
-    const currentRow = ridersSheet[rowIndex - 1];
     const supervisors = await getAllSupervisors();
+    const joinDateText =
+      updates.joinDate !== undefined ? formatSheetIsoDateText(String(updates.joinDate)) : undefined;
+    const contractEndText =
+      updates.contractEndDate !== undefined
+        ? formatSheetIsoDateText(String(updates.contractEndDate))
+        : undefined;
 
-    // Get old and new supervisor codes
-    const oldSupervisorCode = currentRow[3]?.toString().trim();
-    const newSupervisorCode = updates.supervisorCode !== undefined ? updates.supervisorCode.toString().trim() : oldSupervisorCode;
-    const newSupervisorName = newSupervisorCode && newSupervisorCode !== ''
-      ? (supervisors.find((s) => s.code === newSupervisorCode)?.name || '')
-      : '';
-    
-    // Prepare updated row - use trimmed riderCode
-    const updatedRow = [
-      match.actualCode,
-      updates.name || currentRow[1] || '',
-      updates.region !== undefined ? updates.region : (currentRow[2] || ''),
-      newSupervisorCode,
-      newSupervisorName,
-      updates.phone !== undefined ? updates.phone : (currentRow[5] || ''),
-      updates.joinDate !== undefined ? updates.joinDate : (currentRow[6] || ''),
-      updates.status !== undefined ? updates.status : (currentRow[7] || 'نشط'),
-      updates.contractType !== undefined ? updates.contractType : (currentRow[8] || ''),
-      updates.contractEndDate !== undefined ? updates.contractEndDate : (currentRow[9] || ''),
-    ];
-    
-    console.log(`[UpdateRider] Updated row data:`, {
-      riderCode: riderCodeTrimmed,
-      oldSupervisor: oldSupervisorCode,
-      newSupervisor: newSupervisorCode,
-      newSupervisorName: newSupervisorName,
-    });
+    let oldSupervisorCode = '';
+    let newSupervisorCode = '';
 
-    console.log(`[UpdateRider] Updating rider "${riderCodeTrimmed}" at row ${rowIndex}. Old supervisor: "${oldSupervisorCode}", New supervisor: "${newSupervisorCode}"`);
-    console.log(`[UpdateRider] Full row data to update:`, updatedRow);
-    
-    const updateSuccess = await updateSheetRange('المناديب', `A${rowIndex}:J${rowIndex}`, [updatedRow]);
-    
-    if (!updateSuccess) {
-      console.error(`[UpdateRider] Failed to update rider "${riderCodeTrimmed}" in Google Sheets`);
-      return { success: false, error: 'فشل تحديث المندوب في Google Sheets' };
+    for (const match of matches) {
+      const rowIndex = match.sheetRowIndex;
+      const currentRow = ridersSheet[match.dataRowIndex] || match.row;
+
+      oldSupervisorCode = oldSupervisorCode || currentRow[3]?.toString().trim() || '';
+      newSupervisorCode =
+        updates.supervisorCode !== undefined
+          ? updates.supervisorCode.toString().trim()
+          : currentRow[3]?.toString().trim() || '';
+      const newSupervisorName =
+        newSupervisorCode && newSupervisorCode !== ''
+          ? supervisors.find((s) => s.code === newSupervisorCode)?.name || ''
+          : '';
+
+      const updatedRow = [
+        match.actualCode,
+        updates.name || currentRow[1] || '',
+        updates.region !== undefined ? updates.region : currentRow[2] || '',
+        newSupervisorCode,
+        newSupervisorName,
+        updates.phone !== undefined ? updates.phone : currentRow[5] || '',
+        updates.joinDate !== undefined ? joinDateText : currentRow[6] || '',
+        updates.status !== undefined ? updates.status : currentRow[7] || 'نشط',
+        updates.contractType !== undefined ? updates.contractType : currentRow[8] || '',
+        updates.contractEndDate !== undefined ? contractEndText : currentRow[9] || '',
+      ];
+
+      console.log(`[UpdateRider] Updating rider "${match.actualCode}" at row ${rowIndex}`);
+      const updateSuccess = await updateSheetRange('المناديب', `A${rowIndex}:J${rowIndex}`, [updatedRow]);
+      if (!updateSuccess) {
+        console.error(`[UpdateRider] Failed to update rider "${match.actualCode}" in Google Sheets`);
+        return { success: false, error: 'فشل تحديث المندوب في Google Sheets' };
+      }
     }
-    
-    console.log(`[UpdateRider] Successfully updated rider "${match.actualCode}" in Google Sheets`);
+
+    console.log(
+      `[UpdateRider] Successfully updated ${matches.length} row(s) for rider "${riderCodeTrimmed}" in Google Sheets`
+    );
 
     await invalidateRiderWorkflowCaches({
       oldSupervisorCode,

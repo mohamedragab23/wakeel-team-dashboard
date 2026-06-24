@@ -145,7 +145,7 @@ export default function RiderMetadataAuditPage() {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['rider-metadata-audit'],
     queryFn: async () => {
-      const res = await authFetch('/api/rider-metadata-audit');
+      const res = await authFetch(`/api/rider-metadata-audit?refresh=${Date.now()}`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل تحميل التقرير');
       return json.data as AuditResponse;

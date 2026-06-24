@@ -24,20 +24,67 @@ export function parseRiderIsoDate(raw: unknown): string | null {
   if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
     return raw.toISOString().split('T')[0];
   }
-  const s = String(raw).trim();
+
+  let s = String(raw).trim();
   if (!s) return null;
+
+  // Strip leading apostrophe (Sheets text dates) and time suffix
+  s = s.replace(/^['’`]+/, '').split(/\s+/)[0]?.trim() ?? '';
+
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) {
     const d = new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00`);
     return Number.isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
   }
+
+  // Google Sheets serial date (stored as number)
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const serial = Math.floor(Number(s));
+    if (serial >= 20000 && serial <= 90000) {
+      const utc = new Date(Date.UTC(1899, 11, 30 + serial));
+      if (!Number.isNaN(utc.getTime())) {
+        return utc.toISOString().split('T')[0];
+      }
+    }
+  }
+
+  const slash = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
+  if (slash) {
+    const a = parseInt(slash[1], 10);
+    const b = parseInt(slash[2], 10);
+    const year = parseInt(slash[3], 10);
+    let day: number;
+    let month: number;
+    if (a > 12 && b <= 12) {
+      day = a;
+      month = b;
+    } else if (b > 12 && a <= 12) {
+      month = a;
+      day = b;
+    } else {
+      // Default Egypt D/M/Y when ambiguous
+      day = a;
+      month = b;
+    }
+    const d = new Date(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+  }
+
   const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
   if (dmy) {
     const d = new Date(`${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}T00:00:00`);
     return Number.isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
   }
+
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+}
+
+/** Force ISO date as Sheets text so reads stay YYYY-MM-DD. */
+export function formatSheetIsoDateText(isoDate: string): string {
+  const parsed = parseRiderIsoDate(isoDate);
+  if (!parsed) return isoDate;
+  return `'${parsed}`;
 }
 
 export function isValidContractType(raw: unknown): raw is ContractType {

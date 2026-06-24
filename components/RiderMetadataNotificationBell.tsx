@@ -18,7 +18,7 @@ export default function RiderMetadataNotificationBell() {
   const { data } = useQuery({
     queryKey: ['rider-metadata', 'notifications'],
     queryFn: async () => {
-      const res = await authFetch('/api/rider-metadata-notifications');
+      const res = await authFetch(`/api/rider-metadata-notifications?refresh=${Date.now()}`);
       const json = await res.json();
       if (!json.success) return { payload: null as NotificationPayload | null, unread: 0 };
       return {

@@ -76,9 +76,17 @@ export default function DashboardPage() {
     void fetchMetadataAlert();
   }, []);
 
+  useEffect(() => {
+    const onFocus = () => {
+      void fetchMetadataAlert();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
   const fetchMetadataAlert = async () => {
     try {
-      const response = await authFetch('/api/rider-metadata-notifications');
+      const response = await authFetch(`/api/rider-metadata-notifications?refresh=${Date.now()}`);
       const data = await response.json();
       if (data.success && data.data?.missingJoinDateCount > 0) {
         setMetadataAlert({
