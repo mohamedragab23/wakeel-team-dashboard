@@ -2044,6 +2044,51 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
   const actualLookbackDays = lookbackDatesFound.size > 0 ? lookbackDatesFound.size : LOOKBACK_DAYS;
   const riderHistoricalBaselines = buildRiderHistoricalBaselines(lookbackPerformance, actualLookbackDays);
 
+  // ── Baseline Match Diagnostic ──────────────────────────────────────────────
+  // For each current-roster rider, check whether their normalized code exists
+  // in the baselines Map. Unmatched = code normalization may differ between sheets.
+  // DO NOT modify normalization here — collect evidence only.
+  let baselineMatchedRiders = 0;
+  let baselineUnmatchedRiders = 0;
+  const baselineSampleUnmatched: string[] = [];
+  for (const agg of aggList) {
+    const norm = normalizeRiderCodeForPerformance(agg.code);
+    if (norm && riderHistoricalBaselines.has(norm)) {
+      baselineMatchedRiders++;
+    } else {
+      baselineUnmatchedRiders++;
+      if (baselineSampleUnmatched.length < 10) {
+        baselineSampleUnmatched.push(`"${agg.code}" → norm:"${norm ?? 'null'}"`);
+      }
+    }
+  }
+  const baselineMatchRate = aggList.length > 0
+    ? Math.round((baselineMatchedRiders / aggList.length) * 100)
+    : 0;
+  if (lookbackDiagnostic.dataAvailable) {
+    console.log(
+      `[BaselineMatch] matched=${baselineMatchedRiders}/${aggList.length} (${baselineMatchRate}%), ` +
+      `unmatched=${baselineUnmatchedRiders}. ` +
+      (baselineUnmatchedRiders > 0 ? `Sample unmatched: ${baselineSampleUnmatched.join(', ')}` : 'All matched.')
+    );
+    if (baselineUnmatchedRiders > aggList.length * 0.1) {
+      console.warn(
+        `[BaselineMatch] WARNING: ${baselineUnmatchedRiders} riders (${100 - baselineMatchRate}%) ` +
+        `not matched to lookback data — possible rider code normalization mismatch between sheets.`
+      );
+    }
+  }
+
+  // Attach match diagnostics to the lookback diagnostic object for UI display.
+  const lookbackDiagnosticFull = {
+    ...lookbackDiagnostic,
+    rosterSize: aggList.length,
+    matchedRiders: baselineMatchedRiders,
+    unmatchedRiders: baselineUnmatchedRiders,
+    matchRate: baselineMatchRate,
+    sampleUnmatched: baselineSampleUnmatched,
+  };
+
   // Build join-date map for rider lifecycle classification.
   const riderJoinDateByCode = new Map<string, string>();
   for (const r of ridersInScope) {
@@ -2084,7 +2129,7 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     supervisorNameByCode,
     riderJoinDateByCode,
     avgRevenuePerOrder: 0,
-    lookbackDiagnostic,
+    lookbackDiagnostic: lookbackDiagnosticFull,
   });
 
   return { ...partial, operationalFormulaAudit, aiInsights, controlTower };

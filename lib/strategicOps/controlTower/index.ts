@@ -102,7 +102,11 @@ export function buildControlTowerReport(ctx: ControlTowerBuildContext): ControlT
 
   // Baseline coverage stats
   const baselineCoverage = enrichedCtx.riderHistoricalBaselines
-    ? summarizeBaselineSources(enrichedCtx.riderHistoricalBaselines)
+    ? summarizeBaselineSources(
+        enrichedCtx.riderHistoricalBaselines,
+        enrichedCtx.riders,
+        enrichedCtx.avgHoursPerActiveRider
+      )
     : EMPTY_COVERAGE;
 
   const achievementDecomposition = buildAchievementDecomposition(
@@ -209,11 +213,16 @@ export function buildControlTowerReport(ctx: ControlTowerBuildContext): ControlT
     dailyContactList,
     forecastMetrics,
     baselineCoverage,
-    lookbackDiagnostic: ctx.lookbackDiagnostic ?? {
-      rowsFound: 0,
-      uniqueDates: 0,
-      dateRange: 'غير متوفر',
-      dataAvailable: false,
+    lookbackDiagnostic: {
+      rowsFound: ctx.lookbackDiagnostic?.rowsFound ?? 0,
+      uniqueDates: ctx.lookbackDiagnostic?.uniqueDates ?? 0,
+      dateRange: ctx.lookbackDiagnostic?.dateRange ?? 'غير متوفر',
+      dataAvailable: ctx.lookbackDiagnostic?.dataAvailable ?? false,
+      rosterSize: ctx.lookbackDiagnostic?.rosterSize ?? ctx.riders.length,
+      matchedRiders: ctx.lookbackDiagnostic?.matchedRiders ?? 0,
+      unmatchedRiders: ctx.lookbackDiagnostic?.unmatchedRiders ?? ctx.riders.length,
+      matchRate: ctx.lookbackDiagnostic?.matchRate ?? 0,
+      sampleUnmatched: ctx.lookbackDiagnostic?.sampleUnmatched ?? [],
     },
     generatedAt: new Date().toISOString(),
   };

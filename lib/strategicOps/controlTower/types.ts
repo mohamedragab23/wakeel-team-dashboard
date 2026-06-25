@@ -405,12 +405,22 @@ export type ControlTowerReport = {
   dailyContactList: DailyContactEntry[];
   forecastMetrics: MetricForecast[];
   baselineCoverage: BaselineCoverageStats;
-  /** Diagnostic: how many historical rows were found before the report period. */
+  /** Diagnostic: lookback data availability + roster-to-history match rate. */
   lookbackDiagnostic: {
     rowsFound: number;
     uniqueDates: number;
     dateRange: string;
     dataAvailable: boolean;
+    /** Current roster size at time of report. */
+    rosterSize: number;
+    /** Riders whose normalized code was found in the historical baselines Map. */
+    matchedRiders: number;
+    /** Riders whose normalized code was NOT found — likely normalization mismatch. */
+    unmatchedRiders: number;
+    /** matchedRiders / rosterSize × 100 */
+    matchRate: number;
+    /** Sample of unmatched rider codes for debugging (max 10). */
+    sampleUnmatched: string[];
   };
   generatedAt: string;
 };
@@ -455,12 +465,17 @@ export type ControlTowerBuildContext = {
   riderJoinDateByCode?: Map<string, string>;
   /** Target orders/day for revenue impact (default 0 = disabled). */
   avgRevenuePerOrder?: number;
-  /** Diagnostic info about how much historical lookback data was found in the sheet. */
+  /** Diagnostic info about lookback data availability and roster matching. */
   lookbackDiagnostic?: {
     rowsFound: number;
     uniqueDates: number;
     dateRange: string;
     dataAvailable: boolean;
+    rosterSize?: number;
+    matchedRiders?: number;
+    unmatchedRiders?: number;
+    matchRate?: number;
+    sampleUnmatched?: string[];
   };
 };
 

@@ -74,34 +74,47 @@ function trendFromSlope(slope: number, currentValue: number): MetricForecast['tr
   return 'stable';
 }
 
-/** Build 14-day time series for fleet metrics from combined lookback + current performance. */
+/**
+ * Build time series for fleet metrics from combined lookback + current performance.
+ *
+ * No-show definition: headcount − activeRiders per day (mirrors fleet KPI computation).
+ * This is consistent regardless of whether the daily sheet records explicit zero-hour rows.
+ * Lookback periods that only recorded active riders (no zero-rows) would produce noShow=0
+ * under the old zero-row counting approach, creating a spurious declining trend.
+ */
 function buildFleetDailySeries(
   ctx: ControlTowerBuildContext
 ): Map<string, { hours: number; orders: number; activeRiders: number; noShowRiders: number }> {
   const all = [...(ctx.lookbackPerformance ?? []), ...ctx.performance];
-  const byDate = new Map<string, { hours: number; orders: number; activeCodes: Set<string>; noShowCodes: Set<string> }>();
+  const byDate = new Map<string, { hours: number; orders: number; activeCodes: Set<string> }>();
 
   for (const row of all) {
     const norm = normalizeRiderCodeForPerformance(row.riderCode);
     if (!norm) continue;
     const existing = byDate.get(row.date) ?? {
-      hours: 0, orders: 0,
-      activeCodes: new Set<string>(), noShowCodes: new Set<string>(),
+      hours: 0,
+      orders: 0,
+      activeCodes: new Set<string>(),
     };
     existing.hours += row.hours;
     existing.orders += row.orders;
     if (row.hours > 0) existing.activeCodes.add(norm);
-    else existing.noShowCodes.add(norm);
     byDate.set(row.date, existing);
   }
 
+  // Use headcount to compute no-show: headcount − active riders on each date.
+  // For lookback dates the fleet may have had a different size — use the registered
+  // headcount as a stable denominator. This is the same definition as the fleet KPI.
+  const headcount = Math.max(1, ctx.headcount);
+
   const result = new Map<string, { hours: number; orders: number; activeRiders: number; noShowRiders: number }>();
   for (const [date, data] of byDate) {
+    const activeCount = data.activeCodes.size;
     result.set(date, {
       hours: round2(data.hours),
       orders: data.orders,
-      activeRiders: data.activeCodes.size,
-      noShowRiders: data.noShowCodes.size,
+      activeRiders: activeCount,
+      noShowRiders: Math.max(0, headcount - activeCount),
     });
   }
   return result;

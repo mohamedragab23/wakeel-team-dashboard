@@ -111,10 +111,19 @@ export function resolveRiderExpected(
 }
 
 /**
- * Summarize how many riders are using each baseline source.
- * Used for the Data Quality panel.
+ * Summarize baseline source coverage for the CURRENT roster riders only.
+ *
+ * Previously this counted Map entries (historical lookback codes), which included
+ * former employees and produced totals larger than the actual headcount.
+ *
+ * Now iterates ctx.riders and resolves each rider's actual baseline source,
+ * so: total === ctx.riders.length === current headcount.
  */
-export function summarizeBaselineSources(baselines: Map<string, RiderHistoricalBaseline>): {
+export function summarizeBaselineSources(
+  baselines: Map<string, RiderHistoricalBaseline>,
+  currentRiders: Array<{ code: string }>,
+  fleetAvgHours: number
+): {
   historical30d: number;
   historicalPartial: number;
   fleetAverage: number;
@@ -127,9 +136,10 @@ export function summarizeBaselineSources(baselines: Map<string, RiderHistoricalB
   let historicalPartial = 0;
   let fleetAverage = 0;
 
-  for (const b of baselines.values()) {
-    if (b.baselineSource === 'historical_30d') historical30d++;
-    else if (b.baselineSource === 'historical_partial') historicalPartial++;
+  for (const rider of currentRiders) {
+    const { source } = resolveRiderExpected(rider.code, baselines, fleetAvgHours, 0);
+    if (source === 'historical_30d') historical30d++;
+    else if (source === 'historical_partial') historicalPartial++;
     else fleetAverage++;
   }
 

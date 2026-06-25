@@ -53,10 +53,23 @@ export function buildManagementActions(
     : 0;
 
   const noShowValues = supervisorRows.map((s) => s.noShowRiders);
+  const noShowStd = stdDev(noShowValues);
+
+  // Fleet-level rates for relative comparisons.
+  // A supervisor whose rate exceeds the fleet average by more than 5pp is above-average
+  // in that dimension. This prevents the entire fleet from being classified the same way
+  // in high-no-show environments (e.g. Alexandria fleet-wide no-show = 37%).
+  const fleetHeadcount = Math.max(1, ctx.headcount);
+  const fleetNoShowRate = fleetTalabat.noShowRiders / fleetHeadcount;
+  const fleetInactiveRate = inactiveRiders / fleetHeadcount;
+  const fleetUtilizationPct = fleetTalabat.utilizationPercent ?? 0;
+  // Supervisor-level fleet average (for display in Arabic labels)
   const fleetNoShowAvg =
     noShowValues.length > 0 ? noShowValues.reduce((a, b) => a + b, 0) / noShowValues.length : 0;
-  const noShowStd = stdDev(noShowValues);
-  const noShowThreshold = fleetNoShowAvg + 2 * noShowStd;
+
+  // Relative excess thresholds — a supervisor must exceed fleet by at least 5pp to be
+  // classified with that root cause. Prevents blanket classification in high-no-show periods.
+  const RELATIVE_EXCESS = 0.05; // 5 percentage points above fleet average
 
   for (const s of supervisorRows) {
     const candidates: ManagementAction[] = [];
@@ -64,9 +77,15 @@ export function buildManagementActions(
     const noShowRate = s.headcount > 0 ? s.noShowRiders / s.headcount : 0;
     const inactiveRate = s.headcount > 0 ? s.inactiveRiders / s.headcount : 0;
 
-    // Use a percentage-based threshold (>25% absent) instead of a z-score so that
-    // any supervisor with meaningful no-show gets the attendance-specific action.
-    if (s.noShowRiders > 0 && noShowRate > 0.25) {
+    // Relative excesses: how much worse is this supervisor vs the fleet?
+    const noShowExcess = noShowRate - fleetNoShowRate;         // positive = worse than fleet
+    const inactiveExcess = inactiveRate - fleetInactiveRate;   // positive = more inactive
+    const utilizationDeficit = fleetUtilizationPct - s.utilizationPercent; // positive = lower util
+
+    // No-show specific action: supervisor is MEANINGFULLY above fleet average on attendance.
+    // Uses relative threshold, not absolute 25%, to avoid blanket classification.
+    const isWorseOnNoShow = s.noShowRiders > 0 && noShowExcess > RELATIVE_EXCESS;
+    if (isWorseOnNoShow) {
       const recovery = round2(s.noShowRiders * avgHoursPerActiveRider);
       const priority: ActionPriority = s.noShowRiders > 15 ? 'critical' : 'high';
       candidates.push({
@@ -75,15 +94,15 @@ export function buildManagementActions(
         entityType: 'supervisor',
         entityId: s.code,
         entityName: s.name,
-        problemAr: `المشرف ${s.name} لديه ${s.noShowRiders} غياب يومياً (المتوسط ${round2(fleetNoShowAvg)})`,
+        problemAr: `المشرف ${s.name}: غياب ${s.noShowRiders} طيار (${Math.round(noShowRate * 100)}%) — أعلى من متوسط الأسطول (${Math.round(fleetNoShowRate * 100)}%) بفارق ${Math.round(noShowExcess * 100)} نقطة`,
         actionAr: `اتصل بالمشرف ${s.name} اليوم — فعّل خطة حضور فورية`,
-        whyAr: `نسبة الغياب تتجاوز المتوسط بمقدار ${round2(s.noShowRiders - fleetNoShowAvg)} طيار يومياً`,
+        whyAr: `نسبة الغياب في فريقه ${Math.round(noShowExcess * 100)} نقطة أعلى من متوسط الأسطول — أسوأ من الفريق العام`,
         expectedRecoveryHours: recovery,
         expectedRecoveryOrders: ordersFromHours(recovery, ordersPerHour > 0 ? 1 / ordersPerHour : 0),
         riderCount: s.noShowRiders,
         confidence: 'high',
         urgency: 'immediate',
-        evidence: `noShow=${s.noShowRiders}, noShowRate=${Math.round(noShowRate * 100)}%, fleetAvg=${round2(fleetNoShowAvg)}, σ=${round2(noShowStd)}`,
+        evidence: `noShowRate=${Math.round(noShowRate * 100)}%, fleetNoShowRate=${Math.round(fleetNoShowRate * 100)}%, excess=${Math.round(noShowExcess * 100)}pp, σ=${round2(noShowStd)}`,
         rawRecoveryHours: recovery,
         deduplicatedRecoveryHours: recovery,
       });
@@ -94,27 +113,27 @@ export function buildManagementActions(
       const priority: ActionPriority = lost >= 50 ? 'critical' : 'high';
       const confidence: ActionConfidence = s.achievementPercent < 50 ? 'high' : 'medium';
 
-      // Differentiate the action recommendation based on the dominant driver.
-      // noShowRate and inactiveRate already computed above.
-      const utilizationLow = s.utilizationPercent < 60;
-
+      // Dominant-driver classification using RELATIVE performance vs fleet.
+      // Priority: attendance excess > inactive excess > utilization deficit > generic.
       let actionAr: string;
       let whyAr: string;
 
-      if (noShowRate > 0.25) {
-        // Already handled above via the attendance-specific action, but if that
-        // branch was not triggered (e.g. noShow=0) this catch handles the edge case.
-        actionAr = `أولوية اليوم: متابعة ${s.noShowRiders} غائب في فريق ${s.name} — اتصال قبل الشفت`;
-        whyAr = `${Math.round(noShowRate * 100)}% من الفريق غائب — الغياب هو المحرك الرئيسي للفجوة`;
-      } else if (inactiveRate > 0.25) {
-        actionAr = `إعادة تفعيل ${s.inactiveRiders} طيار متوقف في فريق ${s.name}`;
-        whyAr = `${Math.round(inactiveRate * 100)}% من الفريق غير نشط — طاقة تشغيلية كامنة غير مستغلة`;
-      } else if (utilizationLow) {
+      if (noShowExcess > RELATIVE_EXCESS) {
+        actionAr = `أولوية اليوم: متابعة ${s.noShowRiders} غائب في فريق ${s.name} — أداء الحضور أسوأ من المتوسط بـ${Math.round(noShowExcess * 100)}نقطة`;
+        whyAr = `فريق ${s.name} يتجاوز متوسط الغياب الأسطولي بـ${Math.round(noShowExcess * 100)} نقطة — المحرك الرئيسي للفجوة`;
+      } else if (inactiveExcess > RELATIVE_EXCESS) {
+        actionAr = `إعادة تفعيل ${s.inactiveRiders} طيار متوقف في فريق ${s.name} — نسبة الخمول أعلى من الأسطول`;
+        whyAr = `${Math.round(inactiveRate * 100)}% من الفريق غير نشط (متوسط الأسطول ${Math.round(fleetInactiveRate * 100)}%) — طاقة كامنة غير مستغلة`;
+      } else if (utilizationDeficit > 5) {
         actionAr = `دفع ساعات العمل للطيارين النشطين في فريق ${s.name} — استثمار ${round2(s.utilizationPercent)}% فقط`;
-        whyAr = `الطيارون النشطون يعملون أقل من طاقتهم — المشكلة في ساعات العمل وليس في الحضور`;
+        whyAr = `الطيارون النشطون يعملون أقل من متوسط الأسطول ${round2(fleetUtilizationPct)}% — مشكلة ساعات لا غياب`;
+      } else if (isWorseOnNoShow || noShowRate > 0.30) {
+        // High absolute no-show even if not relatively worse (fleet-wide problem)
+        actionAr = `متابعة غياب فريق ${s.name}: ${s.noShowRiders} طيار (${Math.round(noShowRate * 100)}%) — مستوى مرتفع`;
+        whyAr = `الغياب مرتفع على مستوى الأسطول كله — يحتاج متابعة حتى لو ليس الأسوأ نسبياً`;
       } else {
-        actionAr = `مراجعة هيكل فريق ${s.name}: ${lost} ساعة مفقودة/يوم (تحقيق ${s.achievementPercent}%)`;
-        whyAr = `لا يوجد سبب واحد واضح — يُنصح بمراجعة شاملة لعوامل الأداء`;
+        actionAr = `مراجعة هيكل فريق ${s.name}: ${lost} ساعة مفقودة/يوم — لا سبب واحد واضح`;
+        whyAr = `لا يبرز سبب واحد كمحرك رئيسي — يُنصح بمراجعة شاملة للفريق مع المشرف`;
       }
 
       candidates.push({
@@ -131,7 +150,7 @@ export function buildManagementActions(
         riderCount: s.headcount,
         confidence,
         urgency: lost >= 80 ? 'immediate' : 'this_week',
-        evidence: `lostTargetDaily=${lost}, achievement=${s.achievementPercent}%, noShowRate=${Math.round(noShowRate * 100)}%, inactiveRate=${Math.round(inactiveRate * 100)}%, utilization=${round2(s.utilizationPercent)}%`,
+        evidence: `lost=${lost}h, achievement=${s.achievementPercent}%, noShowExcess=${Math.round(noShowExcess * 100)}pp, inactiveExcess=${Math.round(inactiveExcess * 100)}pp, utilDef=${round2(utilizationDeficit)}pp`,
         rawRecoveryHours: lost,
         deduplicatedRecoveryHours: lost,
       });

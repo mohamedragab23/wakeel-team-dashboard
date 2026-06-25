@@ -610,9 +610,21 @@ function BaselineCoveragePanel({
   lookback,
 }: {
   coverage: import('@/lib/strategicOps/controlTower/types').BaselineCoverageStats;
-  lookback?: { rowsFound: number; uniqueDates: number; dateRange: string; dataAvailable: boolean };
+  lookback?: {
+    rowsFound: number;
+    uniqueDates: number;
+    dateRange: string;
+    dataAvailable: boolean;
+    rosterSize?: number;
+    matchedRiders?: number;
+    unmatchedRiders?: number;
+    matchRate?: number;
+    sampleUnmatched?: string[];
+  };
 }) {
   const noHistory = lookback && !lookback.dataAvailable;
+  const hasMismatch = lookback?.dataAvailable && lookback.unmatchedRiders != null && lookback.unmatchedRiders > 0;
+  const matchPct = lookback?.matchRate ?? 0;
   return (
     <div className={`rounded-xl border p-4 text-sm ${noHistory ? 'border-red-500/40 bg-red-500/5' : coverage.qualityWarning ? 'border-amber-500/30 bg-amber-500/5' : 'border-white/10 bg-white/5'}`}>
       <p className="font-semibold text-[#94A3B8] mb-2 text-xs">جودة البيانات التاريخية</p>
@@ -630,7 +642,7 @@ function BaselineCoveragePanel({
 
       {lookback && lookback.dataAvailable && (
         <p className="text-xs text-slate-400 mb-2">
-          📅 البيانات التاريخية المتاحة: <span className="text-slate-300">{lookback.uniqueDates} يوم</span>
+          📅 بيانات تاريخية: <span className="text-slate-300">{lookback.uniqueDates} يوم</span>
           {' '}({lookback.rowsFound.toLocaleString()} سجل) — النطاق: <span className="font-mono text-xs">{lookback.dateRange}</span>
         </p>
       )}
@@ -640,9 +652,25 @@ function BaselineCoveragePanel({
         <span className="text-amber-300">📊 جزئي: {coverage.historicalPartial} طيار</span>
         <span className="text-slate-400">⚠️ متوسط أسطول: {coverage.fleetAverage} طيار</span>
         <span className={`font-semibold ${coverage.qualityWarning ? 'text-amber-300' : 'text-emerald-300'}`}>
-          {coverage.historicalPct}% يستخدمون بياناتهم التاريخية الخاصة
+          {coverage.historicalPct}% يستخدمون بياناتهم الخاصة
+          {lookback?.rosterSize != null && <span className="text-slate-400 font-normal"> (من {lookback.rosterSize} طيار)</span>}
         </span>
       </div>
+
+      {lookback?.dataAvailable && lookback.matchedRiders != null && (
+        <div className={`mt-2 rounded-md px-2 py-1 text-xs ${hasMismatch && matchPct < 90 ? 'border border-amber-500/30 bg-amber-500/10 text-amber-200' : 'text-slate-400'}`}>
+          🔗 مطابقة الكود التاريخي: {lookback.matchedRiders} / {lookback.rosterSize} طيار ({matchPct}%)
+          {hasMismatch && matchPct < 90 && (
+            <span className="block mt-1 text-amber-300">
+              ⚠️ {lookback.unmatchedRiders} طيار لم يُطابَق — احتمال اختلاف تنسيق الكود بين الشيتات.
+              {lookback.sampleUnmatched && lookback.sampleUnmatched.length > 0 && (
+                <span className="block text-slate-400 mt-0.5">نماذج: {lookback.sampleUnmatched.slice(0, 3).join(' | ')}</span>
+              )}
+            </span>
+          )}
+        </div>
+      )}
+
       {!noHistory && coverage.qualityWarning && (
         <p className="text-amber-200/80 mt-2 text-xs">
           ⚠️ أكثر من 40% من الطيارين يعتمدون على متوسط الأسطول كتوقع — مقارنات التراجع لهؤلاء أقل دقة.

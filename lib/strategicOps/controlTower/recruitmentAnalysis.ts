@@ -24,6 +24,23 @@ function pctOfGap(amount: number, gap: number): number {
 
 const FALLBACK_HOURS_PER_RIDER = 8;
 
+/**
+ * Maximum recovery fraction of totalGap per lever.
+ * These caps prevent any single lever from over-consuming the gap and ensure
+ * the model can produce a non-zero remaining gap even when potentials are large.
+ *
+ * Calibration values (experiment — revisit with actual intervention response data):
+ *   Reactivation: max 20% of gap (some inactive riders may be unreachable)
+ *   No-show: max 30% of gap (50% response rate on ~60% of no-shows = ~30%)
+ *   Hours push: max 25% of gap (active riders can only improve so much per shift)
+ *   Supervision: max 15% of gap (management improvement is slow)
+ *   Total ceiling: 90% → at least 10% of gap requires hiring if fully operationally managed
+ */
+const MAX_REACTIVATION_FRACTION = 0.20;
+const MAX_NOSHOW_FRACTION = 0.30;
+const MAX_HOURSPUSH_FRACTION = 0.25;
+const MAX_SUPERVISION_FRACTION = 0.15;
+
 export function buildRecruitmentAnalysis(
   ctx: ControlTowerBuildContext,
   supervisorRows: SupervisorOpsRow[]
@@ -56,7 +73,7 @@ export function buildRecruitmentAnalysis(
 
   // ── Lever 1: Reactivate inactive riders ────────────────────────────────────
   // Use riders' own historical average (not fleet avg) where available.
-  // Apply 40% realism factor (not all inactive riders respond to intervention).
+  // Apply 40% realism factor AND cap at MAX_REACTIVATION_FRACTION of totalGap.
   let reactivationTotal = 0;
   for (const r of riders) {
     if (r.totalHours === 0) {
@@ -64,32 +81,35 @@ export function buildRecruitmentAnalysis(
       reactivationTotal += expectedH;
     }
   }
-  const reactivation = round2(Math.min(remainingGap, reactivationTotal * 0.4));
+  const reactivationMax = round2(totalGap * MAX_REACTIVATION_FRACTION);
+  const reactivation = round2(Math.min(remainingGap, Math.min(reactivationTotal * 0.4, reactivationMax)));
   remainingGap = round2(Math.max(0, remainingGap - reactivation));
   levers.push({
     label: 'Reactivate inactive riders',
     labelAr: 'تفعيل المناديب الغير نشطين',
     recoveryHours: reactivation,
     pctOfGap: pctOfGap(reactivation, totalGap),
-    realismNote: 'بناءً على 40% استجابة فعلية',
+    realismNote: `40% استجابة — حد أقصى ${Math.round(MAX_REACTIVATION_FRACTION * 100)}% من الفجوة`,
   });
 
   // ── Lever 2: Reduce no-show by 50% ────────────────────────────────────────
   // 50% realism: not all no-shows will respond to daily intervention.
+  // Cap at MAX_NOSHOW_FRACTION of totalGap.
+  const noShowMax = round2(totalGap * MAX_NOSHOW_FRACTION);
   const noShowPotential = round2(fleetTalabat.noShowRiders * avgH * 0.5);
-  const noShowReduction = round2(Math.min(remainingGap, noShowPotential));
+  const noShowReduction = round2(Math.min(remainingGap, Math.min(noShowPotential, noShowMax)));
   remainingGap = round2(Math.max(0, remainingGap - noShowReduction));
   levers.push({
     label: 'Reduce no-show (50% response)',
     labelAr: 'تقليل الغياب (50% استجابة)',
     recoveryHours: noShowReduction,
     pctOfGap: pctOfGap(noShowReduction, totalGap),
-    realismNote: 'بناءً على 50% استجابة',
+    realismNote: `50% استجابة — حد أقصى ${Math.round(MAX_NOSHOW_FRACTION * 100)}% من الفجوة`,
   });
 
   // ── Lever 3: Push hours for active riders below their historical average ───
   // For riders who worked but below their own baseline: sum (expectedH - actualH).
-  // Apply 60% realism factor.
+  // Apply 60% realism factor AND cap at MAX_HOURSPUSH_FRACTION of totalGap.
   const days = Math.max(1, ctx.operationalPeriodDays);
   let lowHoursGap = 0;
   for (const r of riders) {
@@ -101,25 +121,28 @@ export function buildRecruitmentAnalysis(
       }
     }
   }
+  const hoursPushMax = round2(totalGap * MAX_HOURSPUSH_FRACTION);
   const hoursPushPotential = round2(lowHoursGap * 0.6);
-  const hoursPush = round2(Math.min(remainingGap, hoursPushPotential));
+  const hoursPush = round2(Math.min(remainingGap, Math.min(hoursPushPotential, hoursPushMax)));
   remainingGap = round2(Math.max(0, remainingGap - hoursPush));
   levers.push({
     label: 'Push active-rider hours to historical avg',
     labelAr: 'رفع ساعات النشطين للمتوسط التاريخي',
     recoveryHours: hoursPush,
     pctOfGap: pctOfGap(hoursPush, totalGap),
-    realismNote: 'بناءً على 60% تحسين واقعي',
+    realismNote: `60% تحسين واقعي — حد أقصى ${Math.round(MAX_HOURSPUSH_FRACTION * 100)}% من الفجوة`,
   });
 
   // ── Lever 4: Supervision improvement (bottom-quartile teams +30%) ──────────
+  // Cap at MAX_SUPERVISION_FRACTION of totalGap.
+  const supervisionMax = round2(totalGap * MAX_SUPERVISION_FRACTION);
   const bottomSups = supervisorRows
     .filter((s) => s.achievementPercent < 70)
     .slice(0, Math.ceil(supervisorRows.length * 0.25));
   const supervisionPotential = round2(
     bottomSups.reduce((sum, s) => sum + Math.max(0, (s.dailyHours / (s.achievementPercent / 100) - s.dailyHours) * 0.3), 0)
   );
-  const supervision = round2(Math.min(remainingGap, supervisionPotential));
+  const supervision = round2(Math.min(remainingGap, Math.min(supervisionPotential, supervisionMax)));
   remainingGap = round2(Math.max(0, remainingGap - supervision));
   levers.push({
     label: 'Supervisor improvement (bottom quartile +30%)',
@@ -142,7 +165,9 @@ export function buildRecruitmentAnalysis(
 
   const hiringRequirementHours = remainingGap;
   const hiringRequirementRiders = Math.ceil(remainingGap / avgH);
-  const recommendHiring = remainingGap > avgH * 3;
+  // Recommend hiring if any gap remains after all operational levers.
+  // With fractional caps, this will typically be true (operational max ≈ 90% of gap).
+  const recommendHiring = remainingGap > 0;
 
   const assumptionNote =
     'الأرقام مبنية على افتراضات معدل الاستجابة: تفعيل 40% | غياب 50% | ساعات 60% | إشراف 30%.';
