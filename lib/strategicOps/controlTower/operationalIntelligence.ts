@@ -133,25 +133,32 @@ export function buildOperationalIntelligenceFeed(
   }
 
   // ─── 5. Low Utilization Alert ─────────────────────────────────────────────
+  // IMPORTANT: All values are DAILY (not period totals). Never multiply by days here.
   const utilizationPct = fleetTalabat.utilizationPercent;
-  if (utilizationPct < 70 && fleetTalabat.activeRiders > 0) {
-    const maxPossibleHours = round2(fleetTalabat.activeRiders * fleetAvg * days);
-    const utilizationGap = round2((maxPossibleHours - actualHours) * 0.3);
-    items.push({
-      id: 'fleet-utilization-low',
-      priority: utilizationPct < 50 ? 'high' : 'medium',
-      titleAr: `استثمار الأسطول ${round2(utilizationPct)}% — الطاقة الفعلية أقل من المتوقع`,
-      explanationAr:
-        `رغم ${fleetTalabat.activeRiders} طيار نشط، الاستثمار ${round2(utilizationPct)}% فقط. ` +
-        `رفع الاستثمار إلى 80% سيضيف ${utilizationGap} ساعة يومياً.`,
-      quantifiedImpact: {
-        hoursLost: round2(maxPossibleHours - actualHours),
-        ridersAffected: fleetTalabat.activeRiders,
-        achievementDelta: round2(80 - utilizationPct),
-      },
-      recommendedActionAr: 'مراجعة توزيع الشفتات وتحسين جداول الطيارين النشطين',
-      expectedRecoveryHours: utilizationGap,
-    });
+  if (utilizationPct < 70 && fleetTalabat.activeRiders > 0 && fleetAvg > 0) {
+    // Daily gap between what active riders could contribute vs what they do
+    const dailyActivePotential = round2(fleetTalabat.activeRiders * fleetAvg);
+    const dailyActualFromActive = actualHours; // fleet daily actual
+    // A 30% improvement on the utilization gap is a realistic recovery
+    const utilizationGap = round2(Math.max(0, dailyActivePotential - dailyActualFromActive) * 0.3);
+    if (utilizationGap > 1) {
+      items.push({
+        id: 'fleet-utilization-low',
+        priority: utilizationPct < 50 ? 'high' : 'medium',
+        titleAr: `استثمار الأسطول ${round2(utilizationPct)}% — الطيارون النشطون يعملون أقل من طاقتهم`,
+        explanationAr:
+          `${fleetTalabat.activeRiders} طيار نشط يمكنهم تقديم ${dailyActivePotential} ساعة/يوم ` +
+          `لكن الفعلي ${round2(actualHours)} ساعة. ` +
+          `تحسين 30% من الفجوة يضيف ${utilizationGap} ساعة يومياً.`,
+        quantifiedImpact: {
+          hoursLost: round2(dailyActivePotential - dailyActualFromActive),
+          ridersAffected: fleetTalabat.activeRiders,
+          achievementDelta: round2(80 - utilizationPct),
+        },
+        recommendedActionAr: 'مراجعة توزيع الشفتات وتحسين جداول الطيارين النشطين',
+        expectedRecoveryHours: utilizationGap,
+      });
+    }
   }
 
   return items

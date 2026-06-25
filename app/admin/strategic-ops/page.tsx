@@ -280,8 +280,8 @@ function RiderImpactTable({ riders }: { riders: RiderIntelligence[] }) {
               <td className="py-2 px-2 text-red-300 font-semibold">{r.lostHoursDaily}س</td>
               <td className="py-2 px-2">{r.noShowCount}</td>
               <td className="py-2 px-2">
-                <span className={`px-1.5 py-0.5 rounded text-xs ${r.baselineSource === 'rider_history' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-500/20 text-slate-300'}`}>
-                  {r.baselineSource === 'rider_history' ? 'تاريخي' : 'متوسط أسطول'}
+                <span className={`px-1.5 py-0.5 rounded text-xs ${r.baselineSource !== 'fleet_average' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-500/20 text-slate-300'}`}>
+                  {r.baselineSource === 'historical_30d' ? '📊 30د' : r.baselineSource === 'historical_partial' ? '📊 جزئي' : '⚠️ متوسط'}
                 </span>
               </td>
               <td className="py-2 px-2">
@@ -345,40 +345,283 @@ function SupervisorIntelligenceTable({ supervisors }: { supervisors: SupervisorI
   );
 }
 
-// ── Layer 9: Recruitment Waterfall ────────────────────────────────────────────
+// ── Layer 9: Recruitment Waterfall (capped, validated) ───────────────────────
 function RecruitmentWaterfall({ analysis }: { analysis: RecruitmentAnalysis }) {
-  const bars = [
-    { label: 'فجوة الساعات الحالية', value: analysis.currentHoursGap, color: 'bg-red-500' },
-    { label: 'تفعيل غير نشطين', value: -analysis.recoverableByReactivation, color: 'bg-emerald-500' },
-    { label: 'تقليل الغياب', value: -analysis.recoverableByNoShowReduction, color: 'bg-emerald-400' },
-    { label: 'رفع ساعات نشطين', value: -analysis.recoverableByHoursPush, color: 'bg-cyan-500' },
-    { label: 'تحسين إشراف', value: -analysis.recoverableBySupervision, color: 'bg-blue-500' },
-    { label: 'فجوة متبقية', value: analysis.remainingGapAfterLevers, color: analysis.recommendHiring ? 'bg-orange-500' : 'bg-emerald-600' },
+  const gap = analysis.currentHoursGap;
+  type BarDef = { labelAr: string; value: number; color: string; note?: string };
+  const bars: BarDef[] = [
+    { labelAr: 'الفجوة اليومية', value: gap, color: 'bg-red-500' },
+    ...analysis.levers.map((l) => ({
+      labelAr: l.labelAr,
+      value: -l.recoveryHours,
+      color: 'bg-emerald-500',
+      note: `${l.pctOfGap}% من الفجوة — ${l.realismNote}`,
+    })),
+    {
+      labelAr: analysis.recommendHiring ? 'فجوة متبقية → تعيين' : 'فجوة متبقية → 0',
+      value: analysis.remainingGapAfterLevers,
+      color: analysis.recommendHiring ? 'bg-orange-500' : 'bg-emerald-600',
+    },
   ];
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
+      {!analysis.validationPassed && (
+        <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-red-200 text-xs">
+          ⚠️ تحذير جودة البيانات: مجموع الرافعات يتجاوز الفجوة الكلية — قد تكون الأرقام غير دقيقة.
+        </div>
+      )}
       {bars.map((bar) => (
-        <div key={bar.label} className="flex items-center gap-3">
-          <div className="text-xs text-[#94A3B8] w-40 shrink-0 text-right">{bar.label}</div>
-          <div className="flex-1 bg-white/5 rounded h-6 overflow-hidden relative">
+        <div key={bar.labelAr} className="flex items-center gap-3">
+          <div className="text-xs text-[#94A3B8] w-44 shrink-0 text-right">{bar.labelAr}</div>
+          <div className="flex-1 bg-white/5 rounded h-5 overflow-hidden">
             <div
-              className={`h-full ${bar.color} rounded`}
-              style={{ width: `${Math.min(100, Math.abs(bar.value) / Math.max(1, analysis.currentHoursGap) * 100)}%` }}
+              className={`h-full ${bar.color} opacity-80 rounded`}
+              style={{ width: `${Math.min(100, (Math.abs(bar.value) / Math.max(1, gap)) * 100)}%` }}
             />
           </div>
           <div className={`text-xs font-medium w-16 text-right ${bar.value < 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-            {bar.value < 0 ? '+' : ''}{Math.abs(Math.round(bar.value))}س
+            {bar.value !== 0 ? `${bar.value < 0 ? '+' : ''}${Math.abs(Math.round(bar.value))}س` : '—'}
           </div>
+          {bar.note && <div className="text-xs text-[#64748B] w-48">{bar.note}</div>}
         </div>
       ))}
-      <div className={`mt-3 rounded-xl border p-3 text-sm ${analysis.recommendHiring ? 'border-orange-500/30 bg-orange-500/10 text-orange-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>
+      <div className={`mt-2 rounded-xl border p-3 text-sm ${analysis.recommendHiring ? 'border-orange-500/30 bg-orange-500/10 text-orange-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>
         {analysis.summaryAr}
         {analysis.recommendHiring && (
-          <span className="block mt-1 font-semibold">
-            مطلوب تعيين {analysis.hiringRequirementRiders} طيار جديد
-          </span>
+          <span className="block mt-1 font-semibold">مطلوب تعيين {analysis.hiringRequirementRiders} طيار جديد</span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Priority 1: Rider Decline Intelligence ────────────────────────────────────
+function RiderDeclineTable({ riders }: { riders: import('@/lib/strategicOps/controlTower/types').RiderDeclineEntry[] }) {
+  const display = riders.slice(0, 20);
+  if (display.length === 0) {
+    return <p className="text-sm text-emerald-300/80">لا يوجد طيارون في تراجع ملحوظ (أكثر من 20%) خلال هذه الفترة.</p>;
+  }
+  const riskColor = { critical: 'text-red-300', high: 'text-orange-300', medium: 'text-amber-300' };
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm text-[#CBD5E1]">
+        <thead>
+          <tr className="border-b border-white/10 text-right">
+            {['الطيار', 'المشرف', 'متوسط سابق', 'متوسط حالي', '↓ نسبة التراجع', 'طلبات سابق', 'طلبات حالي', 'أيام في تراجع', 'خطورة'].map((h) => (
+              <th key={h} className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {display.map((r) => (
+            <tr key={r.code} className="border-b border-white/5 hover:bg-white/5">
+              <td className="py-2 px-2 whitespace-nowrap">{r.name}<br /><span className="text-xs text-[#64748B]">{r.code}</span></td>
+              <td className="py-2 px-2 text-[#94A3B8] whitespace-nowrap">{r.supervisorName || '—'}</td>
+              <td className="py-2 px-2 text-amber-200">{r.prev30AvgHours}س</td>
+              <td className="py-2 px-2 text-cyan-200">{r.currentAvgHours}س</td>
+              <td className={`py-2 px-2 font-bold ${riskColor[r.riskLevel]}`}>{r.hoursDeclinePct}%</td>
+              <td className="py-2 px-2 text-amber-200/70">{r.prev30AvgOrders}</td>
+              <td className="py-2 px-2 text-cyan-200/70">{r.currentAvgOrders}</td>
+              <td className="py-2 px-2">{r.daysInDecline > 0 ? `${r.daysInDecline} يوم` : '—'}</td>
+              <td className="py-2 px-2">
+                <span className={`text-xs font-medium ${riskColor[r.riskLevel]}`}>{r.riskLabelAr}</span>
+                <br />
+                <span className={`text-xs ${r.baselineSource !== 'fleet_average' ? 'text-emerald-400/60' : 'text-slate-500'}`}>
+                  {r.baselineSource === 'historical_30d' ? '📊 30د' : r.baselineSource === 'historical_partial' ? '📊 جزئي' : '⚠️ متوسط'}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Priority 2: Order Collapse Ranking ────────────────────────────────────────
+function OrderCollapseTable({ entries }: { entries: import('@/lib/strategicOps/controlTower/types').OrderCollapseEntry[] }) {
+  const display = entries.slice(0, 25);
+  if (display.length === 0) {
+    return <p className="text-sm text-emerald-300/80">لا يوجد انهيار في الطلبات بشكل ملحوظ خلال هذه الفترة.</p>;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm text-[#CBD5E1]">
+        <thead>
+          <tr className="border-b border-white/10 text-right">
+            {['#', 'الطيار', 'المشرف', 'متوقع/يوم', 'فعلي/يوم', 'مفقود/يوم', 'انهيار %', 'الساعات أيضاً؟'].map((h) => (
+              <th key={h} className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {display.map((r) => (
+            <tr key={r.code} className="border-b border-white/5 hover:bg-white/5">
+              <td className="py-2 px-2 text-[#64748B]">{r.rank}</td>
+              <td className="py-2 px-2 whitespace-nowrap">{r.name}<br /><span className="text-xs text-[#64748B]">{r.code}</span></td>
+              <td className="py-2 px-2 text-[#94A3B8] whitespace-nowrap">{r.supervisorName || '—'}</td>
+              <td className="py-2 px-2 text-amber-200">{r.expectedOrdersDaily}</td>
+              <td className="py-2 px-2 text-cyan-200">{r.actualOrdersDaily}</td>
+              <td className="py-2 px-2 font-bold text-red-300">{r.lostOrdersDaily}</td>
+              <td className="py-2 px-2 text-red-300">{r.ordersCollapsePct}%</td>
+              <td className="py-2 px-2">
+                {r.hoursAlsoCollapsed
+                  ? <span className="text-xs bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded">نعم ↓{r.hoursDeclinePct}%</span>
+                  : <span className="text-xs bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded">لا — كفاءة</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Priority 3: Daily Contact List ────────────────────────────────────────────
+function DailyContactListTable({ entries }: { entries: import('@/lib/strategicOps/controlTower/types').DailyContactEntry[] }) {
+  if (entries.length === 0) {
+    return <p className="text-sm text-emerald-300/80">لا يوجد طيارون يستوفون شروط قائمة الاتصال اليوم.</p>;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm text-[#CBD5E1]">
+        <thead>
+          <tr className="border-b border-white/10 text-right">
+            {['أولوية', 'الطيار', 'الرقم', 'المشرف', 'متوسط ساعات', 'متوسط طلبات', 'أيام متوقف', 'ساعات متوقعة', 'نقاط الأولوية'].map((h) => (
+              <th key={h} className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((r) => (
+            <tr key={r.code} className={`border-b border-white/5 hover:bg-white/5 ${r.priority <= 3 ? 'bg-red-500/5' : ''}`}>
+              <td className="py-2 px-2">
+                <span className={`text-base font-bold ${r.priority === 1 ? 'text-red-300' : r.priority <= 3 ? 'text-orange-300' : 'text-[#94A3B8]'}`}>
+                  #{r.priority}
+                </span>
+              </td>
+              <td className="py-2 px-2 font-medium whitespace-nowrap">{r.name}</td>
+              <td className="py-2 px-2 text-[#64748B] text-xs">{r.code}</td>
+              <td className="py-2 px-2 text-[#94A3B8] whitespace-nowrap">{r.supervisorName || '—'}</td>
+              <td className="py-2 px-2 text-amber-200">{r.prev30AvgHours}س</td>
+              <td className="py-2 px-2 text-amber-200/70">{r.prev30AvgOrders}</td>
+              <td className="py-2 px-2 text-red-300 font-semibold">{r.consecutiveInactiveDays} يوم</td>
+              <td className="py-2 px-2 text-emerald-300">+{r.expectedRecoveryHours}س</td>
+              <td className="py-2 px-2 text-cyan-200 font-semibold">{r.priorityScore}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Priority 4: Supervisor Accountability Bar ─────────────────────────────────
+function SupervisorAccountabilityBars({ breakdowns }: { breakdowns: import('@/lib/strategicOps/controlTower/types').SupervisorAccountabilityBreakdown[] }) {
+  if (breakdowns.length === 0) return null;
+  const display = breakdowns.slice(0, 8);
+  return (
+    <div className="space-y-4">
+      {display.map((s) => (
+        <div key={s.supervisorCode} className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <span className="font-semibold text-[#EAF0FF] text-sm">{s.supervisorName}</span>
+            <span className="text-xs text-red-300">{s.totalLostHours} ساعة مفقودة/يوم</span>
+          </div>
+          <div className="h-6 rounded overflow-hidden flex mb-2">
+            {s.noShowPct > 0 && (
+              <div className="bg-red-500/70 flex items-center justify-center text-xs text-white font-medium" style={{ width: `${s.noShowPct}%` }}>
+                {s.noShowPct > 8 ? `${s.noShowPct}%` : ''}
+              </div>
+            )}
+            {s.lowHoursPct > 0 && (
+              <div className="bg-amber-500/70 flex items-center justify-center text-xs text-white font-medium" style={{ width: `${s.lowHoursPct}%` }}>
+                {s.lowHoursPct > 8 ? `${s.lowHoursPct}%` : ''}
+              </div>
+            )}
+            {s.inactivePct > 0 && (
+              <div className="bg-slate-500/70 flex items-center justify-center text-xs text-white font-medium" style={{ width: `${s.inactivePct}%` }}>
+                {s.inactivePct > 8 ? `${s.inactivePct}%` : ''}
+              </div>
+            )}
+            {s.attritionPct > 0 && (
+              <div className="bg-purple-500/70 flex items-center justify-center text-xs text-white font-medium" style={{ width: `${s.attritionPct}%` }}>
+                {s.attritionPct > 8 ? `${s.attritionPct}%` : ''}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-3 text-xs mb-2">
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500/70 inline-block" />غياب {s.noShowPct}%</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500/70 inline-block" />ساعات منخفضة {s.lowHoursPct}%</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-500/70 inline-block" />غير نشط {s.inactivePct}%</span>
+            {s.attritionPct > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500/70 inline-block" />مغادرة {s.attritionPct}%</span>}
+          </div>
+          <p className="text-xs text-cyan-200/90 font-medium">{s.recommendationAr}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Priority 5: Forecast Cards ────────────────────────────────────────────────
+function ForecastCards({ forecasts }: { forecasts: import('@/lib/strategicOps/controlTower/types').MetricForecast[] }) {
+  if (forecasts.length === 0) return <p className="text-sm text-[#64748B]">بيانات غير كافية للتنبؤ (أقل من 3 أيام).</p>;
+  const trendIcon: Record<string, string> = {
+    improving: '↑', stable: '→', declining: '↓', critical_decline: '↓↓',
+  };
+  const trendColor: Record<string, string> = {
+    improving: 'text-emerald-300', stable: 'text-cyan-300', declining: 'text-amber-300', critical_decline: 'text-red-300',
+  };
+  const confColor: Record<string, string> = { high: 'text-emerald-400', medium: 'text-amber-400', low: 'text-slate-400' };
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {forecasts.map((f) => (
+        <div key={f.metricKey} className={`rounded-xl border p-4 ${f.alertAr ? 'border-red-500/40 bg-red-500/5' : 'border-white/10 bg-white/5'}`}>
+          <p className="text-xs text-[#94A3B8] mb-2">{f.metricLabelAr}</p>
+          <div className="flex items-baseline gap-2 mb-3">
+            <span className="text-2xl font-bold text-[#EAF0FF]">{f.currentValue}</span>
+            <span className={`text-sm font-semibold ${trendColor[f.trend]}`}>{trendIcon[f.trend]}</span>
+          </div>
+          <div className="space-y-1 mb-3 text-xs">
+            <div className="flex justify-between">
+              <span className="text-[#64748B]">7 أيام:</span>
+              <span className={trendColor[f.trend]}>{f.day7Forecast} {trendIcon[f.trend]}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-[#64748B]">14 يوم:</span>
+              <span className={trendColor[f.trend]}>{f.day14Forecast} {f.trend === 'critical_decline' ? '↓↓' : trendIcon[f.trend]}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-[#64748B]">ثقة:</span>
+              <span className={confColor[f.confidence]}>{f.confidence === 'high' ? 'مرتفعة' : f.confidence === 'medium' ? 'متوسطة' : 'منخفضة'}</span>
+            </div>
+          </div>
+          {f.alertAr && <p className="text-xs text-red-300 font-medium mb-2">{f.alertAr}</p>}
+          <p className="text-xs text-[#64748B] italic">{f.interpretationAr}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Baseline Coverage Panel ───────────────────────────────────────────────────
+function BaselineCoveragePanel({ coverage }: { coverage: import('@/lib/strategicOps/controlTower/types').BaselineCoverageStats }) {
+  return (
+    <div className={`rounded-xl border p-4 text-sm ${coverage.qualityWarning ? 'border-amber-500/30 bg-amber-500/5' : 'border-white/10 bg-white/5'}`}>
+      <p className="font-semibold text-[#94A3B8] mb-2 text-xs">جودة البيانات التاريخية</p>
+      <div className="flex flex-wrap gap-4 text-xs">
+        <span className="text-emerald-300">📊 30 يوم كامل: {coverage.historical30d} طيار</span>
+        <span className="text-amber-300">📊 جزئي: {coverage.historicalPartial} طيار</span>
+        <span className="text-slate-400">⚠️ متوسط أسطول: {coverage.fleetAverage} طيار</span>
+        <span className={`font-semibold ${coverage.qualityWarning ? 'text-amber-300' : 'text-emerald-300'}`}>
+          {coverage.historicalPct}% يستخدمون بياناتهم التاريخية الخاصة
+        </span>
+      </div>
+      {coverage.qualityWarning && (
+        <p className="text-amber-200/80 mt-2 text-xs">
+          ⚠️ أكثر من 40% من الطيارين يعتمدون على متوسط الأسطول كتوقع — مقارنات التراجع لهؤلاء أقل دقة.
+        </p>
+      )}
     </div>
   );
 }
@@ -816,6 +1059,55 @@ export default function StrategicOpsCenterPage() {
             {report.controlTower?.recruitmentAnalysis && report.controlTower.recruitmentAnalysis.currentHoursGap > 0 && (
               <Section title="🧮 تحليل احتياجات التوظيف — هل نحتاج تعيينات أم تحسين تشغيلي؟">
                 <RecruitmentWaterfall analysis={report.controlTower.recruitmentAnalysis} />
+              </Section>
+            )}
+
+            {report.controlTower?.baselineCoverage && (
+              <BaselineCoveragePanel coverage={report.controlTower.baselineCoverage} />
+            )}
+
+            {report.controlTower?.forecastMetrics && report.controlTower.forecastMetrics.length > 0 && (
+              <Section title="🔮 محرك التنبؤ — توقعات 7 و14 يوم بناءً على الاتجاه الفعلي">
+                <p className="text-xs text-[#64748B] mb-3">
+                  بناءً على آخر 14 يوم بيانات فعلية — الأوزان مرجحة لصالح الأيام الأحدث.
+                </p>
+                <ForecastCards forecasts={report.controlTower.forecastMetrics} />
+              </Section>
+            )}
+
+            {report.controlTower?.dailyContactList && report.controlTower.dailyContactList.length > 0 && (
+              <Section title="📞 قائمة الاتصال اليومي — أولى 10 مناديب للتواصل معهم اليوم">
+                <p className="text-sm text-amber-200/90 font-medium mb-3">
+                  إذا كان لديك وقت للتواصل مع 10 مناديب فقط اليوم — هؤلاء هم
+                </p>
+                <DailyContactListTable entries={report.controlTower.dailyContactList} />
+              </Section>
+            )}
+
+            {report.controlTower?.riderDeclineView && report.controlTower.riderDeclineView.length > 0 && (
+              <Section title="📉 منحدر الأداء — مناديب في تراجع ملحوظ مقارنةً بأدائهم السابق">
+                <p className="text-xs text-[#64748B] mb-3">
+                  مرتبون حسب نسبة التراجع (%) — ليس الساعات المفقودة. الانخفاض من 8س إلى 3س (−62%) أخطر من الانخفاض من 4س إلى 2س.
+                </p>
+                <RiderDeclineTable riders={report.controlTower.riderDeclineView} />
+              </Section>
+            )}
+
+            {report.controlTower?.orderCollapseView && report.controlTower.orderCollapseView.length > 0 && (
+              <Section title="📦 انهيار الطلبات — مناديب يعملون لكن طلباتهم انخفضت بشكل مستقل">
+                <p className="text-xs text-[#64748B] mb-3">
+                  عمود "الساعات أيضاً؟" يوضح: هل هي مشكلة حضور (طيار غائب) أم مشكلة كفاءة (طيار يعمل ولا يوصل)؟ — كل منهما يحتاج تدخلاً مختلفاً.
+                </p>
+                <OrderCollapseTable entries={report.controlTower.orderCollapseView} />
+              </Section>
+            )}
+
+            {report.controlTower?.supervisorAccountability && report.controlTower.supervisorAccountability.length > 0 && (
+              <Section title="📊 مساءلة المشرفين — تفكيك الساعات المفقودة إلى 4 أسباب">
+                <p className="text-xs text-[#64748B] mb-3">
+                  الأشرطة تجمع 100% — تساعدك في تحديد هل المشكلة غياب، ساعات منخفضة، توقف، أم مغادرة.
+                </p>
+                <SupervisorAccountabilityBars breakdowns={report.controlTower.supervisorAccountability} />
               </Section>
             )}
 

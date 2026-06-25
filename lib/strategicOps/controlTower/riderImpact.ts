@@ -80,6 +80,7 @@ export function buildTopNegativeImpactRiders(
       fleetExpectedDaily,
       fleetAvgOrders
     );
+    
 
     const actualHoursDaily = round2(r.totalHours / days);
     const hoursGapDaily = round2(Math.max(0, expectedHoursDaily - actualHoursDaily));
@@ -273,12 +274,14 @@ export function buildRiderIntelligence(ctx: ControlTowerBuildContext): RiderInte
     const norm = normalizeRiderCodeForPerformance(rider.code);
     if (!norm) continue;
 
-    const { hours: expectedH, orders: expectedO, source } = resolveRiderExpected(
+    const expectedResolved = resolveRiderExpected(
       rider.code,
       riderHistoricalBaselines,
       fleetAvg,
       fleetAvgOrders
     );
+    const { hours: expectedH, orders: expectedO } = expectedResolved;
+    const source = expectedResolved.source as 'historical_30d' | 'historical_partial' | 'fleet_average';
 
     const riderPerf = perfByRider.get(norm) ?? [];
     const totalHours = riderPerf.reduce((s, r) => s + r.hours, 0);

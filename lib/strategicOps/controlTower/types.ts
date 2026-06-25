@@ -30,7 +30,7 @@ export type ManagementAction = {
   evidence: string;
 };
 
-/** Per-rider historical baseline from lookback window (14–30 days before period). */
+/** Per-rider historical baseline from lookback window (30 days before period). */
 export type RiderHistoricalBaseline = {
   riderCode: string;
   avgHoursDaily: number;
@@ -38,6 +38,8 @@ export type RiderHistoricalBaseline = {
   activeDays: number;
   lookbackDays: number;
   hasHistory: boolean;
+  /** Source of expected hours: own 30-day history, partial history, or fleet average fallback. */
+  baselineSource: 'historical_30d' | 'historical_partial' | 'fleet_average';
 };
 
 export type SupervisorTrendStatus = 'improving' | 'stable' | 'declining' | 'critical';
@@ -128,14 +130,24 @@ export type RiderIntelligence = {
   attendanceRate: number;
   utilizationPercent: number;
   trendDirection: 'improving' | 'stable' | 'declining';
-  baselineSource: 'rider_history' | 'fleet_average';
+  baselineSource: 'historical_30d' | 'historical_partial' | 'fleet_average';
   impactLevel: RiderImpactLevel;
   impactLabelAr: string;
 };
 
-/** Recruitment needs waterfall. */
+/** A single recovery lever in the recruitment waterfall. */
+export type RecoveryLever = {
+  label: string;
+  labelAr: string;
+  recoveryHours: number;
+  pctOfGap: number;
+  realismNote: string;
+};
+
+/** Recruitment needs waterfall (daily hours). */
 export type RecruitmentAnalysis = {
   currentHoursGap: number;
+  levers: RecoveryLever[];
   recoverableByReactivation: number;
   recoverableByNoShowReduction: number;
   recoverableByHoursPush: number;
@@ -145,6 +157,98 @@ export type RecruitmentAnalysis = {
   hiringRequirementHours: number;
   recommendHiring: boolean;
   summaryAr: string;
+  validationPassed: boolean;
+};
+
+/** Priority 1: Rider decline entry (ranked by % decline). */
+export type RiderDeclineEntry = {
+  code: string;
+  name: string;
+  supervisorCode: string;
+  supervisorName: string;
+  prev30AvgHours: number;
+  currentAvgHours: number;
+  hoursDeclinePct: number;
+  prev30AvgOrders: number;
+  currentAvgOrders: number;
+  ordersDeclinePct: number;
+  declineStartDay: string | null;
+  daysInDecline: number;
+  riskLevel: 'critical' | 'high' | 'medium';
+  riskLabelAr: string;
+  baselineSource: 'historical_30d' | 'historical_partial' | 'fleet_average';
+};
+
+/** Priority 2: Order collapse entry (ranked by absolute lost orders). */
+export type OrderCollapseEntry = {
+  rank: number;
+  code: string;
+  name: string;
+  supervisorCode: string;
+  supervisorName: string;
+  expectedOrdersDaily: number;
+  actualOrdersDaily: number;
+  lostOrdersDaily: number;
+  ordersCollapsePct: number;
+  hoursAlsoCollapsed: boolean;
+  hoursDeclinePct: number;
+};
+
+/** Priority 3: Daily contact priority entry (specific riders to call today). */
+export type DailyContactEntry = {
+  priority: number;
+  code: string;
+  name: string;
+  supervisorCode: string;
+  supervisorName: string;
+  prev30AvgHours: number;
+  prev30AvgOrders: number;
+  consecutiveInactiveDays: number;
+  expectedRecoveryHours: number;
+  expectedRecoveryOrders: number;
+  priorityScore: number;
+};
+
+/** Priority 4: Supervisor accountability breakdown into 4 causes. */
+export type SupervisorAccountabilityBreakdown = {
+  supervisorCode: string;
+  supervisorName: string;
+  totalLostHours: number;
+  noShowLostHours: number;
+  noShowPct: number;
+  lowHoursLostHours: number;
+  lowHoursPct: number;
+  inactiveLostHours: number;
+  inactivePct: number;
+  attritionLostHours: number;
+  attritionPct: number;
+  dominantCause: 'noShow' | 'lowHours' | 'inactive' | 'attrition';
+  recommendationAr: string;
+};
+
+/** Priority 5: Metric forecast card (7-day and 14-day projection). */
+export type MetricForecast = {
+  metricKey: string;
+  metricLabelAr: string;
+  currentValue: number;
+  day7Forecast: number;
+  day14Forecast: number;
+  trend: 'improving' | 'stable' | 'declining' | 'critical_decline';
+  confidence: 'high' | 'medium' | 'low';
+  alertAr: string | null;
+  interpretationAr: string;
+  rSquared: number;
+};
+
+/** Baseline coverage stats for the data quality panel. */
+export type BaselineCoverageStats = {
+  historical30d: number;
+  historicalPartial: number;
+  fleetAverage: number;
+  total: number;
+  historicalPct: number;
+  fleetAvgPct: number;
+  qualityWarning: boolean;
 };
 
 export type KpiTrendComparison = {
@@ -292,9 +396,15 @@ export type ControlTowerReport = {
   periodComparisons: KpiTrendComparison[];
   supervisorScorecards: SupervisorScorecardsReport;
   supervisorIntelligence: SupervisorIntelligence[];
+  supervisorAccountability: SupervisorAccountabilityBreakdown[];
   intelligenceFeed: IntelligenceFeedItem[];
   executiveHealth: OperationalHealthSummary;
   recruitmentAnalysis: RecruitmentAnalysis;
+  riderDeclineView: RiderDeclineEntry[];
+  orderCollapseView: OrderCollapseEntry[];
+  dailyContactList: DailyContactEntry[];
+  forecastMetrics: MetricForecast[];
+  baselineCoverage: BaselineCoverageStats;
   generatedAt: string;
 };
 
