@@ -77,44 +77,71 @@ function trendFromSlope(slope: number, currentValue: number): MetricForecast['tr
 /**
  * Build time series for fleet metrics from combined lookback + current performance.
  *
- * No-show definition: headcount − activeRiders per day (mirrors fleet KPI computation).
- * This is consistent regardless of whether the daily sheet records explicit zero-hour rows.
- * Lookback periods that only recorded active riders (no zero-rows) would produce noShow=0
- * under the old zero-row counting approach, creating a spurious declining trend.
+ * No-show definition: mirrors talabatOpsMetrics.computeDailyTalabatSeries exactly:
+ *   - Only riders present in assignedRiderCodes are eligible (same roster gate).
+ *   - Active    = hours > 0
+ *   - No-show   = hours === 0 AND orders === 0  (isTalabatNoShow rule)
+ *   - Excluded  = hours === 0 AND orders > 0    (partial-work — neither active nor no-show)
+ *
+ * Using this per-rider rule (rather than headcount − active) eliminates the ~5-rider
+ * gap between the forecast currentValue and the KPI noShowRiders average.
  */
 function buildFleetDailySeries(
   ctx: ControlTowerBuildContext
 ): Map<string, { hours: number; orders: number; activeRiders: number; noShowRiders: number }> {
   const all = [...(ctx.lookbackPerformance ?? []), ...ctx.performance];
-  const byDate = new Map<string, { hours: number; orders: number; activeCodes: Set<string> }>();
+  const assignedCodes = ctx.assignedRiderCodes;
+
+  // Per date: accumulate per-rider totals (hours + orders) for assigned riders only.
+  const byDate = new Map<
+    string,
+    { hours: number; orders: number; riderTotals: Map<string, { hours: number; orders: number }> }
+  >();
 
   for (const row of all) {
     const norm = normalizeRiderCodeForPerformance(row.riderCode);
     if (!norm) continue;
+    // Apply the same assignedRiderCodes gate used by the KPI engine.
+    if (!assignedCodes.has(norm)) continue;
+
     const existing = byDate.get(row.date) ?? {
       hours: 0,
       orders: 0,
-      activeCodes: new Set<string>(),
+      riderTotals: new Map<string, { hours: number; orders: number }>(),
     };
     existing.hours += row.hours;
     existing.orders += row.orders;
-    if (row.hours > 0) existing.activeCodes.add(norm);
+
+    // Accumulate per-rider totals so we can apply isTalabatNoShow correctly.
+    const prev = existing.riderTotals.get(norm) ?? { hours: 0, orders: 0 };
+    existing.riderTotals.set(norm, {
+      hours: prev.hours + row.hours,
+      orders: prev.orders + row.orders,
+    });
+
     byDate.set(row.date, existing);
   }
 
-  // Use headcount to compute no-show: headcount − active riders on each date.
-  // For lookback dates the fleet may have had a different size — use the registered
-  // headcount as a stable denominator. This is the same definition as the fleet KPI.
-  const headcount = Math.max(1, ctx.headcount);
-
   const result = new Map<string, { hours: number; orders: number; activeRiders: number; noShowRiders: number }>();
   for (const [date, data] of byDate) {
-    const activeCount = data.activeCodes.size;
+    let activeRiders = 0;
+    let noShowRiders = 0;
+
+    for (const totals of data.riderTotals.values()) {
+      if (totals.hours > 0) {
+        activeRiders++;
+      } else if (totals.orders === 0) {
+        // hours === 0 AND orders === 0 → isTalabatNoShow
+        noShowRiders++;
+      }
+      // hours === 0 AND orders > 0 → partial work, excluded from both counts (same as KPI)
+    }
+
     result.set(date, {
       hours: round2(data.hours),
       orders: data.orders,
-      activeRiders: activeCount,
-      noShowRiders: Math.max(0, headcount - activeCount),
+      activeRiders,
+      noShowRiders,
     });
   }
   return result;
