@@ -49,6 +49,7 @@ import {
   type RoadmapRidersAudit,
 } from '@/lib/strategicOps/roadmapCalculation';
 import { buildControlTowerReport, type ControlTowerReport } from '@/lib/strategicOps/controlTower';
+import { buildRiderHistoricalBaselines } from '@/lib/strategicOps/controlTower/riderHistory';
 
 export type StrategicOpsFilters = {
   startDate: string;
@@ -1983,6 +1984,41 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     supervisorsScoped.map((s) => [String(s.code ?? '').trim(), s.name || String(s.code ?? '').trim()])
   );
 
+  // Build per-rider historical baselines from the 30-day lookback window before startDate.
+  const LOOKBACK_DAYS = 30;
+  const lookbackEndDate = new Date(startDate.getTime() - 1);
+  const lookbackStartDate = new Date(startDate.getTime() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const lookbackStartIso = lookbackStartDate.toISOString().split('T')[0];
+  const lookbackEndIso = lookbackEndDate.toISOString().split('T')[0];
+
+  const headerOffset =
+    dailySheetRaw.length > 0 && String(dailySheetRaw[0][0] ?? '').includes('تاريخ') ? 1 : 0;
+
+  const lookbackPerformance: Array<{ date: string; riderCode: string; hours: number; orders: number }> = [];
+  for (let i = headerOffset; i < dailySheetRaw.length; i++) {
+    const row = dailySheetRaw[i];
+    if (!row?.length) continue;
+    const parsed = parseDailySheetDate(row[0]);
+    if (!parsed) continue;
+    const dateStr = parsed.toISOString().split('T')[0];
+    if (dateStr < lookbackStartIso || dateStr > lookbackEndIso) continue;
+    const riderCode = String(row[1] ?? '').trim();
+    const norm = normalizeRiderCodeForPerformance(riderCode);
+    if (!norm) continue;
+    const hours = Math.max(0, parseFloat(String(row[2] ?? '0').replace(',', '.')) || 0);
+    const orders = Math.max(0, parseInt(String(row[3] ?? '0'), 10) || 0);
+    lookbackPerformance.push({ date: dateStr, riderCode: norm, hours, orders });
+  }
+
+  const riderHistoricalBaselines = buildRiderHistoricalBaselines(lookbackPerformance, LOOKBACK_DAYS);
+
+  // Build join-date map for rider lifecycle classification.
+  const riderJoinDateByCode = new Map<string, string>();
+  for (const r of ridersInScope) {
+    const norm = normalizeRiderCodeForPerformance(r.code);
+    if (norm && r.joinDate) riderJoinDateByCode.set(norm, r.joinDate);
+  }
+
   const controlTower = buildControlTowerReport({
     startDate: filters.startDate,
     endDate: filters.endDate,
@@ -2006,12 +2042,16 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
       totalOrders: agg.totalOrders,
     })),
     performance,
+    lookbackPerformance,
+    riderHistoricalBaselines,
     assignedRiderCodes,
     fleetDailyTargetHours,
     headcount: totalRegistered,
     inactiveRiders,
     avgHoursPerActiveRider: fleetTalabat.avgHoursPerActiveRider,
     supervisorNameByCode,
+    riderJoinDateByCode,
+    avgRevenuePerOrder: 0,
   });
 
   return { ...partial, operationalFormulaAudit, aiInsights, controlTower };

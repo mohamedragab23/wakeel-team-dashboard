@@ -9,7 +9,15 @@ import { ZONE_OPTIONS } from '@/lib/zones';
 import { STRATEGIC_OPS_LABELS as L } from '@/lib/strategicOps/labelsAr';
 import { GHOST_CATEGORY_LABELS_AR } from '@/lib/strategicOps/ghostRiderAudit';
 import type { StrategicOpsReport } from '@/lib/strategicOps/buildReport';
-import type { KpiRootCause, ManagementAction } from '@/lib/strategicOps/controlTower/types';
+import type {
+  KpiRootCause,
+  ManagementAction,
+  IntelligenceFeedItem,
+  OperationalHealthSummary,
+  RiderIntelligence,
+  SupervisorIntelligence,
+  RecruitmentAnalysis,
+} from '@/lib/strategicOps/controlTower/types';
 import { formatKpiTrendSummary } from '@/lib/strategicOps/controlTower/kpiRootCause';
 import {
   exportStrategicOpsExcel,
@@ -49,6 +57,329 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <h2 className="text-lg font-semibold text-[#EAF0FF] border-b border-white/10 pb-2">{title}</h2>
       {children}
     </section>
+  );
+}
+
+// ── Layer 1: Executive Health Panel ──────────────────────────────────────────
+function ExecutiveHealthPanel({ health }: { health: OperationalHealthSummary }) {
+  const statusBg =
+    health.statusLabel === 'Healthy'
+      ? 'border-emerald-500/40 bg-emerald-500/10'
+      : health.statusLabel === 'Warning'
+        ? 'border-amber-500/40 bg-amber-500/10'
+        : 'border-red-500/40 bg-red-500/10';
+  const scoreColor =
+    health.statusLabel === 'Healthy'
+      ? 'text-emerald-300'
+      : health.statusLabel === 'Warning'
+        ? 'text-amber-300'
+        : 'text-red-300';
+  const riskColors: Record<string, string> = {
+    low: 'bg-emerald-500/20 text-emerald-200 border-emerald-500/30',
+    medium: 'bg-amber-500/20 text-amber-200 border-amber-500/30',
+    high: 'bg-orange-500/20 text-orange-200 border-orange-500/30',
+    severe: 'bg-red-500/20 text-red-200 border-red-500/30',
+  };
+  const riskLabels: Record<string, string> = { low: 'منخفض', medium: 'متوسط', high: 'مرتفع', severe: 'حرج' };
+  return (
+    <div className={`rounded-2xl border p-5 ${statusBg}`}>
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+        <div>
+          <p className="text-xs text-[#94A3B8] mb-1">مركز العمليات الاستراتيجي — الوضع الراهن</p>
+          <div className="flex items-baseline gap-2">
+            <span className={`text-5xl font-bold ${scoreColor}`}>{health.healthScore}</span>
+            <span className="text-lg text-[#64748B]">/100</span>
+            <span className="text-2xl font-semibold text-[#EAF0FF] mr-2">{health.statusLabelAr}</span>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className={`px-2 py-0.5 rounded-full text-xs border ${riskColors[health.riskLevel]}`}>
+            خطورة: {riskLabels[health.riskLevel]}
+          </span>
+          <span className="px-2 py-0.5 rounded-full text-xs border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">
+            تحقيق: {health.achievementPercent}%
+          </span>
+          {health.hoursGap > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-xs border border-red-500/30 bg-red-500/10 text-red-200">
+              ↓ {health.hoursGap} ساعة فجوة
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+          <p className="text-xs text-[#94A3B8] mb-1">صحة الأسطول</p>
+          <p className="text-xl font-bold text-[#EAF0FF]">{health.fleetHealthScore}/100</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+          <p className="text-xs text-[#94A3B8] mb-1">صحة الإشراف</p>
+          <p className="text-xl font-bold text-[#EAF0FF]">{health.supervisorHealthScore}/100</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+          <p className="text-xs text-[#94A3B8] mb-1">فجوة الساعات</p>
+          <p className="text-xl font-bold text-red-300">{health.hoursGap} س/يوم</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+          <p className="text-xs text-[#94A3B8] mb-1">التحقيق</p>
+          <p className="text-xl font-bold text-[#EAF0FF]">{health.achievementPercent}%</p>
+        </div>
+      </div>
+      <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+        <p className="text-sm text-[#CBD5E1]">
+          <span className="font-semibold text-[#94A3B8]">ملخص: </span>
+          {health.situationSummaryAr}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Layer 2: Intelligence Feed ────────────────────────────────────────────────
+function IntelligenceFeed({ items, expanded }: { items: IntelligenceFeedItem[]; expanded?: boolean }) {
+  const priorityStyles: Record<string, string> = {
+    critical: 'border-l-4 border-l-red-500 bg-red-500/5',
+    high: 'border-l-4 border-l-orange-500 bg-orange-500/5',
+    medium: 'border-l-4 border-l-amber-500 bg-amber-500/5',
+    low: 'border-l-4 border-l-slate-500 bg-slate-500/5',
+  };
+  const priorityIcons: Record<string, string> = { critical: '🔴', high: '🟠', medium: '🟡', low: '⚪' };
+  const display = expanded ? items : items.slice(0, 5);
+  if (items.length === 0) {
+    return <p className="text-sm text-emerald-300/80">لا توجد تنبيهات — الأداء ضمن النطاق المقبول.</p>;
+  }
+  return (
+    <div className="space-y-3">
+      {display.map((item) => (
+        <div key={item.id} className={`rounded-xl border border-white/10 p-4 ${priorityStyles[item.priority]}`}>
+          <div className="flex flex-wrap items-start gap-3">
+            <span className="text-base">{priorityIcons[item.priority]}</span>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-[#EAF0FF] text-sm">{item.titleAr}</p>
+              <p className="text-sm text-[#94A3B8] mt-1">{item.explanationAr}</p>
+              <div className="flex flex-wrap gap-3 mt-2 text-xs">
+                <span className="text-red-300">
+                  📉 {item.quantifiedImpact.hoursLost} ساعة مفقودة
+                </span>
+                <span className="text-[#64748B]">
+                  👥 {item.quantifiedImpact.ridersAffected} طيار
+                </span>
+                <span className="text-emerald-300">
+                  ✅ إجراء: {item.recommendedActionAr}
+                </span>
+                {item.expectedRecoveryHours > 0 && (
+                  <span className="text-cyan-300">
+                    ↗ استرداد متوقع: +{item.expectedRecoveryHours} ساعة
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Layer 8: Enhanced Action Card ────────────────────────────────────────────
+function ActionCard({ action, rank }: { action: ManagementAction; rank: number }) {
+  const confidenceColors: Record<string, string> = {
+    high: 'text-emerald-300',
+    medium: 'text-amber-300',
+    low: 'text-slate-400',
+  };
+  const urgencyColors: Record<string, string> = {
+    immediate: 'bg-red-500/20 text-red-200 border-red-500/40',
+    this_week: 'bg-amber-500/20 text-amber-200 border-amber-500/40',
+    this_month: 'bg-slate-500/20 text-slate-200 border-slate-500/40',
+  };
+  const urgencyLabels: Record<string, string> = {
+    immediate: 'فوري',
+    this_week: 'هذا الأسبوع',
+    this_month: 'هذا الشهر',
+  };
+  const confidence = (action as ManagementAction & { confidence?: string }).confidence;
+  const urgency = (action as ManagementAction & { urgency?: string }).urgency;
+  const whyAr = (action as ManagementAction & { whyAr?: string }).whyAr;
+  const riderCount = (action as ManagementAction & { riderCount?: number }).riderCount;
+  const expectedRecoveryOrders = (action as ManagementAction & { expectedRecoveryOrders?: number }).expectedRecoveryOrders;
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/5 p-4 flex flex-col sm:flex-row sm:items-start gap-3">
+      <div className="flex items-start gap-2 shrink-0">
+        <span className="text-lg font-bold text-[#EAF0FF] w-6">{rank}</span>
+        <ActionPriorityBadge priority={action.priority} />
+      </div>
+      <div className="flex-1 min-w-0 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-semibold text-[#EAF0FF] text-sm">
+            {action.entityType === 'supervisor' && '🔴 '}
+            {action.entityName}
+          </p>
+          {urgency && (
+            <span className={`px-2 py-0.5 rounded-full text-xs border ${urgencyColors[urgency] ?? ''}`}>
+              {urgencyLabels[urgency] ?? urgency}
+            </span>
+          )}
+        </div>
+        <p className="text-sm text-[#94A3B8]">{action.problemAr}</p>
+        {whyAr && <p className="text-xs text-[#64748B] italic">{whyAr}</p>}
+        <div className="flex flex-wrap gap-4 mt-2 text-xs">
+          <span className="text-emerald-300">
+            ↗ استرداد: +{action.deduplicatedRecoveryHours} س/يوم
+          </span>
+          {expectedRecoveryOrders !== undefined && expectedRecoveryOrders > 0 && (
+            <span className="text-cyan-300">+{expectedRecoveryOrders} طلب</span>
+          )}
+          {riderCount !== undefined && riderCount > 0 && (
+            <span className="text-[#64748B]">👥 {riderCount} طيار</span>
+          )}
+          {confidence && (
+            <span className={`${confidenceColors[confidence] ?? ''}`}>
+              ثقة: {confidence === 'high' ? 'مرتفعة' : confidence === 'medium' ? 'متوسطة' : 'منخفضة'}
+            </span>
+          )}
+        </div>
+        <p className="text-sm text-cyan-200/90 mt-1">
+          <span className="text-[#64748B]">الإجراء: </span>
+          {action.actionAr}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Layer 5: Rider Impact Table (history-based) ───────────────────────────────
+function RiderImpactTable({ riders }: { riders: RiderIntelligence[] }) {
+  const top = riders.filter((r) => r.lostHoursDaily > 0).slice(0, 20);
+  if (top.length === 0) {
+    return <p className="text-sm text-emerald-300/80">لا يوجد طيارون بساعات مفقودة في هذه الفترة.</p>;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm text-[#CBD5E1]">
+        <thead>
+          <tr className="border-b border-white/10 text-right">
+            <th className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">#</th>
+            <th className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">الطيار</th>
+            <th className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">المشرف</th>
+            <th className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">متوقع</th>
+            <th className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">فعلي</th>
+            <th className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">مفقود/يوم</th>
+            <th className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">غياب</th>
+            <th className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">المصدر</th>
+            <th className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">التصنيف</th>
+          </tr>
+        </thead>
+        <tbody>
+          {top.map((r, i) => (
+            <tr key={r.code} className="border-b border-white/5 hover:bg-white/5">
+              <td className="py-2 px-2">{i + 1}</td>
+              <td className="py-2 px-2 whitespace-nowrap">{r.name}</td>
+              <td className="py-2 px-2 text-[#94A3B8] whitespace-nowrap">{r.supervisorName || '—'}</td>
+              <td className="py-2 px-2 text-amber-200">{r.expectedHoursDaily}س</td>
+              <td className="py-2 px-2 text-cyan-200">{r.actualHoursDaily}س</td>
+              <td className="py-2 px-2 text-red-300 font-semibold">{r.lostHoursDaily}س</td>
+              <td className="py-2 px-2">{r.noShowCount}</td>
+              <td className="py-2 px-2">
+                <span className={`px-1.5 py-0.5 rounded text-xs ${r.baselineSource === 'rider_history' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-500/20 text-slate-300'}`}>
+                  {r.baselineSource === 'rider_history' ? 'تاريخي' : 'متوسط أسطول'}
+                </span>
+              </td>
+              <td className="py-2 px-2">
+                <span className="text-xs text-[#94A3B8]">{r.classificationLabelAr}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Layer 6+7: Supervisor Intelligence Table ──────────────────────────────────
+function SupervisorIntelligenceTable({ supervisors }: { supervisors: SupervisorIntelligence[] }) {
+  if (supervisors.length === 0) return null;
+  const trendColors: Record<string, string> = {
+    improving: 'text-emerald-300',
+    stable: 'text-cyan-300',
+    declining: 'text-amber-300',
+    critical: 'text-red-300',
+  };
+  const trendLabels: Record<string, string> = {
+    improving: '↑ محسّن',
+    stable: '→ مستقر',
+    declining: '↓ متراجع',
+    critical: '🔴 حرج',
+  };
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm text-[#CBD5E1]">
+        <thead>
+          <tr className="border-b border-white/10 text-right">
+            {['المشرف', 'الفريق', 'نشط', 'غياب', 'فعلي', 'هدف', 'تحقيق', 'مفقود/يوم', 'الحالة', 'السبب'].map((h) => (
+              <th key={h} className="py-2 px-2 font-medium text-[#94A3B8] whitespace-nowrap">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {supervisors.map((s) => (
+            <tr key={s.code} className="border-b border-white/5 hover:bg-white/5 align-top">
+              <td className="py-2 px-2 font-medium whitespace-nowrap">{s.name}</td>
+              <td className="py-2 px-2">{s.headcount}</td>
+              <td className="py-2 px-2 text-emerald-300">{s.activeRiders}</td>
+              <td className="py-2 px-2 text-red-300">{s.noShowCount}</td>
+              <td className="py-2 px-2 text-cyan-200">{s.actualHours}س</td>
+              <td className="py-2 px-2 text-amber-200">{s.targetHours}س</td>
+              <td className="py-2 px-2">{s.achievementPercent}%</td>
+              <td className="py-2 px-2 font-semibold text-red-300">{s.lostTargetHours}س</td>
+              <td className="py-2 px-2">
+                <span className={`text-xs font-medium ${trendColors[s.trendStatus]}`}>
+                  {trendLabels[s.trendStatus]}
+                </span>
+              </td>
+              <td className="py-2 px-2 text-xs text-[#94A3B8] max-w-xs">{s.rootCauseAr}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Layer 9: Recruitment Waterfall ────────────────────────────────────────────
+function RecruitmentWaterfall({ analysis }: { analysis: RecruitmentAnalysis }) {
+  const bars = [
+    { label: 'فجوة الساعات الحالية', value: analysis.currentHoursGap, color: 'bg-red-500' },
+    { label: 'تفعيل غير نشطين', value: -analysis.recoverableByReactivation, color: 'bg-emerald-500' },
+    { label: 'تقليل الغياب', value: -analysis.recoverableByNoShowReduction, color: 'bg-emerald-400' },
+    { label: 'رفع ساعات نشطين', value: -analysis.recoverableByHoursPush, color: 'bg-cyan-500' },
+    { label: 'تحسين إشراف', value: -analysis.recoverableBySupervision, color: 'bg-blue-500' },
+    { label: 'فجوة متبقية', value: analysis.remainingGapAfterLevers, color: analysis.recommendHiring ? 'bg-orange-500' : 'bg-emerald-600' },
+  ];
+  return (
+    <div className="space-y-3">
+      {bars.map((bar) => (
+        <div key={bar.label} className="flex items-center gap-3">
+          <div className="text-xs text-[#94A3B8] w-40 shrink-0 text-right">{bar.label}</div>
+          <div className="flex-1 bg-white/5 rounded h-6 overflow-hidden relative">
+            <div
+              className={`h-full ${bar.color} rounded`}
+              style={{ width: `${Math.min(100, Math.abs(bar.value) / Math.max(1, analysis.currentHoursGap) * 100)}%` }}
+            />
+          </div>
+          <div className={`text-xs font-medium w-16 text-right ${bar.value < 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+            {bar.value < 0 ? '+' : ''}{Math.abs(Math.round(bar.value))}س
+          </div>
+        </div>
+      ))}
+      <div className={`mt-3 rounded-xl border p-3 text-sm ${analysis.recommendHiring ? 'border-orange-500/30 bg-orange-500/10 text-orange-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>
+        {analysis.summaryAr}
+        {analysis.recommendHiring && (
+          <span className="block mt-1 font-semibold">
+            مطلوب تعيين {analysis.hiringRequirementRiders} طيار جديد
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -444,6 +775,50 @@ export default function StrategicOpsCenterPage() {
               </div>
             </div>
 
+            {report.controlTower?.executiveHealth && (
+              <ExecutiveHealthPanel health={report.controlTower.executiveHealth} />
+            )}
+
+            {report.controlTower?.intelligenceFeed && (
+              <Section title="📡 التغذية الاستخباراتية التشغيلية — أبرز المشكلات والفرص">
+                <IntelligenceFeed items={report.controlTower.intelligenceFeed} />
+              </Section>
+            )}
+
+            {report.controlTower?.insightsEnabled && report.controlTower.executiveFocus.length > 0 && (
+              <Section title="🎯 مركز الإجراءات الإدارية — مرتبة حسب أثر الاسترداد">
+                <p className="text-xs text-[#64748B] mb-3">
+                  كل إجراء يوضح السبب، المتأثرون، الاسترداد المتوقع، مستوى الثقة، والأولوية.
+                </p>
+                <div className="space-y-3">
+                  {report.controlTower.executiveFocus.map((action, idx) => (
+                    <ActionCard key={action.id} action={action} rank={idx + 1} />
+                  ))}
+                </div>
+              </Section>
+            )}
+
+            {report.controlTower?.riderIntelligence && report.controlTower.riderIntelligence.length > 0 && (
+              <Section title="📊 محرك أثر الطيارين — بناءً على الأداء التاريخي الفردي">
+                <p className="text-xs text-[#64748B] mb-3">
+                  الساعات المتوقعة مبنية على متوسط أداء الطيار خلال الـ 30 يوماً السابقة — ليس متوسط الأسطول.
+                </p>
+                <RiderImpactTable riders={report.controlTower.riderIntelligence} />
+              </Section>
+            )}
+
+            {report.controlTower?.supervisorIntelligence && report.controlTower.supervisorIntelligence.length > 0 && (
+              <Section title="🔍 ذكاء المشرفين — تحليل الأداء والمساءلة">
+                <SupervisorIntelligenceTable supervisors={report.controlTower.supervisorIntelligence} />
+              </Section>
+            )}
+
+            {report.controlTower?.recruitmentAnalysis && report.controlTower.recruitmentAnalysis.currentHoursGap > 0 && (
+              <Section title="🧮 تحليل احتياجات التوظيف — هل نحتاج تعيينات أم تحسين تشغيلي؟">
+                <RecruitmentWaterfall analysis={report.controlTower.recruitmentAnalysis} />
+              </Section>
+            )}
+
             {report.controlTower && (
               <>
                 <Section title={L.reliabilityTitle}>
@@ -490,36 +865,13 @@ export default function StrategicOpsCenterPage() {
 
                 {report.controlTower.insightsEnabled && (
                 <Section title={L.executiveFocus}>
-                  <p className="text-sm text-[#94A3B8] mb-4">{L.controlTowerSubtitle}</p>
+                  <p className="text-xs text-[#64748B] mb-3">{L.controlTowerSubtitle}</p>
                   {report.controlTower.executiveFocus.length === 0 ? (
                     <p className="text-sm text-emerald-300/90">لا توجد إجراءات حرجة — الأداء ضمن النطاق المقبول.</p>
                   ) : (
                     <div className="space-y-3">
                       {report.controlTower.executiveFocus.map((action, idx) => (
-                        <div
-                          key={action.id}
-                          className="rounded-xl border border-white/10 bg-white/5 p-4 flex flex-col sm:flex-row sm:items-start gap-3"
-                        >
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className="text-lg font-bold text-[#EAF0FF] w-6">{idx + 1}</span>
-                            <ActionPriorityBadge priority={action.priority} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-[#EAF0FF]">
-                              {action.entityType === 'supervisor' && '🔴 '}
-                              {action.entityName}
-                            </p>
-                            <p className="text-sm text-[#94A3B8] mt-1">{action.problemAr}</p>
-                            <p className="text-sm text-emerald-300/90 mt-2">
-                              <span className="text-[#64748B]">{L.potentialRecovery}: </span>
-                              +{action.deduplicatedRecoveryHours} {L.recoveryPerDay}
-                            </p>
-                            <p className="text-sm text-cyan-200/90 mt-1">
-                              <span className="text-[#64748B]">{L.recommendedAction}: </span>
-                              {action.actionAr}
-                            </p>
-                          </div>
-                        </div>
+                        <ActionCard key={action.id} action={action} rank={idx + 1} />
                       ))}
                     </div>
                   )}

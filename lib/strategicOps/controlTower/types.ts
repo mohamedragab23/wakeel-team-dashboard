@@ -4,6 +4,8 @@ import type { SupervisorMappingHealth } from '@/lib/strategicOps/controlTower/su
 import type { ControlTowerReliability } from '@/lib/strategicOps/controlTower/reliability';
 
 export type ActionPriority = 'critical' | 'high' | 'medium' | 'low';
+export type ActionConfidence = 'high' | 'medium' | 'low';
+export type ActionUrgency = 'immediate' | 'this_week' | 'this_month';
 
 export type RiderImpactLevel = 'critical' | 'high' | 'medium' | 'low';
 
@@ -17,10 +19,132 @@ export type ManagementAction = {
   entityName: string;
   problemAr: string;
   actionAr: string;
+  whyAr?: string;
   expectedRecoveryHours: number;
+  expectedRecoveryOrders?: number;
+  riderCount?: number;
   rawRecoveryHours: number;
   deduplicatedRecoveryHours: number;
+  confidence?: ActionConfidence;
+  urgency?: ActionUrgency;
   evidence: string;
+};
+
+/** Per-rider historical baseline from lookback window (14–30 days before period). */
+export type RiderHistoricalBaseline = {
+  riderCode: string;
+  avgHoursDaily: number;
+  avgOrdersDaily: number;
+  activeDays: number;
+  lookbackDays: number;
+  hasHistory: boolean;
+};
+
+export type SupervisorTrendStatus = 'improving' | 'stable' | 'declining' | 'critical';
+
+/** Supervisor period-over-period comparison. */
+export type SupervisorIntelligence = {
+  code: string;
+  name: string;
+  region: string;
+  headcount: number;
+  activeRiders: number;
+  noShowCount: number;
+  actualHours: number;
+  targetHours: number;
+  achievementPercent: number;
+  utilizationPercent: number;
+  lostTargetHours: number;
+  retentionRate: number;
+  newHires: number;
+  reactivations: number;
+  trendStatus: SupervisorTrendStatus;
+  rootCauseAr: string;
+  priorityRank: number;
+};
+
+/** Operational intelligence feed item. */
+export type IntelligenceFeedItem = {
+  id: string;
+  priority: ActionPriority;
+  titleAr: string;
+  explanationAr: string;
+  quantifiedImpact: {
+    hoursLost: number;
+    ridersAffected: number;
+    achievementDelta?: number;
+  };
+  recommendedActionAr: string;
+  expectedRecoveryHours: number;
+};
+
+/** Executive health summary. */
+export type OperationalHealthSummary = {
+  healthScore: number;
+  statusLabel: 'Healthy' | 'Warning' | 'Critical';
+  statusLabelAr: '✅ وضع جيد' | '⚠️ تحذير' | '🔴 حرج';
+  riskLevel: 'low' | 'medium' | 'high' | 'severe';
+  achievementPercent: number;
+  hoursGap: number;
+  hoursGapDirection: 'above' | 'below';
+  ordersGap: number;
+  supervisorHealthScore: number;
+  fleetHealthScore: number;
+  situationSummaryAr: string;
+};
+
+/** Rider classification category. */
+export type RiderClassification =
+  | 'high_performer'
+  | 'stable'
+  | 'improving'
+  | 'declining'
+  | 'sudden_drop'
+  | 'chronic_underperformer'
+  | 'inactive'
+  | 'no_show_risk'
+  | 'new_joiner'
+  | 'reactivated';
+
+/** Enriched rider with classification + risk score + history-based impact. */
+export type RiderIntelligence = {
+  code: string;
+  name: string;
+  supervisorCode: string;
+  supervisorName: string;
+  region: string;
+  classification: RiderClassification;
+  classificationLabelAr: string;
+  riskScore: number;
+  expectedHoursDaily: number;
+  actualHoursDaily: number;
+  lostHoursDaily: number;
+  lostHoursPeriod: number;
+  expectedOrdersDaily: number;
+  actualOrdersDaily: number;
+  lostOrdersDaily: number;
+  noShowCount: number;
+  scheduledDays: number;
+  attendanceRate: number;
+  utilizationPercent: number;
+  trendDirection: 'improving' | 'stable' | 'declining';
+  baselineSource: 'rider_history' | 'fleet_average';
+  impactLevel: RiderImpactLevel;
+  impactLabelAr: string;
+};
+
+/** Recruitment needs waterfall. */
+export type RecruitmentAnalysis = {
+  currentHoursGap: number;
+  recoverableByReactivation: number;
+  recoverableByNoShowReduction: number;
+  recoverableByHoursPush: number;
+  recoverableBySupervision: number;
+  remainingGapAfterLevers: number;
+  hiringRequirementRiders: number;
+  hiringRequirementHours: number;
+  recommendHiring: boolean;
+  summaryAr: string;
 };
 
 export type KpiTrendComparison = {
@@ -163,8 +287,14 @@ export type ControlTowerReport = {
   kpiRootCauses: KpiRootCause[];
   achievementDecomposition: AchievementDecomposition;
   topNegativeImpactRiders: NegativeImpactRider[];
+  /** Enriched rider list with per-rider history-based expected hours, classification, risk score. */
+  riderIntelligence: RiderIntelligence[];
   periodComparisons: KpiTrendComparison[];
   supervisorScorecards: SupervisorScorecardsReport;
+  supervisorIntelligence: SupervisorIntelligence[];
+  intelligenceFeed: IntelligenceFeedItem[];
+  executiveHealth: OperationalHealthSummary;
+  recruitmentAnalysis: RecruitmentAnalysis;
   generatedAt: string;
 };
 
@@ -194,12 +324,20 @@ export type ControlTowerBuildContext = {
   supervisorRows: SupervisorOpsRow[];
   riders: ControlTowerRiderInput[];
   performance: Array<{ date: string; riderCode: string; hours: number; orders: number }>;
+  /** Historical performance (lookback window before startDate) for per-rider baselines. */
+  lookbackPerformance?: Array<{ date: string; riderCode: string; hours: number; orders: number }>;
+  /** Pre-computed per-rider historical baselines. If not set, fleet avg is used. */
+  riderHistoricalBaselines?: Map<string, RiderHistoricalBaseline>;
   assignedRiderCodes: Set<string>;
   fleetDailyTargetHours: number;
   headcount: number;
   inactiveRiders: number;
   avgHoursPerActiveRider: number;
   supervisorNameByCode: Map<string, string>;
+  /** Join date map for rider lifecycle classification. */
+  riderJoinDateByCode?: Map<string, string>;
+  /** Target orders/day for revenue impact (default 0 = disabled). */
+  avgRevenuePerOrder?: number;
 };
 
 export const KPI_KEYS = [
