@@ -405,6 +405,13 @@ export type ControlTowerReport = {
   dailyContactList: DailyContactEntry[];
   forecastMetrics: MetricForecast[];
   baselineCoverage: BaselineCoverageStats;
+  /** Diagnostic: how many historical rows were found before the report period. */
+  lookbackDiagnostic: {
+    rowsFound: number;
+    uniqueDates: number;
+    dateRange: string;
+    dataAvailable: boolean;
+  };
   generatedAt: string;
 };
 
@@ -448,6 +455,13 @@ export type ControlTowerBuildContext = {
   riderJoinDateByCode?: Map<string, string>;
   /** Target orders/day for revenue impact (default 0 = disabled). */
   avgRevenuePerOrder?: number;
+  /** Diagnostic info about how much historical lookback data was found in the sheet. */
+  lookbackDiagnostic?: {
+    rowsFound: number;
+    uniqueDates: number;
+    dateRange: string;
+    dataAvailable: boolean;
+  };
 };
 
 export const KPI_KEYS = [

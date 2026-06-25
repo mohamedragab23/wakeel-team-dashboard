@@ -209,6 +209,12 @@ export function buildControlTowerReport(ctx: ControlTowerBuildContext): ControlT
     dailyContactList,
     forecastMetrics,
     baselineCoverage,
+    lookbackDiagnostic: ctx.lookbackDiagnostic ?? {
+      rowsFound: 0,
+      uniqueDates: 0,
+      dateRange: 'غير متوفر',
+      dataAvailable: false,
+    },
     generatedAt: new Date().toISOString(),
   };
 }

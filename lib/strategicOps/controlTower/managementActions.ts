@@ -61,7 +61,12 @@ export function buildManagementActions(
   for (const s of supervisorRows) {
     const candidates: ManagementAction[] = [];
 
-    if (s.noShowRiders > noShowThreshold && s.noShowRiders > 0) {
+    const noShowRate = s.headcount > 0 ? s.noShowRiders / s.headcount : 0;
+    const inactiveRate = s.headcount > 0 ? s.inactiveRiders / s.headcount : 0;
+
+    // Use a percentage-based threshold (>25% absent) instead of a z-score so that
+    // any supervisor with meaningful no-show gets the attendance-specific action.
+    if (s.noShowRiders > 0 && noShowRate > 0.25) {
       const recovery = round2(s.noShowRiders * avgHoursPerActiveRider);
       const priority: ActionPriority = s.noShowRiders > 15 ? 'critical' : 'high';
       candidates.push({
@@ -78,7 +83,7 @@ export function buildManagementActions(
         riderCount: s.noShowRiders,
         confidence: 'high',
         urgency: 'immediate',
-        evidence: `noShow=${s.noShowRiders}, fleetAvg=${round2(fleetNoShowAvg)}, σ=${round2(noShowStd)}`,
+        evidence: `noShow=${s.noShowRiders}, noShowRate=${Math.round(noShowRate * 100)}%, fleetAvg=${round2(fleetNoShowAvg)}, σ=${round2(noShowStd)}`,
         rawRecoveryHours: recovery,
         deduplicatedRecoveryHours: recovery,
       });
@@ -88,6 +93,30 @@ export function buildManagementActions(
     if (lost >= 20) {
       const priority: ActionPriority = lost >= 50 ? 'critical' : 'high';
       const confidence: ActionConfidence = s.achievementPercent < 50 ? 'high' : 'medium';
+
+      // Differentiate the action recommendation based on the dominant driver.
+      // noShowRate and inactiveRate already computed above.
+      const utilizationLow = s.utilizationPercent < 60;
+
+      let actionAr: string;
+      let whyAr: string;
+
+      if (noShowRate > 0.25) {
+        // Already handled above via the attendance-specific action, but if that
+        // branch was not triggered (e.g. noShow=0) this catch handles the edge case.
+        actionAr = `أولوية اليوم: متابعة ${s.noShowRiders} غائب في فريق ${s.name} — اتصال قبل الشفت`;
+        whyAr = `${Math.round(noShowRate * 100)}% من الفريق غائب — الغياب هو المحرك الرئيسي للفجوة`;
+      } else if (inactiveRate > 0.25) {
+        actionAr = `إعادة تفعيل ${s.inactiveRiders} طيار متوقف في فريق ${s.name}`;
+        whyAr = `${Math.round(inactiveRate * 100)}% من الفريق غير نشط — طاقة تشغيلية كامنة غير مستغلة`;
+      } else if (utilizationLow) {
+        actionAr = `دفع ساعات العمل للطيارين النشطين في فريق ${s.name} — استثمار ${round2(s.utilizationPercent)}% فقط`;
+        whyAr = `الطيارون النشطون يعملون أقل من طاقتهم — المشكلة في ساعات العمل وليس في الحضور`;
+      } else {
+        actionAr = `مراجعة هيكل فريق ${s.name}: ${lost} ساعة مفقودة/يوم (تحقيق ${s.achievementPercent}%)`;
+        whyAr = `لا يوجد سبب واحد واضح — يُنصح بمراجعة شاملة لعوامل الأداء`;
+      }
+
       candidates.push({
         id: `sup-hours-${s.code}`,
         priority,
@@ -95,14 +124,14 @@ export function buildManagementActions(
         entityId: s.code,
         entityName: s.name,
         problemAr: `المشرف ${s.name} يفقد ${lost} ساعة/يوم من الهدف (تحقيق ${s.achievementPercent}%)`,
-        actionAr: `مراجعة توزيع الطيارين ورفع ساعات فريق ${s.name}`,
-        whyAr: `الهدف اليومي ${round2(s.dailyHours / (s.achievementPercent / 100))} ساعة — الفعلي ${s.dailyHours} ساعة`,
+        actionAr,
+        whyAr,
         expectedRecoveryHours: lost,
         expectedRecoveryOrders: ordersFromHours(lost, ordersPerHour > 0 ? 1 / ordersPerHour : 0),
         riderCount: s.headcount,
         confidence,
         urgency: lost >= 80 ? 'immediate' : 'this_week',
-        evidence: `lostTargetDaily=${lost}, achievement=${s.achievementPercent}%`,
+        evidence: `lostTargetDaily=${lost}, achievement=${s.achievementPercent}%, noShowRate=${Math.round(noShowRate * 100)}%, inactiveRate=${Math.round(inactiveRate * 100)}%, utilization=${round2(s.utilizationPercent)}%`,
         rawRecoveryHours: lost,
         deduplicatedRecoveryHours: lost,
       });

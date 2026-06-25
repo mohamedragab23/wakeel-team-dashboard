@@ -605,10 +605,36 @@ function ForecastCards({ forecasts }: { forecasts: import('@/lib/strategicOps/co
 }
 
 // ── Baseline Coverage Panel ───────────────────────────────────────────────────
-function BaselineCoveragePanel({ coverage }: { coverage: import('@/lib/strategicOps/controlTower/types').BaselineCoverageStats }) {
+function BaselineCoveragePanel({
+  coverage,
+  lookback,
+}: {
+  coverage: import('@/lib/strategicOps/controlTower/types').BaselineCoverageStats;
+  lookback?: { rowsFound: number; uniqueDates: number; dateRange: string; dataAvailable: boolean };
+}) {
+  const noHistory = lookback && !lookback.dataAvailable;
   return (
-    <div className={`rounded-xl border p-4 text-sm ${coverage.qualityWarning ? 'border-amber-500/30 bg-amber-500/5' : 'border-white/10 bg-white/5'}`}>
+    <div className={`rounded-xl border p-4 text-sm ${noHistory ? 'border-red-500/40 bg-red-500/5' : coverage.qualityWarning ? 'border-amber-500/30 bg-amber-500/5' : 'border-white/10 bg-white/5'}`}>
       <p className="font-semibold text-[#94A3B8] mb-2 text-xs">جودة البيانات التاريخية</p>
+
+      {noHistory && (
+        <div className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+          <p className="font-bold mb-1">⛔ لا توجد بيانات تاريخية متاحة</p>
+          <p>النطاق المطلوب: <span className="font-mono text-red-300">{lookback!.dateRange}</span></p>
+          <p className="mt-1">
+            جميع توقعات الطيارين تعتمد على متوسط الأسطول ({coverage.fleetAverage} طيار = 100%).
+            لتفعيل التحليل التاريخي، يجب أن تحتوي شيت البيانات اليومية على بيانات من فترات سابقة لتاريخ بدء التقرير.
+          </p>
+        </div>
+      )}
+
+      {lookback && lookback.dataAvailable && (
+        <p className="text-xs text-slate-400 mb-2">
+          📅 البيانات التاريخية المتاحة: <span className="text-slate-300">{lookback.uniqueDates} يوم</span>
+          {' '}({lookback.rowsFound.toLocaleString()} سجل) — النطاق: <span className="font-mono text-xs">{lookback.dateRange}</span>
+        </p>
+      )}
+
       <div className="flex flex-wrap gap-4 text-xs">
         <span className="text-emerald-300">📊 30 يوم كامل: {coverage.historical30d} طيار</span>
         <span className="text-amber-300">📊 جزئي: {coverage.historicalPartial} طيار</span>
@@ -617,7 +643,7 @@ function BaselineCoveragePanel({ coverage }: { coverage: import('@/lib/strategic
           {coverage.historicalPct}% يستخدمون بياناتهم التاريخية الخاصة
         </span>
       </div>
-      {coverage.qualityWarning && (
+      {!noHistory && coverage.qualityWarning && (
         <p className="text-amber-200/80 mt-2 text-xs">
           ⚠️ أكثر من 40% من الطيارين يعتمدون على متوسط الأسطول كتوقع — مقارنات التراجع لهؤلاء أقل دقة.
         </p>
@@ -1063,7 +1089,10 @@ export default function StrategicOpsCenterPage() {
             )}
 
             {report.controlTower?.baselineCoverage && (
-              <BaselineCoveragePanel coverage={report.controlTower.baselineCoverage} />
+              <BaselineCoveragePanel
+                coverage={report.controlTower.baselineCoverage}
+                lookback={report.controlTower.lookbackDiagnostic}
+              />
             )}
 
             {report.controlTower?.forecastMetrics && report.controlTower.forecastMetrics.length > 0 && (

@@ -1984,7 +1984,9 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     supervisorsScoped.map((s) => [String(s.code ?? '').trim(), s.name || String(s.code ?? '').trim()])
   );
 
-  // Build per-rider historical baselines from the 30-day lookback window before startDate.
+  // Build per-rider historical baselines from the lookback window before startDate.
+  // Adaptive: tries 30-day window first, then falls back to any pre-period data
+  // available in the sheet (the sheet may only contain the current period).
   const LOOKBACK_DAYS = 30;
   const lookbackEndDate = new Date(startDate.getTime() - 1);
   const lookbackStartDate = new Date(startDate.getTime() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
@@ -2010,7 +2012,37 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     lookbackPerformance.push({ date: dateStr, riderCode: norm, hours, orders });
   }
 
-  const riderHistoricalBaselines = buildRiderHistoricalBaselines(lookbackPerformance, LOOKBACK_DAYS);
+  // If the 30-day window returned nothing, opportunistically try ANY pre-period
+  // data in the sheet (handles cases where the sheet only holds recent history).
+  if (lookbackPerformance.length === 0) {
+    const periodStartIso = filters.startDate;
+    for (let i = headerOffset; i < dailySheetRaw.length; i++) {
+      const row = dailySheetRaw[i];
+      if (!row?.length) continue;
+      const parsed = parseDailySheetDate(row[0]);
+      if (!parsed) continue;
+      const dateStr = parsed.toISOString().split('T')[0];
+      if (dateStr >= periodStartIso) continue; // must be strictly before current period
+      const riderCode = String(row[1] ?? '').trim();
+      const norm = normalizeRiderCodeForPerformance(riderCode);
+      if (!norm) continue;
+      const hours = Math.max(0, parseFloat(String(row[2] ?? '0').replace(',', '.')) || 0);
+      const orders = Math.max(0, parseInt(String(row[3] ?? '0'), 10) || 0);
+      lookbackPerformance.push({ date: dateStr, riderCode: norm, hours, orders });
+    }
+  }
+
+  // Diagnostics — how much lookback history we actually have.
+  const lookbackDatesFound = new Set(lookbackPerformance.map((r) => r.date));
+  const lookbackDiagnostic = {
+    rowsFound: lookbackPerformance.length,
+    uniqueDates: lookbackDatesFound.size,
+    dateRange: `${lookbackStartIso} → ${lookbackEndIso}`,
+    dataAvailable: lookbackPerformance.length > 0,
+  };
+
+  const actualLookbackDays = lookbackDatesFound.size > 0 ? lookbackDatesFound.size : LOOKBACK_DAYS;
+  const riderHistoricalBaselines = buildRiderHistoricalBaselines(lookbackPerformance, actualLookbackDays);
 
   // Build join-date map for rider lifecycle classification.
   const riderJoinDateByCode = new Map<string, string>();
@@ -2052,6 +2084,7 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     supervisorNameByCode,
     riderJoinDateByCode,
     avgRevenuePerOrder: 0,
+    lookbackDiagnostic,
   });
 
   return { ...partial, operationalFormulaAudit, aiInsights, controlTower };

@@ -83,15 +83,12 @@ export function buildTopNegativeImpactRiders(
     
 
     const actualHoursDaily = round2(r.totalHours / days);
-    const hoursGapDaily = round2(Math.max(0, expectedHoursDaily - actualHoursDaily));
+    // lostHoursDaily = expected − actual only. noShowCount is a diagnostic cause,
+    // NOT an additive component — no-show is already captured in (expected − actual).
+    const lostHoursDaily = round2(Math.max(0, expectedHoursDaily - actualHoursDaily));
+    const lostHoursPeriod = round2(lostHoursDaily * days);
     const noShowCount = countNoShows(r.code, performance);
     const scheduledDays = countScheduledDays(r.code, performance);
-    const noShowLostDaily =
-      scheduledDays > 0
-        ? round2((noShowCount / scheduledDays) * expectedHoursDaily)
-        : round2(noShowCount * (expectedHoursDaily / days));
-    const lostHoursDaily = round2(hoursGapDaily + noShowLostDaily);
-    const lostHoursPeriod = round2(lostHoursDaily * days);
     const level = impactLevel(lostHoursDaily, noShowCount, fleetExpectedDaily);
     const impactScore = lostHoursDaily * 10 + noShowCount * 2;
 

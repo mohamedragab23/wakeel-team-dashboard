@@ -133,20 +133,32 @@ export function buildRecruitmentAnalysis(
   const totalRecovered = round2(reactivation + noShowReduction + hoursPush + supervision);
   const validationPassed = totalRecovered <= totalGap + 0.01;
 
+  if (!validationPassed) {
+    console.error(
+      `[RecruitmentAnalysis] VALIDATION FAILED: totalRecovered=${totalRecovered} > totalGap=${totalGap}. ` +
+      `Levers: reactivation=${reactivation}, noShow=${noShowReduction}, hours=${hoursPush}, supervision=${supervision}`
+    );
+  }
+
   const hiringRequirementHours = remainingGap;
   const hiringRequirementRiders = Math.ceil(remainingGap / avgH);
   const recommendHiring = remainingGap > avgH * 3;
+
+  const assumptionNote =
+    'الأرقام مبنية على افتراضات معدل الاستجابة: تفعيل 40% | غياب 50% | ساعات 60% | إشراف 30%.';
 
   let summaryAr = '';
   if (!recommendHiring) {
     summaryAr =
       `الفجوة اليومية ${totalGap} ساعة قابلة للإغلاق تشغيلياً. ` +
       `تفعيل: ${reactivation}س + غياب: ${noShowReduction}س + ساعات: ${hoursPush}س + إشراف: ${supervision}س. ` +
-      `لا يوجد احتياج فوري للتعيين — الفجوة قابلة للإغلاق تشغيلياً.`;
+      `لا يوجد احتياج فوري للتعيين — الفجوة قابلة للإغلاق تشغيلياً. ` +
+      assumptionNote;
   } else {
     summaryAr =
       `بعد كل الرافعات التشغيلية تبقى ${remainingGap} ساعة يومياً غير مغطاة. ` +
-      `مطلوب تعيين ${hiringRequirementRiders} طيار جديد للإغلاق الكامل.`;
+      `مطلوب تعيين ${hiringRequirementRiders} طيار جديد للإغلاق الكامل. ` +
+      assumptionNote;
   }
 
   return {
