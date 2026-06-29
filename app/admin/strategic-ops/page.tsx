@@ -17,6 +17,11 @@ import type {
   RiderIntelligence,
   SupervisorIntelligence,
   RecruitmentAnalysis,
+  RiderOperationsProfile,
+  RiderDayRecord,
+  GapAttribution,
+  ContractIntelligence,
+  RecoverySimulatorInputs,
 } from '@/lib/strategicOps/controlTower/types';
 import { formatKpiTrendSummary } from '@/lib/strategicOps/controlTower/kpiRootCause';
 import {
@@ -1165,6 +1170,43 @@ export default function StrategicOpsCenterPage() {
                   الأشرطة تجمع 100% — تساعدك في تحديد هل المشكلة غياب، ساعات منخفضة، توقف، أم مغادرة.
                 </p>
                 <SupervisorAccountabilityBars breakdowns={report.controlTower.supervisorAccountability} />
+              </Section>
+            )}
+
+            {/* Phase 2: Rider Operations Intelligence */}
+            {report.controlTower?.riderOperationsProfiles && report.controlTower.riderOperationsProfiles.length > 0 && (
+              <Section title="🧑‍💼 ملفات الطيارين التشغيلية — الفترة المحددة">
+                <p className="text-xs text-[#64748B] mb-3">
+                  انقر على أي طيار لعرض سجله اليومي خلال الفترة. مرتب تنازلياً حسب الساعات المفقودة.
+                </p>
+                <RiderOperationsTable profiles={report.controlTower.riderOperationsProfiles} />
+              </Section>
+            )}
+
+            {/* Phase 2: Gap Attribution */}
+            {report.controlTower?.gapAttribution && report.controlTower.gapAttribution.totalGap > 0 && (
+              <Section title="🔍 تفكيك فجوة الساعات — 5 أسباب حصرية">
+                <p className="text-xs text-[#64748B] mb-3">
+                  كل ساعة مفقودة تنتمي لسبب واحد فقط. لا يوجد تكرار.
+                </p>
+                <GapAttributionPanel attribution={report.controlTower.gapAttribution} />
+              </Section>
+            )}
+
+            {/* Phase 2: Contract Intelligence */}
+            {report.controlTower?.contractIntelligence && report.controlTower.contractIntelligence.length > 0 && (
+              <Section title="📋 ذكاء العقود — أداء كل عقد">
+                <ContractIntelligenceSection contracts={report.controlTower.contractIntelligence} />
+              </Section>
+            )}
+
+            {/* Phase 2: Recovery Simulator */}
+            {report.controlTower?.recoverySimulatorInputs && report.controlTower.recoverySimulatorInputs.totalGap > 0 && (
+              <Section title="🔧 محاكي الاسترداد — ماذا لو؟">
+                <p className="text-xs text-[#64748B] mb-3">
+                  حرك الأشرطة لمحاكاة أثر تدخلاتك التشغيلية على الفجوة — الحسابات فورية.
+                </p>
+                <RecoverySimulatorPanel inputs={report.controlTower.recoverySimulatorInputs} />
               </Section>
             )}
 
@@ -2375,6 +2417,301 @@ function InsightBlock({ title, text }: { title: string; text: string }) {
     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
       <p className="text-xs font-semibold text-cyan-400 mb-1">{title}</p>
       <p className="leading-relaxed">{text}</p>
+    </div>
+  );
+}
+
+// ── Phase 2: Rider Timeline Modal ────────────────────────────────────────────
+function RiderTimelineModal({ profile, onClose }: { profile: RiderOperationsProfile; onClose: () => void }) {
+  const statusIcon = (s: RiderDayRecord['status']) =>
+    s === 'worked' ? '✅' : s === 'partial' ? '⚡' : s === 'no_show' ? '🔴' : '❌';
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="relative bg-[#0F1117] border border-white/20 rounded-2xl p-5 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} className="absolute top-4 right-4 text-[#64748B] hover:text-white text-xl">×</button>
+        <h3 className="text-lg font-bold text-[#EAF0FF] mb-1">{profile.name}</h3>
+        <p className="text-xs text-[#64748B] mb-3">{profile.supervisorName} · {profile.zone} · {profile.contractType || 'عقد غير محدد'}</p>
+        <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+          <div className="rounded-lg bg-white/5 p-2">
+            <p className="text-xs text-[#94A3B8]">الحضور</p>
+            <p className="text-lg font-bold text-white">{profile.attendancePct}%</p>
+          </div>
+          <div className="rounded-lg bg-white/5 p-2">
+            <p className="text-xs text-[#94A3B8]">متوسط ساعات/يوم</p>
+            <p className="text-lg font-bold text-white">{profile.avgHoursPerWorkingDay}h</p>
+          </div>
+          <div className="rounded-lg bg-white/5 p-2">
+            <p className="text-xs text-[#94A3B8]">ساعات مفقودة/يوم</p>
+            <p className="text-lg font-bold text-red-400">{profile.lostHoursDaily}h</p>
+          </div>
+        </div>
+        <div className="space-y-1">
+          {profile.timeline.map((day) => (
+            <div key={day.date} className="flex items-center gap-3 text-sm rounded-lg bg-white/5 px-3 py-1.5">
+              <span className="text-base">{statusIcon(day.status)}</span>
+              <span className="text-[#94A3B8] font-mono text-xs w-24">{day.date}</span>
+              {day.status === 'worked' ? (
+                <>
+                  <span className="text-emerald-300 font-semibold">{day.hours}h</span>
+                  {day.delayMinutes > 0 && <span className="text-amber-400 text-xs">⏱ {day.delayMinutes.toFixed(0)}م تأخير</span>}
+                  {day.breakMinutes > 0 && <span className="text-blue-400 text-xs">☕ {day.breakMinutes.toFixed(0)}م استراحة</span>}
+                  <span className="text-[#64748B] text-xs ml-auto">{day.orders} طلبات</span>
+                </>
+              ) : (
+                <span className="text-[#64748B] text-xs">{day.status === 'no_show' ? 'No Show' : 'غياب'}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Phase 2: Rider Operations Table ──────────────────────────────────────────
+function RiderOperationsTable({ profiles }: { profiles: RiderOperationsProfile[] }) {
+  const [selected, setSelected] = useState<RiderOperationsProfile | null>(null);
+  const [showAll, setShowAll] = useState(false);
+
+  const classColor = (c: RiderOperationsProfile['classification']) => {
+    if (c === 'excellent') return 'text-emerald-400';
+    if (c === 'healthy') return 'text-cyan-400';
+    if (c === 'inactive') return 'text-red-400';
+    if (c === 'declining' || c === 'frequently_absent') return 'text-orange-400';
+    if (c === 'needs_coaching' || c === 'low_hours') return 'text-amber-400';
+    return 'text-[#94A3B8]';
+  };
+
+  const stars = (n: number) => '⭐'.repeat(n) + '☆'.repeat(5 - n);
+  const shown = showAll ? profiles : profiles.slice(0, 20);
+
+  return (
+    <>
+      {selected && <RiderTimelineModal profile={selected} onClose={() => setSelected(null)} />}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs text-[#94A3B8]">
+          <thead>
+            <tr className="text-left border-b border-white/10 text-[#64748B]">
+              <th className="pb-2 pr-3">الطيار</th>
+              <th className="pb-2 pr-3">المشرف</th>
+              <th className="pb-2 pr-3">أيام عمل</th>
+              <th className="pb-2 pr-3">س/يوم فعلي</th>
+              <th className="pb-2 pr-3">س/يوم متوقع</th>
+              <th className="pb-2 pr-3">ساعات مفقودة</th>
+              <th className="pb-2 pr-3">تأخير م</th>
+              <th className="pb-2 pr-3">استراحة م</th>
+              <th className="pb-2 pr-3">الحضور</th>
+              <th className="pb-2 pr-3">التصنيف</th>
+              <th className="pb-2">⭐</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((p) => (
+              <tr
+                key={p.code}
+                className="border-b border-white/5 hover:bg-white/5 cursor-pointer transition-colors"
+                onClick={() => setSelected(p)}
+              >
+                <td className="py-2 pr-3 text-[#EAF0FF] font-medium">{p.name}</td>
+                <td className="py-2 pr-3">{p.supervisorName}</td>
+                <td className="py-2 pr-3">{p.workingDays}</td>
+                <td className="py-2 pr-3 text-cyan-300 font-semibold">{p.actualHoursDaily}h</td>
+                <td className="py-2 pr-3">{p.expectedHoursDaily}h</td>
+                <td className="py-2 pr-3 text-red-400 font-semibold">{p.lostHoursDaily > 0 ? `-${p.lostHoursDaily}h` : '—'}</td>
+                <td className="py-2 pr-3">{p.avgDelayMinutesPerDay > 0 ? p.avgDelayMinutesPerDay.toFixed(0) : '—'}</td>
+                <td className="py-2 pr-3">{p.avgBreakMinutesPerDay > 0 ? p.avgBreakMinutesPerDay.toFixed(0) : '—'}</td>
+                <td className="py-2 pr-3">{p.attendancePct}%</td>
+                <td className={`py-2 pr-3 font-medium ${classColor(p.classification)}`}>{p.classificationLabelAr}</td>
+                <td className="py-2 text-amber-400 text-xs">{stars(p.attendanceStars)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {profiles.length > 20 && (
+        <button
+          onClick={() => setShowAll(!showAll)}
+          className="mt-3 text-xs text-cyan-400 hover:text-cyan-300 underline"
+        >
+          {showAll ? `عرض أقل` : `عرض الكل (${profiles.length} طيار)`}
+        </button>
+      )}
+    </>
+  );
+}
+
+// ── Phase 2: Gap Attribution Chart ───────────────────────────────────────────
+function GapAttributionPanel({ attribution }: { attribution: GapAttribution }) {
+  const causeColors: Record<string, string> = {
+    absence: '#ef4444',
+    inactive: '#f97316',
+    late: '#eab308',
+    break: '#06b6d4',
+    low_hours: '#8b5cf6',
+  };
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 text-sm text-[#94A3B8]">
+        <span>إجمالي الفجوة:</span>
+        <span className="text-red-400 font-bold text-base">{attribution.totalGap.toFixed(1)} ساعة/يوم</span>
+        {!attribution.validationPassed && (
+          <span className="text-xs text-amber-400 border border-amber-500/30 rounded px-2 py-0.5">⚠ تحقق الجمع لم ينجح</span>
+        )}
+      </div>
+      <div className="space-y-2">
+        {attribution.causes.filter((c) => c.hoursLost > 0).map((cause) => (
+          <div key={cause.causeKey} className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[#EAF0FF]">{cause.causeLabelAr}</span>
+              <span className="font-semibold" style={{ color: causeColors[cause.causeKey] }}>
+                {cause.hoursLost.toFixed(1)} ساعة ({cause.pctOfGap}%)
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, cause.pctOfGap)}%`, backgroundColor: causeColors[cause.causeKey] }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Phase 2: Contract Intelligence Section ────────────────────────────────────
+function ContractIntelligenceSection({ contracts }: { contracts: ContractIntelligence[] }) {
+  const classColor = (c: ContractIntelligence['classification']) => {
+    if (c === 'excellent') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300';
+    if (c === 'healthy') return 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300';
+    if (c === 'warning') return 'border-amber-500/40 bg-amber-500/10 text-amber-300';
+    return 'border-red-500/40 bg-red-500/10 text-red-300';
+  };
+  const classLabel = (c: ContractIntelligence['classification']) =>
+    c === 'excellent' ? 'ممتاز' : c === 'healthy' ? 'جيد' : c === 'warning' ? 'تحذير' : 'حرج';
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {contracts.map((c) => (
+        <div key={c.contractType} className={`rounded-xl border p-4 ${classColor(c.classification)}`}>
+          <div className="flex items-start justify-between mb-2">
+            <div>
+              <h4 className="font-bold text-sm text-[#EAF0FF]">{c.contractType}</h4>
+              <p className="text-xs opacity-80">{c.headcount} طيار · {c.activeRiders} نشط</p>
+            </div>
+            <span className={`text-xs font-semibold rounded px-2 py-0.5 border ${classColor(c.classification)}`}>{classLabel(c.classification)}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs mt-3">
+            <div>
+              <p className="text-[#64748B]">التحقيق %</p>
+              <p className="font-bold text-white">{c.achievementPct}%</p>
+            </div>
+            <div>
+              <p className="text-[#64748B]">فجوة يومية</p>
+              <p className="font-bold text-red-400">{c.gapHoursDaily}h</p>
+            </div>
+            <div>
+              <p className="text-[#64748B]">No Show %</p>
+              <p className="font-bold">{c.noShowPct}%</p>
+            </div>
+            <div>
+              <p className="text-[#64748B]">متوسط ساعات</p>
+              <p className="font-bold">{c.avgHoursDaily}h</p>
+            </div>
+          </div>
+          {c.mainOperationalIssueAr && (
+            <p className="text-xs mt-3 opacity-90 border-t border-white/10 pt-2">{c.mainOperationalIssueAr}</p>
+          )}
+          {c.biggestRiderLosses.length > 0 && (
+            <div className="mt-2 text-xs opacity-80">
+              <p className="text-[#64748B] mb-1">أكبر خسائر:</p>
+              {c.biggestRiderLosses.slice(0, 2).map((r) => (
+                <p key={r.name}>{r.name} — {r.lostHoursDaily}h/يوم</p>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Phase 2: Recovery Simulator ───────────────────────────────────────────────
+function RecoverySimulatorPanel({ inputs }: { inputs: RecoverySimulatorInputs }) {
+  const [noShowPct, setNoShowPct] = useState(50);
+  const [breakPct, setBreakPct] = useState(50);
+  const [latePct, setLatePct] = useState(50);
+  const [inactivePct, setInactivePct] = useState(40);
+
+  const recoveredNoShow = (inputs.maxRecoveryByNoShow * noShowPct) / 100;
+  const recoveredBreak = (inputs.maxRecoveryByBreak * breakPct) / 100;
+  const recoveredLate = (inputs.maxRecoveryByLate * latePct) / 100;
+  const recoveredInactive = (inputs.maxRecoveryByInactive * inactivePct) / 100;
+  const totalRecovered = Math.min(inputs.totalGap, recoveredNoShow + recoveredBreak + recoveredLate + recoveredInactive);
+  const remainingGap = Math.max(0, inputs.totalGap - totalRecovered);
+  const hiringNeeded = Math.ceil(remainingGap / Math.max(1, inputs.avgHoursPerNewRider));
+
+  const sliders: Array<{ label: string; key: string; value: number; setter: (v: number) => void; max: number; recovered: number; color: string }> = [
+    { label: 'تفعيل Riders غائبين (No Show)', key: 'noshow', value: noShowPct, setter: setNoShowPct, max: inputs.maxRecoveryByNoShow, recovered: recoveredNoShow, color: '#ef4444' },
+    { label: 'تقليل فترات الاستراحة', key: 'break', value: breakPct, setter: setBreakPct, max: inputs.maxRecoveryByBreak, recovered: recoveredBreak, color: '#06b6d4' },
+    { label: 'تقليل التأخير في الوصول', key: 'late', value: latePct, setter: setLatePct, max: inputs.maxRecoveryByLate, recovered: recoveredLate, color: '#eab308' },
+    { label: 'إعادة تفعيل Riders غير نشطين', key: 'inactive', value: inactivePct, setter: setInactivePct, max: inputs.maxRecoveryByInactive, recovered: recoveredInactive, color: '#f97316' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-3 text-sm mb-2">
+        <span className="text-[#94A3B8]">إجمالي الفجوة: <strong className="text-red-400">{inputs.totalGap.toFixed(1)}h</strong></span>
+        <span className="text-[#94A3B8]">مسترداد: <strong className="text-emerald-400">{totalRecovered.toFixed(1)}h</strong></span>
+        <span className="text-[#94A3B8]">متبقي: <strong className={remainingGap > 0 ? 'text-amber-400' : 'text-emerald-400'}>{remainingGap.toFixed(1)}h</strong></span>
+        {remainingGap > 0 && (
+          <span className="text-[#94A3B8]">تعيينات مطلوبة: <strong className="text-purple-400">{hiringNeeded} طيار</strong></span>
+        )}
+      </div>
+
+      {/* Progress bar */}
+      <div className="h-3 rounded-full bg-white/5 overflow-hidden">
+        <div
+          className="h-full rounded-full bg-emerald-500 transition-all duration-300"
+          style={{ width: `${inputs.totalGap > 0 ? Math.min(100, (totalRecovered / inputs.totalGap) * 100) : 0}%` }}
+        />
+      </div>
+
+      <div className="space-y-4">
+        {sliders.map((s) => (
+          <div key={s.key} className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[#EAF0FF]">{s.label}</span>
+              <span style={{ color: s.color }}>{s.recovered.toFixed(1)}h مسترداد ({s.value}% تدخل)</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={s.value}
+                onChange={(e) => s.setter(Number(e.target.value))}
+                className="flex-1 accent-cyan-500"
+              />
+              <span className="text-xs text-[#64748B] w-20 text-right">
+                {s.value}% / max {s.max.toFixed(1)}h
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {remainingGap <= 0 && (
+        <p className="text-emerald-400 text-sm font-semibold text-center mt-2">
+          ✅ لا يوجد احتياج فوري للتعيين — الفجوة قابلة للإغلاق تشغيلياً
+        </p>
+      )}
+      {remainingGap > 0 && (
+        <p className="text-amber-400 text-sm text-center mt-2">
+          📋 لإغلاق الفجوة المتبقية بالكامل: تعيين {hiringNeeded} طيار جديد تقريباً
+        </p>
+      )}
     </div>
   );
 }

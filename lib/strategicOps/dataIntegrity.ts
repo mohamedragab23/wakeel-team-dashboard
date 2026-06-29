@@ -12,6 +12,8 @@ export type ValidatedPerfRec = {
   riderCode: string;
   hours: number;
   orders: number;
+  breakMinutes: number;
+  delayMinutes: number;
   sheetRow: number;
 };
 
@@ -167,6 +169,8 @@ type RawPerfRow = {
   rawRiderCode: string;
   hours: number;
   orders: number;
+  breakMinutes: number;
+  delayMinutes: number;
   sheetRow: number;
   smartResolution: SmartCodeResolution;
 };
@@ -252,6 +256,8 @@ function toValidatedRec(row: RawPerfRow): ValidatedPerfRec {
     riderCode: row.rawRiderCode,
     hours: row.hours,
     orders: row.orders,
+    breakMinutes: row.breakMinutes,
+    delayMinutes: row.delayMinutes,
     sheetRow: row.sheetRow,
   };
 }
@@ -319,6 +325,8 @@ export function runDataIntegrityLayer(input: DataIntegrityInput): DataIntegrityR
       rawRiderCode,
       hours: parseNum(row[2]),
       orders: parseNum(row[6]),
+      breakMinutes: parseNum(row[3]),
+      delayMinutes: parseNum(row[4]),
       sheetRow: i + 1,
       smartResolution,
     });

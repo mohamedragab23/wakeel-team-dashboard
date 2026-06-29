@@ -324,6 +324,13 @@ export type BottomPerformerDiagnosis = {
   recommendedActionAr: string;
 };
 
+export type SupervisorCoachingItem = {
+  priority: 1 | 2 | 3;
+  actionAr: string;
+  evidenceAr: string;
+  potentialGainHours: number;
+};
+
 export type SupervisorScorecard = {
   code: string;
   name: string;
@@ -337,6 +344,14 @@ export type SupervisorScorecard = {
   lostTargetDaily: number;
   compositeScore: number;
   scorecardRank: number;
+  /** Phase 2: rank category based on percentile */
+  rankCategory: 'top_performer' | 'average' | 'needs_improvement' | 'critical';
+  /** Phase 2: average break minutes per rider per working day */
+  avgBreakMinutesDaily: number;
+  /** Phase 2: average delay minutes per rider per working day */
+  avgDelayMinutesDaily: number;
+  /** Phase 2: actionable coaching items derived from actual data */
+  coachingItems: SupervisorCoachingItem[];
   bottomPerformerDiagnosis?: BottomPerformerDiagnosis;
 };
 
@@ -405,6 +420,14 @@ export type ControlTowerReport = {
   dailyContactList: DailyContactEntry[];
   forecastMetrics: MetricForecast[];
   baselineCoverage: BaselineCoverageStats;
+  /** Phase 2: detailed per-rider operational profiles with timeline */
+  riderOperationsProfiles: RiderOperationsProfile[];
+  /** Phase 2: fleet gap broken into 5 mutually exclusive causes */
+  gapAttribution: GapAttribution;
+  /** Phase 2: per-contract aggregation and classification */
+  contractIntelligence: ContractIntelligence[];
+  /** Phase 2: server-side precomputed simulator inputs for UI sliders */
+  recoverySimulatorInputs: RecoverySimulatorInputs;
   /** Diagnostic: lookback data availability + roster-to-history match rate. */
   lookbackDiagnostic: {
     rowsFound: number;
@@ -433,6 +456,120 @@ export type ControlTowerRiderInput = {
   supervisorName: string;
   totalHours: number;
   totalOrders: number;
+  contractType?: string;
+};
+
+// ── Phase 2: Rider Operations Intelligence ──────────────────────────────────
+
+export type RiderOpsClassification =
+  | 'excellent'
+  | 'healthy'
+  | 'needs_coaching'
+  | 'frequently_late'
+  | 'long_breaks'
+  | 'low_hours'
+  | 'frequently_absent'
+  | 'inactive'
+  | 'high_potential'
+  | 'declining'
+  | 'recovering';
+
+export type RiderDayRecord = {
+  date: string;
+  status: 'worked' | 'absent' | 'no_show' | 'partial';
+  hours: number;
+  orders: number;
+  breakMinutes: number;
+  delayMinutes: number;
+};
+
+export type RiderOperationsProfile = {
+  code: string;
+  name: string;
+  supervisorCode: string;
+  supervisorName: string;
+  zone: string;
+  contractType: string;
+  workingDays: number;
+  absentDays: number;
+  inactiveDays: number;
+  totalHours: number;
+  avgHoursPerWorkingDay: number;
+  totalBreakMinutes: number;
+  avgBreakMinutesPerDay: number;
+  totalDelayMinutes: number;
+  avgDelayMinutesPerDay: number;
+  totalOrders: number;
+  attendancePct: number;
+  utilizationPct: number;
+  expectedHoursDaily: number;
+  actualHoursDaily: number;
+  lostHoursDaily: number;
+  lostHoursPeriod: number;
+  classification: RiderOpsClassification;
+  classificationLabelAr: string;
+  performanceScore: number;
+  riskScore: number;
+  contributionToFleetGap: number;
+  timeline: RiderDayRecord[];
+  attendanceStars: number;
+};
+
+// ── Phase 2: Gap Attribution ────────────────────────────────────────────────
+
+export type GapCauseKey = 'absence' | 'inactive' | 'late' | 'break' | 'low_hours';
+
+export type GapAttribution = {
+  totalGap: number;
+  causes: Array<{
+    causeKey: GapCauseKey;
+    causeLabelAr: string;
+    hoursLost: number;
+    pctOfGap: number;
+  }>;
+  validationPassed: boolean;
+};
+
+// ── Phase 2: Contract Intelligence ─────────────────────────────────────────
+
+export type ContractIntelligence = {
+  contractType: string;
+  headcount: number;
+  activeRiders: number;
+  inactiveRiders: number;
+  achievementPct: number;
+  gapHoursDaily: number;
+  avgHoursDaily: number;
+  noShowPct: number;
+  utilizationPct: number;
+  trendDirection: 'improving' | 'stable' | 'declining';
+  topSupervisor: string;
+  weakestSupervisor: string;
+  biggestRiderLosses: Array<{ name: string; lostHoursDaily: number }>;
+  mainOperationalIssueAr: string;
+  classification: 'excellent' | 'healthy' | 'warning' | 'critical';
+};
+
+// ── Phase 2: Recovery Simulator ─────────────────────────────────────────────
+
+export type RecoverySimulatorInputs = {
+  totalGap: number;
+  maxRecoveryByNoShow: number;
+  maxRecoveryByBreak: number;
+  maxRecoveryByLate: number;
+  maxRecoveryByInactive: number;
+  hiringGap: number;
+  avgHoursPerNewRider: number;
+};
+
+export type RichPerfRec = {
+  date: string;
+  riderCode: string;
+  hours: number;
+  orders: number;
+  breakMinutes: number;
+  delayMinutes: number;
+  absenceFlag: string;
 };
 
 export type ControlTowerBuildContext = {
@@ -451,8 +588,10 @@ export type ControlTowerBuildContext = {
   supervisorRows: SupervisorOpsRow[];
   riders: ControlTowerRiderInput[];
   performance: Array<{ date: string; riderCode: string; hours: number; orders: number }>;
+  /** Rich performance including break/delay for Phase 2 analytics. */
+  richPerformance?: RichPerfRec[];
   /** Historical performance (lookback window before startDate) for per-rider baselines. */
-  lookbackPerformance?: Array<{ date: string; riderCode: string; hours: number; orders: number }>;
+  lookbackPerformance?: Array<{ date: string; riderCode: string; hours: number; orders: number; breakMinutes?: number; delayMinutes?: number }>;
   /** Pre-computed per-rider historical baselines. If not set, fleet avg is used. */
   riderHistoricalBaselines?: Map<string, RiderHistoricalBaseline>;
   assignedRiderCodes: Set<string>;

@@ -126,6 +126,10 @@ export type SupervisorOpsRow = {
   productivityScore: number;
   riskScore: number;
   riskLevel: 'green' | 'yellow' | 'red';
+  /** Average break minutes per rider per working day */
+  avgBreakMinutesDaily?: number;
+  /** Average delay (late) minutes per rider per working day */
+  avgDelayMinutesDaily?: number;
 };
 
 export type DataValidationEntry = {
@@ -404,6 +408,8 @@ type PerfRec = {
   riderCode: string;
   hours: number;
   orders: number;
+  breakMinutes?: number;
+  delayMinutes?: number;
 };
 
 type RiderAgg = {
@@ -414,8 +420,11 @@ type RiderAgg = {
   supervisorName: string;
   status: string;
   joinDate: string;
+  contractType: string;
   totalHours: number;
   totalOrders: number;
+  totalBreakMinutes: number;
+  totalDelayMinutes: number;
   workDays: number;
   dailyHours: Map<string, number>;
 };
@@ -634,8 +643,11 @@ function buildRiderAggs(riders: Rider[], performance: PerfRec[]): Map<string, Ri
       supervisorName: r.supervisorName ?? '',
       status: r.status ?? 'نشط',
       joinDate: r.joinDate ?? '',
+      contractType: (r as { contractType?: string }).contractType ?? '',
       totalHours: 0,
       totalOrders: 0,
+      totalBreakMinutes: 0,
+      totalDelayMinutes: 0,
       workDays: 0,
       dailyHours: new Map(),
     });
@@ -648,6 +660,8 @@ function buildRiderAggs(riders: Rider[], performance: PerfRec[]): Map<string, Ri
     if (!agg) continue;
     agg.totalHours += rec.hours;
     agg.totalOrders += rec.orders;
+    agg.totalBreakMinutes += rec.breakMinutes ?? 0;
+    agg.totalDelayMinutes += rec.delayMinutes ?? 0;
     const dk = `${norm}|${rec.date}`;
     dayWork.set(dk, (dayWork.get(dk) ?? 0) + rec.hours);
     agg.dailyHours.set(rec.date, (agg.dailyHours.get(rec.date) ?? 0) + rec.hours);
@@ -1144,6 +1158,8 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     riderCode: rec.riderCode,
     hours: rec.hours,
     orders: rec.orders,
+    breakMinutes: rec.breakMinutes,
+    delayMinutes: rec.delayMinutes,
   }));
 
   const assignedRiders = ridersInScope.filter((r) => String(r.supervisorCode ?? '').trim());
@@ -1381,6 +1397,8 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     const supInactive = supAggs.filter(isRiderInactive).length;
     const supHours = supAggs.reduce((s, a) => s + a.totalHours, 0);
     const supOrders = supAggs.reduce((s, a) => s + a.totalOrders, 0);
+    const supTotalBreakMinutes = supAggs.reduce((s, a) => s + a.totalBreakMinutes, 0);
+    const supTotalDelayMinutes = supAggs.reduce((s, a) => s + a.totalDelayMinutes, 0);
     const supSuspended = supRiders.filter((r) => isSheetSuspendedStatus(r.status)).length;
     const supNewHires = supRiders.filter((r) => inDateRange(parseJoinDate(r.joinDate), startDate, endDate)).length;
     const supResignations = resignationsBySup.get(code) ?? 0;
@@ -1396,6 +1414,10 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
         supTalabat.achievementPercent * 0.4 +
         Math.min(100, avgHoursPerRiderDaily * 12) * 0.3
     );
+
+    const supActiveWorkDayRiders = Math.max(1, supAggs.filter((a) => a.workDays > 0).length);
+    const avgBreakMinutesDaily = round2(supTotalBreakMinutes / supActiveWorkDayRiders / Math.max(1, operationalPeriodDays));
+    const avgDelayMinutesDaily = round2(supTotalDelayMinutes / supActiveWorkDayRiders / Math.max(1, operationalPeriodDays));
 
     const base: Omit<SupervisorOpsRow, 'riskScore' | 'riskLevel'> = {
       code,
@@ -1423,6 +1445,8 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
       targetAchievementPercent: supTalabat.achievementPercent,
       achievementPercent: supTalabat.achievementPercent,
       productivityScore,
+      avgBreakMinutesDaily,
+      avgDelayMinutesDaily,
     };
 
     const risk = computeSupervisorRisk(base, periodDays);
@@ -1996,7 +2020,7 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
   const headerOffset =
     dailySheetRaw.length > 0 && String(dailySheetRaw[0][0] ?? '').includes('تاريخ') ? 1 : 0;
 
-  const lookbackPerformance: Array<{ date: string; riderCode: string; hours: number; orders: number }> = [];
+  const lookbackPerformance: Array<{ date: string; riderCode: string; hours: number; orders: number; breakMinutes: number; delayMinutes: number }> = [];
   for (let i = headerOffset; i < dailySheetRaw.length; i++) {
     const row = dailySheetRaw[i];
     if (!row?.length) continue;
@@ -2008,8 +2032,10 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     const norm = normalizeRiderCodeForPerformance(riderCode);
     if (!norm) continue;
     const hours = Math.max(0, parseFloat(String(row[2] ?? '0').replace(',', '.')) || 0);
-    const orders = Math.max(0, parseInt(String(row[3] ?? '0'), 10) || 0);
-    lookbackPerformance.push({ date: dateStr, riderCode: norm, hours, orders });
+    const orders = Math.max(0, parseInt(String(row[6] ?? '0'), 10) || 0);
+    const breakMinutes = Math.max(0, parseFloat(String(row[3] ?? '0').replace(',', '.')) || 0);
+    const delayMinutes = Math.max(0, parseFloat(String(row[4] ?? '0').replace(',', '.')) || 0);
+    lookbackPerformance.push({ date: dateStr, riderCode: norm, hours, orders, breakMinutes, delayMinutes });
   }
 
   // If the 30-day window returned nothing, opportunistically try ANY pre-period
@@ -2027,8 +2053,10 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
       const norm = normalizeRiderCodeForPerformance(riderCode);
       if (!norm) continue;
       const hours = Math.max(0, parseFloat(String(row[2] ?? '0').replace(',', '.')) || 0);
-      const orders = Math.max(0, parseInt(String(row[3] ?? '0'), 10) || 0);
-      lookbackPerformance.push({ date: dateStr, riderCode: norm, hours, orders });
+      const orders = Math.max(0, parseInt(String(row[6] ?? '0'), 10) || 0);
+      const breakMinutes = Math.max(0, parseFloat(String(row[3] ?? '0').replace(',', '.')) || 0);
+      const delayMinutes = Math.max(0, parseFloat(String(row[4] ?? '0').replace(',', '.')) || 0);
+      lookbackPerformance.push({ date: dateStr, riderCode: norm, hours, orders, breakMinutes, delayMinutes });
     }
   }
 
@@ -2117,8 +2145,18 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
       supervisorName: agg.supervisorName,
       totalHours: agg.totalHours,
       totalOrders: agg.totalOrders,
+      contractType: agg.contractType,
     })),
     performance,
+    richPerformance: performance.map((rec) => ({
+      date: rec.date,
+      riderCode: rec.riderCode,
+      hours: rec.hours,
+      orders: rec.orders,
+      breakMinutes: rec.breakMinutes ?? 0,
+      delayMinutes: rec.delayMinutes ?? 0,
+      absenceFlag: '',
+    })),
     lookbackPerformance,
     riderHistoricalBaselines,
     assignedRiderCodes,

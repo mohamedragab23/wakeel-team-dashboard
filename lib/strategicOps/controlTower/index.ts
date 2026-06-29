@@ -1,4 +1,5 @@
 import { buildAchievementDecomposition } from '@/lib/strategicOps/controlTower/achievementDecomposition';
+import { buildContractIntelligence } from '@/lib/strategicOps/controlTower/contractIntelligence';
 import {
   COVERAGE_GATE_DISABLED_AR,
   METADATA_COVERAGE_LIMITED_AR,
@@ -7,12 +8,14 @@ import { buildDailyContactList } from '@/lib/strategicOps/controlTower/dailyCont
 import { buildExecutiveFocus } from '@/lib/strategicOps/controlTower/executiveFocus';
 import { buildExecutiveHealthSummary, buildSupervisorIntelligence } from '@/lib/strategicOps/controlTower/executiveHealth';
 import { buildForecastMetrics } from '@/lib/strategicOps/controlTower/forecastEngine';
+import { buildGapAttribution } from '@/lib/strategicOps/controlTower/gapAttribution';
 import { buildKpiRootCauses } from '@/lib/strategicOps/controlTower/kpiRootCause';
 import { buildManagementActions, rankActionsByImpact } from '@/lib/strategicOps/controlTower/managementActions';
 import { buildOperationalIntelligenceFeed } from '@/lib/strategicOps/controlTower/operationalIntelligence';
 import { buildOrderCollapseView } from '@/lib/strategicOps/controlTower/orderCollapseView';
 import { buildPeriodComparisons } from '@/lib/strategicOps/controlTower/periodComparison';
 import { buildRecruitmentAnalysis } from '@/lib/strategicOps/controlTower/recruitmentAnalysis';
+import { buildRecoverySimulatorInputs } from '@/lib/strategicOps/controlTower/recoverySimulator';
 import {
   computeControlTowerReliability,
   emptyExecutiveFocusAudit,
@@ -24,15 +27,19 @@ import {
   buildRiderLostHoursRank,
   buildTopNegativeImpactRiders,
 } from '@/lib/strategicOps/controlTower/riderImpact';
+import { buildRiderOperationsProfiles } from '@/lib/strategicOps/controlTower/riderOperationsProfile';
 import { resolveRiderSupervisorNames } from '@/lib/strategicOps/controlTower/supervisorMapping';
 import { buildSupervisorAccountabilityBreakdowns } from '@/lib/strategicOps/controlTower/supervisorAccountability';
 import { buildSupervisorScorecards, emptySupervisorScorecardsReport } from '@/lib/strategicOps/controlTower/supervisorScorecard';
 import type {
   BaselineCoverageStats,
+  ContractIntelligence,
   ControlTowerBuildContext,
   ControlTowerReport,
+  GapAttribution,
   OperationalHealthSummary,
   RecruitmentAnalysis,
+  RecoverySimulatorInputs,
   SupervisorIntelligence,
 } from '@/lib/strategicOps/controlTower/types';
 
@@ -76,6 +83,30 @@ const EMPTY_COVERAGE: BaselineCoverageStats = {
   fleetAvgPct: 0,
   qualityWarning: false,
 };
+
+const EMPTY_GAP_ATTRIBUTION: GapAttribution = {
+  totalGap: 0,
+  causes: [
+    { causeKey: 'absence', causeLabelAr: 'غياب (No Show)', hoursLost: 0, pctOfGap: 0 },
+    { causeKey: 'inactive', causeLabelAr: 'طيارون غير نشطون', hoursLost: 0, pctOfGap: 0 },
+    { causeKey: 'late', causeLabelAr: 'تأخير في الوصول', hoursLost: 0, pctOfGap: 0 },
+    { causeKey: 'break', causeLabelAr: 'استراحات زائدة', hoursLost: 0, pctOfGap: 0 },
+    { causeKey: 'low_hours', causeLabelAr: 'ساعات منخفضة', hoursLost: 0, pctOfGap: 0 },
+  ],
+  validationPassed: true,
+};
+
+const EMPTY_RECOVERY_SIMULATOR: RecoverySimulatorInputs = {
+  totalGap: 0,
+  maxRecoveryByNoShow: 0,
+  maxRecoveryByBreak: 0,
+  maxRecoveryByLate: 0,
+  maxRecoveryByInactive: 0,
+  hiringGap: 0,
+  avgHoursPerNewRider: 5,
+};
+
+const EMPTY_CONTRACT_INTELLIGENCE: ContractIntelligence[] = [];
 
 export function buildControlTowerReport(ctx: ControlTowerBuildContext): ControlTowerReport {
   const insightsEnabled = ctx.operationalAnalyticsEnabled;
@@ -175,6 +206,26 @@ export function buildControlTowerReport(ctx: ControlTowerBuildContext): ControlT
     ? buildRecruitmentAnalysis(enrichedCtx, enrichedCtx.supervisorRows)
     : EMPTY_RECRUITMENT;
 
+  // Phase 2: rider operations profiles (timeline + classification)
+  const riderOperationsProfiles = insightsEnabled
+    ? buildRiderOperationsProfiles(enrichedCtx)
+    : [];
+
+  // Phase 2: gap attribution (5-cause breakdown)
+  const gapAttribution = insightsEnabled
+    ? buildGapAttribution(enrichedCtx)
+    : EMPTY_GAP_ATTRIBUTION;
+
+  // Phase 2: contract intelligence
+  const contractIntelligence: ContractIntelligence[] = insightsEnabled
+    ? buildContractIntelligence(enrichedCtx)
+    : EMPTY_CONTRACT_INTELLIGENCE;
+
+  // Phase 2: recovery simulator inputs for UI sliders
+  const recoverySimulatorInputs = insightsEnabled
+    ? buildRecoverySimulatorInputs(enrichedCtx)
+    : EMPTY_RECOVERY_SIMULATOR;
+
   const reliability = computeControlTowerReliability({
     coveragePercent: ctx.operationalCoveragePercent,
     insightsEnabled,
@@ -213,6 +264,10 @@ export function buildControlTowerReport(ctx: ControlTowerBuildContext): ControlT
     dailyContactList,
     forecastMetrics,
     baselineCoverage,
+    riderOperationsProfiles,
+    gapAttribution,
+    contractIntelligence,
+    recoverySimulatorInputs,
     lookbackDiagnostic: {
       rowsFound: ctx.lookbackDiagnostic?.rowsFound ?? 0,
       uniqueDates: ctx.lookbackDiagnostic?.uniqueDates ?? 0,

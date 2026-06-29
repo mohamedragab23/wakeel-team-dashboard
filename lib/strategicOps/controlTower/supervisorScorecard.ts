@@ -6,6 +6,7 @@ import type {
   KpiRootCause,
   ManagementAction,
   NegativeImpactRider,
+  SupervisorCoachingItem,
   SupervisorScorecard,
   SupervisorScorecardDrillDown,
   SupervisorScorecardsReport,
@@ -118,15 +119,82 @@ export function buildBottomPerformerDiagnosis(
   };
 }
 
+function buildCoachingItems(
+  s: SupervisorOpsRow,
+  fleetNoShowPct: number,
+  fleetAvgBreak: number,
+  fleetAvgDelay: number
+): SupervisorCoachingItem[] {
+  const items: SupervisorCoachingItem[] = [];
+  const noShowPct = computeSupervisorNoShowPercent(s);
+
+  if (noShowPct > fleetNoShowPct + 5) {
+    const excessRiders = Math.max(1, Math.round((noShowPct - fleetNoShowPct) / 100 * s.headcount));
+    items.push({
+      priority: 1,
+      actionAr: 'تواصل مع الطيارين الغائبين قبل بداية الشيفت',
+      evidenceAr: `${noShowPct.toFixed(0)}% no-show (متوسط الأسطول ${fleetNoShowPct.toFixed(0)}%) — ${excessRiders} طيار زيادة`,
+      potentialGainHours: round2(excessRiders * s.avgHoursPerRiderDaily * 0.5),
+    });
+  }
+
+  if (s.inactiveRiders > 2) {
+    items.push({
+      priority: 1,
+      actionAr: 'إعادة تفعيل الطيارين المتوقفين',
+      evidenceAr: `${s.inactiveRiders} طيار غير نشط بدون سبب واضح`,
+      potentialGainHours: round2(s.inactiveRiders * s.avgHoursPerRiderDaily * 0.4),
+    });
+  }
+
+  const avgDelay = s.avgDelayMinutesDaily ?? 0;
+  const avgBreak = s.avgBreakMinutesDaily ?? 0;
+
+  if (avgDelay > fleetAvgDelay + 10) {
+    const excessDelay = round2(avgDelay - fleetAvgDelay);
+    items.push({
+      priority: 2,
+      actionAr: 'تقليل متوسط وقت التأخير',
+      evidenceAr: `متوسط تأخير ${avgDelay.toFixed(0)} دقيقة (الأسطول ${fleetAvgDelay.toFixed(0)}) — فرق ${excessDelay} دقيقة`,
+      potentialGainHours: round2((excessDelay / 60) * s.activeRiders * 0.3),
+    });
+  }
+
+  if (avgBreak > fleetAvgBreak + 15) {
+    const excessBreak = round2(avgBreak - fleetAvgBreak);
+    items.push({
+      priority: 2,
+      actionAr: 'تقليل فترات الاستراحة الزائدة',
+      evidenceAr: `متوسط استراحة ${avgBreak.toFixed(0)} دقيقة (الأسطول ${fleetAvgBreak.toFixed(0)}) — فرق ${excessBreak} دقيقة`,
+      potentialGainHours: round2((excessBreak / 60) * s.activeRiders * 0.5),
+    });
+  }
+
+  if (items.length === 0 && s.achievementPercent < 75) {
+    items.push({
+      priority: 3,
+      actionAr: 'مراجعة توزيع الطيارين على الشفتات',
+      evidenceAr: `تحقيق ${s.achievementPercent.toFixed(0)}% — دون المستوى المستهدف 75%`,
+      potentialGainHours: round2(s.headcount * s.avgHoursPerRiderDaily * 0.1),
+    });
+  }
+
+  return items.slice(0, 3);
+}
+
 function buildScorecardFromRow(
   s: SupervisorOpsRow,
   expectedHoursPerRider: number,
   maxLostTarget: number,
-  includeDiagnosis: boolean
+  includeDiagnosis: boolean,
+  fleetNoShowPct: number,
+  fleetAvgBreak: number,
+  fleetAvgDelay: number
 ): SupervisorScorecard {
   const lostTargetDaily = supervisorLostTargetDaily(s);
   const lostHoursDaily = computeSupervisorLostHoursDaily(s, expectedHoursPerRider);
   const compositeScore = computeCompositeScore(s, lostTargetDaily, maxLostTarget);
+  const coachingItems = buildCoachingItems(s, fleetNoShowPct, fleetAvgBreak, fleetAvgDelay);
 
   return {
     code: s.code,
@@ -141,10 +209,22 @@ function buildScorecardFromRow(
     lostTargetDaily,
     compositeScore,
     scorecardRank: 0,
+    rankCategory: 'average',
+    avgBreakMinutesDaily: s.avgBreakMinutesDaily ?? 0,
+    avgDelayMinutesDaily: s.avgDelayMinutesDaily ?? 0,
+    coachingItems,
     bottomPerformerDiagnosis: includeDiagnosis
       ? buildBottomPerformerDiagnosis(s, lostHoursDaily, lostTargetDaily)
       : undefined,
   };
+}
+
+function assignRankCategory(rank: number, total: number): SupervisorScorecard['rankCategory'] {
+  const pct = (rank - 1) / Math.max(1, total - 1);
+  if (pct <= 0.25) return 'top_performer';
+  if (pct <= 0.5) return 'average';
+  if (pct <= 0.75) return 'needs_improvement';
+  return 'critical';
 }
 
 export function buildSupervisorScorecardDrillDown(input: {
@@ -215,12 +295,32 @@ export function buildSupervisorScorecards(input: {
   const lostTargets = rows.map((s) => supervisorLostTargetDaily(s));
   const maxLostTarget = Math.max(...lostTargets, 1);
 
+  // Fleet averages for coaching thresholds
+  const totalHeadcount = rows.reduce((s, r) => s + r.headcount, 0);
+  const fleetNoShowPct = totalHeadcount > 0
+    ? round2((rows.reduce((s, r) => s + r.noShowRiders, 0) / totalHeadcount) * 100)
+    : 0;
+  const rowsWithBreak = rows.filter((r) => (r.avgBreakMinutesDaily ?? 0) > 0);
+  const fleetAvgBreak = rowsWithBreak.length > 0
+    ? rowsWithBreak.reduce((s, r) => s + (r.avgBreakMinutesDaily ?? 0), 0) / rowsWithBreak.length
+    : 20;
+  const rowsWithDelay = rows.filter((r) => (r.avgDelayMinutesDaily ?? 0) > 0);
+  const fleetAvgDelay = rowsWithDelay.length > 0
+    ? rowsWithDelay.reduce((s, r) => s + (r.avgDelayMinutesDaily ?? 0), 0) / rowsWithDelay.length
+    : 10;
+
   const bottomCodes = new Set<string>();
 
-  let cards = rows.map((s) => buildScorecardFromRow(s, expectedHoursPerRider, maxLostTarget, false));
+  let cards = rows.map((s) =>
+    buildScorecardFromRow(s, expectedHoursPerRider, maxLostTarget, false, fleetNoShowPct, fleetAvgBreak, fleetAvgDelay)
+  );
 
   cards.sort((a, b) => b.compositeScore - a.compositeScore);
-  cards = cards.map((c, i) => ({ ...c, scorecardRank: i + 1 }));
+  cards = cards.map((c, i) => ({
+    ...c,
+    scorecardRank: i + 1,
+    rankCategory: assignRankCategory(i + 1, cards.length),
+  }));
 
   const topPerformers = cards.slice(0, 5);
   const bottomSlice = [...cards].reverse().slice(0, 5);
@@ -232,9 +332,9 @@ export function buildSupervisorScorecards(input: {
     const row = rows.find((r) => r.code === c.code)!;
     const includeDiagnosis = bottomCodes.has(c.code);
     const withDiag = includeDiagnosis
-      ? buildScorecardFromRow(row, expectedHoursPerRider, maxLostTarget, true)
+      ? buildScorecardFromRow(row, expectedHoursPerRider, maxLostTarget, true, fleetNoShowPct, fleetAvgBreak, fleetAvgDelay)
       : c;
-    return { ...withDiag, scorecardRank: c.scorecardRank };
+    return { ...withDiag, scorecardRank: c.scorecardRank, rankCategory: c.rankCategory };
   });
 
   const topPerformersFinal = all.filter((c) => topPerformers.some((t) => t.code === c.code));
