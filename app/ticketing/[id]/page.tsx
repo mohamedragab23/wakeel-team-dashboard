@@ -224,45 +224,64 @@ export default function TicketDetailPage() {
 }
 
 function TicketPayloadDetails({ ticket }: { ticket: TicketRow }) {
-  const p = ticket.payload as Record<string, unknown>;
-  if (!p || Object.keys(p).length === 0) return null;
+  // Normalise payload — postgres.js returns JSONB as an object, but guard against
+  // edge cases where it might arrive as a JSON string or null.
+  let p: Record<string, unknown> = {};
+  try {
+    const raw = ticket.payload;
+    if (raw && typeof raw === 'string') {
+      p = JSON.parse(raw);
+    } else if (raw && typeof raw === 'object') {
+      p = raw as Record<string, unknown>;
+    }
+  } catch {
+    p = {};
+  }
 
   const rows: { label: string; value: string | undefined }[] = [];
 
   if (ticket.type === 'order_issue') {
     rows.push(
-      { label: 'كود الطيار', value: p.riderId as string },
-      { label: 'اسم الطيار', value: p.riderName as string },
-      { label: 'رقم الطلب', value: p.orderId as string },
-      { label: 'تاريخ الطلب', value: p.orderDate as string },
+      { label: 'كود الطيار', value: p.riderId ? String(p.riderId) : undefined },
+      { label: 'اسم الطيار', value: p.riderName ? String(p.riderName) : undefined },
+      { label: 'رقم الطلب', value: p.orderId ? String(p.orderId) : undefined },
+      { label: 'تاريخ الطلب', value: p.orderDate ? String(p.orderDate) : undefined },
       {
         label: 'فئة المشكلة',
         value: p.issueCategory
           ? (ORDER_ISSUE_CATEGORY_LABELS_AR[p.issueCategory as keyof typeof ORDER_ISSUE_CATEGORY_LABELS_AR] ?? String(p.issueCategory))
           : undefined,
       },
+      { label: 'الوصف', value: p.description ? String(p.description) : undefined },
     );
   } else if (ticket.type === 'security_clearance') {
     rows.push(
-      { label: 'كود الطيار', value: p.riderId as string },
-      { label: 'اسم الطيار', value: p.riderName as string },
-      { label: 'الرقم القومي', value: p.nationalId as string },
-      { label: 'ملاحظات', value: p.notes as string },
+      { label: 'كود الطيار', value: p.riderId ? String(p.riderId) : undefined },
+      { label: 'اسم الطيار', value: p.riderName ? String(p.riderName) : undefined },
+      { label: 'الرقم القومي', value: p.nationalId ? String(p.nationalId) : undefined },
+      { label: 'ملاحظات', value: p.notes ? String(p.notes) : undefined },
     );
   } else if (ticket.type === 'rider_suspension') {
     rows.push(
-      { label: 'كود الطيار', value: p.riderId as string },
-      { label: 'اسم الطيار', value: p.riderName as string },
-      { label: 'سبب الإيقاف', value: p.suspensionReason as string },
-      { label: 'تاريخ البداية', value: p.suspensionStartDate as string },
-      { label: 'تاريخ النهاية', value: p.suspensionEndDate as string },
+      { label: 'كود الطيار', value: p.riderId ? String(p.riderId) : undefined },
+      { label: 'اسم الطيار', value: p.riderName ? String(p.riderName) : undefined },
+      { label: 'سبب الإيقاف', value: p.suspensionReason ? String(p.suspensionReason) : undefined },
+      { label: 'تاريخ البداية', value: p.suspensionStartDate ? String(p.suspensionStartDate) : undefined },
+      { label: 'تاريخ النهاية', value: p.suspensionEndDate ? String(p.suspensionEndDate) : undefined },
       { label: 'عدد الأيام', value: p.suspensionDays != null ? String(p.suspensionDays) : undefined },
-      { label: 'ملاحظات', value: p.notes as string },
+      { label: 'ملاحظات', value: p.notes ? String(p.notes) : undefined },
     );
   }
 
+  // Always render — even if we only have raw payload keys (helps diagnose schema issues)
   const visible = rows.filter((r) => r.value);
-  if (visible.length === 0) return null;
+
+  // If no structured rows matched, try to render the raw payload keys as a fallback
+  const fallbackEntries = visible.length === 0
+    ? Object.entries(p).filter(([, v]) => v !== null && v !== undefined && v !== '')
+    : [];
+
+  if (visible.length === 0 && fallbackEntries.length === 0) return null;
 
   return (
     <div className="mt-5 pt-4 border-t border-white/10">
@@ -272,6 +291,12 @@ function TicketPayloadDetails({ ticket }: { ticket: TicketRow }) {
           <div key={r.label}>
             <dt className="text-xs text-[#64748B]">{r.label}</dt>
             <dd className="text-sm text-[#E2E8F0] mt-0.5 whitespace-pre-wrap">{r.value}</dd>
+          </div>
+        ))}
+        {fallbackEntries.map(([k, v]) => (
+          <div key={k}>
+            <dt className="text-xs text-[#64748B]">{k}</dt>
+            <dd className="text-sm text-[#E2E8F0] mt-0.5 whitespace-pre-wrap">{String(v)}</dd>
           </div>
         ))}
       </dl>
