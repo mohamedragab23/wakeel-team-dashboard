@@ -15,6 +15,7 @@ import {
 import { findRiderInSheet, findAllRidersInSheet, normalizeRiderCodeForPerformance, riderCodesMatch } from '@/lib/riderCodeUtils';
 import { formatSheetIsoDateText, isValidContractType, parseRiderIsoDate } from '@/lib/riderMetadata';
 import { invalidateRiderWorkflowCaches } from '@/lib/cacheInvalidation';
+import { hashPassword, isPasswordHashed } from '@/lib/passwordUtils';
 
 export interface Supervisor {
   code: string;
@@ -115,6 +116,11 @@ export async function addSupervisor(supervisor: Supervisor): Promise<{ success: 
     }
 
     console.log(`[AddSupervisor] Code is unique, proceeding to add to sheet`);
+
+    // Hash password before storing — plain text passwords cannot be verified at login
+    if (supervisor.password && !isPasswordHashed(supervisor.password)) {
+      supervisor = { ...supervisor, password: await hashPassword(supervisor.password) };
+    }
 
     const matrix = await getSheetData('المشرفين', false);
     const { dataStartIndex, columns } = resolveSupervisorsSheetLayout(matrix);
@@ -256,7 +262,13 @@ export async function updateSupervisor(
       return { success: false, error: 'المشرف غير موجود' };
     }
 
-    const patch = pickSupervisorPatch(updates);
+    let patch = pickSupervisorPatch(updates);
+
+    // Hash new password before storing if admin is changing it
+    if (patch.password && !isPasswordHashed(patch.password)) {
+      patch = { ...patch, password: await hashPassword(patch.password) };
+    }
+
     const merged: Supervisor = {
       ...current,
       ...patch,
