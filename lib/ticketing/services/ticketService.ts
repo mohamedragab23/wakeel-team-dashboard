@@ -419,19 +419,16 @@ export async function getTicketMetrics(): Promise<TicketMetrics & { statusCounts
     avgHours: string | null;
   }[]>`
     SELECT
-      COUNT(*) FILTER (WHERE status = 'new')::text AS "newRequests",
-      COUNT(*) FILTER (WHERE status NOT IN ('closed', 'rejected', 'approved'))::text AS "openRequests",
-      COUNT(*) FILTER (WHERE status = 'rejected')::text AS "rejectedRequests",
-      COUNT(*) FILTER (WHERE status = 'closed')::text AS "closedRequests",
-      (
-        SELECT AVG(EXTRACT(EPOCH FROM (closed_at - created_at)) / 3600.0)::text
-        FROM tickets
-        WHERE closed_at IS NOT NULL
-      ) AS "avgHours"
+      COUNT(*) FILTER (WHERE t.status = 'new')::text AS "newRequests",
+      COUNT(*) FILTER (WHERE t.status NOT IN ('closed', 'rejected', 'approved'))::text AS "openRequests",
+      COUNT(*) FILTER (WHERE t.status = 'rejected')::text AS "rejectedRequests",
+      COUNT(*) FILTER (WHERE t.status = 'closed')::text AS "closedRequests",
+      (AVG(EXTRACT(EPOCH FROM (t.closed_at - t.created_at)) / 3600.0) FILTER (WHERE t.closed_at IS NOT NULL))::text AS "avgHours"
+    FROM tickets t
   `;
 
   const statusRows = await sql<{ status: string; count: string }[]>`
-    SELECT status, COUNT(*)::text AS count FROM tickets GROUP BY status
+    SELECT t.status, COUNT(*)::text AS count FROM tickets t GROUP BY t.status
   `;
   const statusCounts: Record<string, number> = {};
   for (const r of statusRows) {
