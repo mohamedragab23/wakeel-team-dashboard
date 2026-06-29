@@ -7,6 +7,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TicketStatusBadge } from '@/components/ticketing/TicketTable';
 import {
+  ORDER_ISSUE_CATEGORY_LABELS_AR,
   TICKET_PRIORITIES,
   TICKET_PRIORITY_LABELS_AR,
   TICKET_STATUSES,
@@ -97,6 +98,8 @@ export default function TicketDetailPage() {
           <span>الأولوية: {TICKET_PRIORITY_LABELS_AR[ticket.priority]}</span>
           {ticket.slaDueAt && <span>SLA: {new Date(ticket.slaDueAt).toLocaleString('ar-EG')}</span>}
         </div>
+
+        <TicketPayloadDetails ticket={ticket} />
       </div>
 
       {isAdmin && !closed && (
@@ -216,6 +219,62 @@ export default function TicketDetailPage() {
           </ul>
         </section>
       )}
+    </div>
+  );
+}
+
+function TicketPayloadDetails({ ticket }: { ticket: TicketRow }) {
+  const p = ticket.payload as Record<string, unknown>;
+  if (!p || Object.keys(p).length === 0) return null;
+
+  const rows: { label: string; value: string | undefined }[] = [];
+
+  if (ticket.type === 'order_issue') {
+    rows.push(
+      { label: 'كود الطيار', value: p.riderId as string },
+      { label: 'اسم الطيار', value: p.riderName as string },
+      { label: 'رقم الطلب', value: p.orderId as string },
+      { label: 'تاريخ الطلب', value: p.orderDate as string },
+      {
+        label: 'فئة المشكلة',
+        value: p.issueCategory
+          ? (ORDER_ISSUE_CATEGORY_LABELS_AR[p.issueCategory as keyof typeof ORDER_ISSUE_CATEGORY_LABELS_AR] ?? String(p.issueCategory))
+          : undefined,
+      },
+    );
+  } else if (ticket.type === 'security_clearance') {
+    rows.push(
+      { label: 'كود الطيار', value: p.riderId as string },
+      { label: 'اسم الطيار', value: p.riderName as string },
+      { label: 'الرقم القومي', value: p.nationalId as string },
+      { label: 'ملاحظات', value: p.notes as string },
+    );
+  } else if (ticket.type === 'rider_suspension') {
+    rows.push(
+      { label: 'كود الطيار', value: p.riderId as string },
+      { label: 'اسم الطيار', value: p.riderName as string },
+      { label: 'سبب الإيقاف', value: p.suspensionReason as string },
+      { label: 'تاريخ البداية', value: p.suspensionStartDate as string },
+      { label: 'تاريخ النهاية', value: p.suspensionEndDate as string },
+      { label: 'عدد الأيام', value: p.suspensionDays != null ? String(p.suspensionDays) : undefined },
+      { label: 'ملاحظات', value: p.notes as string },
+    );
+  }
+
+  const visible = rows.filter((r) => r.value);
+  if (visible.length === 0) return null;
+
+  return (
+    <div className="mt-5 pt-4 border-t border-white/10">
+      <p className="text-xs font-semibold text-[#94A3B8] mb-3">تفاصيل الطلب</p>
+      <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-2">
+        {visible.map((r) => (
+          <div key={r.label}>
+            <dt className="text-xs text-[#64748B]">{r.label}</dt>
+            <dd className="text-sm text-[#E2E8F0] mt-0.5 whitespace-pre-wrap">{r.value}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
