@@ -216,6 +216,32 @@ export async function POST(request: NextRequest) {
 
     await appendToSheet(SHEET_EQUIPMENT_DELIVERY, [row], false);
 
+    // إشعار الإدمن عبر Telegram
+    const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'http://localhost:3000';
+    
+    const items = [];
+    if (m > 0) items.push({ name: 'باوتش موتوسيكل', quantity: m });
+    if (b > 0) items.push({ name: 'باوتش عجلة', quantity: b });
+    if (t > 0) items.push({ name: 'تيشرت', quantity: t });
+    if (j > 0) items.push({ name: 'جاكيت', quantity: j });
+    if (h > 0) items.push({ name: 'خوذة', quantity: h });
+    
+    sendAdminTelegramNotificationSafe({
+      type: 'equipment_delivery',
+      supervisorName: decoded.name?.toString().trim() || '',
+      supervisorCode: decoded.code?.toString().trim() || '',
+      riderName: riderName?.toString().trim() || '',
+      riderCode: riderCode?.toString().trim() || '',
+      items,
+      requestDate,
+      url: `${baseUrl}/admin/equipment-requests`,
+    }).catch((error) => {
+      console.error('[EquipmentDelivery] Failed to send Telegram notification:', error);
+    });
+
     return NextResponse.json({
       success: true,
       message: 'تم إرسال طلب التسليم. سيتم إشعار المدير للمراجعة من صفحة طلبات المعدات.',

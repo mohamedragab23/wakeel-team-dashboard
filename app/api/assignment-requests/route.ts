@@ -331,6 +331,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // إشعار الإدمن عبر Telegram
+    const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'http://localhost:3000';
+    
+    sendAdminTelegramNotificationSafe({
+      type: 'assignment_request',
+      supervisorName: requestSupervisorName,
+      supervisorCode: requestSupervisorCode,
+      riderName: riderName?.toString().trim() || '',
+      riderCode: riderCode?.toString().trim() || '',
+      zone: zone?.toString().trim() || '',
+      contractType: metadataCheck.contractType,
+      requestDate,
+      url: `${baseUrl}/admin/assignment-requests`,
+    }).catch((error) => {
+      console.error('[AssignmentRequest] Failed to send Telegram notification:', error);
+    });
+
     return NextResponse.json({
       success: true,
       message: 'تم إرسال طلب التعيين بنجاح',

@@ -199,6 +199,26 @@ export async function POST(request: NextRequest) {
       false
     );
 
+    // إشعار الإدمن عبر Telegram
+    const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'http://localhost:3000';
+    
+    sendAdminTelegramNotificationSafe({
+      type: 'reactivation_request',
+      supervisorName: String(decoded.name ?? '').trim(),
+      supervisorCode: String(decoded.code ?? '').trim(),
+      riderName,
+      riderCode,
+      zone,
+      contractType: metadataCheck.contractType,
+      requestDate,
+      url: `${baseUrl}/admin/reactivation-requests`,
+    }).catch((error) => {
+      console.error('[ReactivationRequest] Failed to send Telegram notification:', error);
+    });
+
     return NextResponse.json({
       success: true,
       message: 'تم إرسال طلب إعادة التفعيل بنجاح',

@@ -131,6 +131,23 @@ export async function createTicket(input: CreateInput, actor: Actor): Promise<Ti
     notifyAdmin: true,
   });
 
+  // إشعار الإدمن عبر Telegram
+  const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL 
+    ? `https://${process.env.VERCEL_URL}` 
+    : 'http://localhost:3000';
+  
+  sendAdminTelegramNotificationSafe({
+    type: 'new_ticket',
+    ticketType: input.type,
+    supervisorName: actor.name,
+    supervisorCode: actor.code,
+    priority: priority === 'urgent' ? 'high' : priority === 'high' ? 'medium' : 'low',
+    url: `${baseUrl}/ticketing/admin`,
+  }).catch((error) => {
+    console.error('[TicketService] Failed to send Telegram notification:', error);
+  });
+
   return ticket;
 }
 

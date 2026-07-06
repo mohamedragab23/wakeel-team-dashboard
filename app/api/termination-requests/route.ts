@@ -432,6 +432,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // إشعار الإدمن عبر Telegram
+    const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'http://localhost:3000';
+    
+    sendAdminTelegramNotificationSafe({
+      type: 'termination_request',
+      supervisorName: decoded.name?.toString().trim() || '',
+      supervisorCode: decoded.code?.toString().trim() || '',
+      riderName: rider.name?.toString().trim() || '',
+      riderCode: riderCode?.toString().trim() || '',
+      reason: reason?.toString().trim() || '',
+      requestDate,
+      url: `${baseUrl}/admin/termination-requests`,
+    }).catch((error) => {
+      console.error('[TerminationRequest] Failed to send Telegram notification:', error);
+      // Don't fail the request if notification fails
+    });
+
     return NextResponse.json({
       success: true,
       message: 'تم إرسال طلب الإقالة بنجاح',

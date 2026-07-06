@@ -26,6 +26,31 @@ export async function GET(req: NextRequest) {
     const alerts = buildSupervisorJoinDateAlerts(allRiders, supervisorNameByCode);
     const notify = await notifySupervisorsMissingJoinDate(alerts);
 
+    // إشعار الإدمن بالطيارين ذوي البيانات الناقصة
+    if (alerts.length > 0) {
+      const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL 
+        ? `https://${process.env.VERCEL_URL}` 
+        : 'http://localhost:3000';
+      
+      // جمع كل الطيارين من جميع التنبيهات
+      const allMissingRiders = alerts.flatMap((alert) => 
+        alert.ridersMissingJoinDate.map((rider) => ({
+          name: rider.name,
+          code: rider.riderCode,
+        }))
+      );
+      
+      sendAdminTelegramNotificationSafe({
+        type: 'incomplete_rider_data',
+        count: allMissingRiders.length,
+        riders: allMissingRiders,
+        url: `${baseUrl}/admin/riders`,
+      }).catch((error) => {
+        console.error('[RiderMetadataReminder] Failed to send Telegram notification to admin:', error);
+      });
+    }
+
     return NextResponse.json({
       success: true,
       supervisorsWithMissingJoinDate: alerts.length,
