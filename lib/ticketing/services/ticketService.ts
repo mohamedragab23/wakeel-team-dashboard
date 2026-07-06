@@ -142,7 +142,7 @@ export async function createTicket(input: CreateInput, actor: Actor): Promise<Ti
     ticketType: input.type,
     supervisorName: actor.name,
     supervisorCode: actor.code,
-    priority: priority === 'urgent' ? 'high' : priority === 'high' ? 'medium' : 'low',
+    priority: 'medium',
     url: `${baseUrl}/ticketing/admin`,
   }).catch((error) => {
     console.error('[TicketService] Failed to send Telegram notification:', error);
