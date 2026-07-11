@@ -45,21 +45,45 @@ function toSeconds(value: any): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Format seconds to "Xh Ym" or "Ym" or "00:00" */
+function formatWorkTime(seconds: number): string {
+  if (!seconds || seconds === 0) return '00:00';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}س ${m}د`;
+  return `${m}د`;
+}
+
+/** Format shift time from ISO timestamp to "HH:MM - HH:MM" */
+function formatSessionLabel(startISO: any, endISO: any): string {
+  try {
+    if (!startISO) return '—';
+    const start = new Date(startISO);
+    const end = endISO ? new Date(endISO) : null;
+    const startTime = start.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: false });
+    if (!end) return startTime;
+    const endTime = end.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `${startTime} - ${endTime}`;
+  } catch {
+    return String(startISO || '—');
+  }
+}
+
 const FIELD_CANDIDATES = {
-  riderId: ['id', 'riderId', 'rider_id', 'employeeId', 'employee_id'],
+  riderId: ['employee_id', 'employeeId', 'id', 'riderId', 'rider_id'],
   riderName: ['name', 'riderName', 'rider_name', 'fullName', 'full_name'],
-  riderState: ['riderState', 'rider_state', 'state', 'status'],
-  walletBalance: ['walletBalance', 'wallet_balance', 'wallet', 'walletAmount'],
-  breaksCount: ['breaksCount', 'breaks_count', 'breaks', 'numberOfBreaks', 'number_of_breaks'],
-  breakTime: ['breaksTime', 'breaks_time', 'breakTime', 'break_time'],
-  lateTime: ['lateTime', 'late_time'],
-  currentSession: ['currentSession', 'current_session', 'sessionLabel', 'session'],
-  performance: ['performance', 'utr', 'UTR'],
-  timeWorked: ['timeWorked', 'time_worked', 'workedTime', 'worked_time'],
-  acceptanceRate: ['acceptanceRate', 'acceptance_rate', 'acceptance'],
-  ordersToday: ['orders', 'deliveries', 'ordersToday', 'orders_today'],
-  vehicle: ['vehicle', 'vehicleType', 'vehicle_type'],
-  zone: ['zone', 'area', 'startingPoint', 'starting_point'],
+  riderState: ['status', 'riderState', 'rider_state', 'state'],
+  walletBalance: ['wallet_info.balance', 'walletBalance', 'wallet_balance', 'wallet', 'walletAmount'],
+  breaksCount: ['performance.time_spent.number_of_breaks', 'breaksCount', 'breaks_count', 'breaks', 'numberOfBreaks', 'number_of_breaks'],
+  breakTime: ['performance.time_spent.break_seconds', 'breaksTime', 'breaks_time', 'breakTime', 'break_time'],
+  lateTime: ['performance.time_spent.late_seconds', 'lateTime', 'late_time'],
+  currentSession: ['active_shift_started_at', 'currentSession', 'current_session', 'sessionLabel', 'session'],
+  performance: ['performance.utilization_rate', 'performance', 'utr', 'UTR'],
+  timeWorked: ['performance.time_spent.worked_seconds', 'timeWorked', 'time_worked', 'workedTime', 'worked_time'],
+  acceptanceRate: ['performance.acceptance_rate', 'acceptanceRate', 'acceptance_rate', 'acceptance'],
+  ordersToday: ['deliveries_info.completed_deliveries_count', 'orders', 'deliveries', 'ordersToday', 'orders_today'],
+  vehicle: ['vehicle.name', 'vehicle', 'vehicleType', 'vehicle_type'],
+  zone: ['starting_point.name', 'zone.name', 'zone', 'area', 'startingPoint', 'starting_point'],
 } as const;
 
 /** Best-effort status bucket from Talabat's free-text state + breaks/late signals. */
@@ -67,10 +91,9 @@ function classifyStatusBucket(rawState: string, breaksCount: number, lateTimeSec
   const s = rawState.trim().toLowerCase();
   if (!s) return 'unknown';
   if (lateTimeSeconds > 0) return 'late';
-  if (breaksCount > 0 && /break/.test(s)) return 'on_break';
-  if (/working|active|online|busy|delivering/.test(s)) return 'online';
+  if (s === 'break' || breaksCount > 0) return 'on_break';
+  if (s === 'working' || /working|active|online|busy|delivering/.test(s)) return 'online';
   if (/ending|offline|inactive|logged.?out/.test(s)) return 'offline';
-  if (/break/.test(s)) return 'on_break';
   return 'unknown';
 }
 
@@ -81,6 +104,15 @@ export function mapRawRoosterLiveRider(row: RawRider, lastSyncAt: string): LiveR
   const rawState = String(pick(row, FIELD_CANDIDATES.riderState) ?? '').trim();
   const breaksCount = toNumber(pick(row, FIELD_CANDIDATES.breaksCount), 0);
   const lateTimeSeconds = toSeconds(pick(row, FIELD_CANDIDATES.lateTime));
+  
+  // Format session label from ISO timestamps
+  const shiftStart = row['active_shift_started_at'];
+  const shiftEnd = row['active_shift_ended_at'];
+  const currentSessionLabel = formatSessionLabel(shiftStart, shiftEnd);
+  
+  // Format worked time from seconds
+  const workedSeconds = toSeconds(pick(row, FIELD_CANDIDATES.timeWorked));
+  const timeWorkedLabel = formatWorkTime(workedSeconds);
 
   return {
     riderId: String(riderId).trim(),
@@ -91,13 +123,15 @@ export function mapRawRoosterLiveRider(row: RawRider, lastSyncAt: string): LiveR
     breaksCount,
     breakTimeSeconds: toSeconds(pick(row, FIELD_CANDIDATES.breakTime)),
     lateTimeSeconds,
-    currentSessionLabel: String(pick(row, FIELD_CANDIDATES.currentSession) ?? '').trim(),
+    currentSessionLabel,
     performance: pick(row, FIELD_CANDIDATES.performance),
-    timeWorkedLabel: String(pick(row, FIELD_CANDIDATES.timeWorked) ?? '').trim(),
+    timeWorkedLabel,
     acceptanceRate: (() => {
       const raw = pick(row, FIELD_CANDIDATES.acceptanceRate);
       if (raw === null) return null;
       const n = toNumber(raw, NaN);
+      // Convert to percentage if it's a decimal (0.0-1.0)
+      if (Number.isFinite(n) && n <= 1.0) return n * 100;
       return Number.isFinite(n) ? n : null;
     })(),
     ordersToday: (() => {
