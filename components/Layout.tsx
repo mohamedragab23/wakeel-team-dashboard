@@ -133,6 +133,7 @@ export default function Layout({ children }: LayoutProps) {
       // Supervisor menu - Reports tab removed as per requirements
       return [
         { href: '/dashboard', label: 'لوحة التحكم', icon: '📊' },
+        { href: '/live-riders', label: 'العمليات المباشرة', icon: '📡' },
         { href: '/riders', label: 'المناديب', icon: '👥' },
         { href: '/equipment-delivery', label: 'تسليم معدات', icon: '📤' },
         { href: '/equipment-return', label: 'استرجاع معدات', icon: '📥' },
