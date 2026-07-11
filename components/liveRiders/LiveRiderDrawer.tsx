@@ -44,14 +44,15 @@ export default function LiveRiderDrawer({
           </div>
 
           <Row label="المشرف" value={rider.supervisorName || '—'} />
-          <Row label="رصيد المحفظة" value={`${rider.walletBalance.toLocaleString('ar-EG')} ج.م`} />
+          <Row label="حالة المندوب" value={rider.riderState || '—'} />
           <Row label="الجلسة الحالية" value={rider.currentSessionLabel || '—'} />
+          <Row label="الأداء (UTR)" value={rider.performance !== null && rider.performance !== undefined ? String(rider.performance) : '—'} />
           <Row label="وقت العمل" value={rider.timeWorkedLabel || '—'} />
+          <Row label="نسبة القبول" value={rider.acceptanceRate !== null ? `${Math.round(rider.acceptanceRate)}%` : '—'} />
+          <Row label="رصيد المحفظة" value={`${rider.walletBalance.toLocaleString('ar-EG')} ج.م`} />
           <Row label="عدد الاستراحات" value={rider.breaksCount} />
           <Row label="وقت الاستراحة" value={formatDuration(rider.breakTimeSeconds)} />
           <Row label="وقت التأخير" value={formatDuration(rider.lateTimeSeconds)} />
-          {rider.acceptanceRate !== null && <Row label="نسبة القبول" value={`${rider.acceptanceRate}%`} />}
-          {rider.performance !== null && <Row label="الأداء (UTR)" value={String(rider.performance)} />}
           {rider.ordersToday !== null && <Row label="عدد الطلبات" value={rider.ordersToday} />}
           {rider.vehicle && <Row label="نوع المركبة" value={rider.vehicle} />}
           {rider.zone && <Row label="المنطقة" value={rider.zone} />}
