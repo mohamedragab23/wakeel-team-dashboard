@@ -13,7 +13,7 @@ import {
   sanitizeShiftObjectsLikeLegacy,
 } from '@/lib/shiftAutomationLegacy';
 
-type Viewer = { role: 'supervisor' | 'admin'; name: string };
+type Viewer = { role: 'supervisor' | 'admin'; name: string; code?: string };
 
 export type AnalyzeLegacyShiftsInput = {
   viewer: Viewer;
@@ -41,9 +41,17 @@ function detectFileKind(name: string): 'csv' | 'xlsx' | 'unknown' {
 }
 
 export async function analyzeLegacyShifts(input: AnalyzeLegacyShiftsInput) {
-  const shiftsAllMatrix = await getShiftsSheetData('all', false);
+  // Try multiple tab names for employee data
+  const TAB_CANDIDATES = ['all', 'المناديب', 'الموظفين', 'employees'];
+  let shiftsAllMatrix: any[][] = [];
+  
+  for (const tabName of TAB_CANDIDATES) {
+    shiftsAllMatrix = await getShiftsSheetData(tabName, false);
+    if (shiftsAllMatrix?.length) break;
+  }
+  
   if (!shiftsAllMatrix?.length) {
-    throw new Error('تعذر قراءة تبويب all من ملف الشفتات (GOOGLE_SHEETS_SHIFTS_SPREADSHEET_ID).');
+    throw new Error('تعذر قراءة بيانات الموظفين. تأكد من وجود تبويب اسمه: ' + TAB_CANDIDATES.join(' أو '));
   }
 
   // HQ source: shifts sheet tab "all"

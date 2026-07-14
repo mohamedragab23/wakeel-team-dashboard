@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
     const decoded = verifyToken(token) as {
       role?: 'supervisor' | 'admin';
       name?: string;
+      code?: string;
       dataZone?: string;
     } | null;
     if (!decoded || (decoded.role !== 'supervisor' && decoded.role !== 'admin')) {
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
     const selectedDates = (searchParams.getAll('dates') || []).map((d) => String(d || '').trim()).filter(Boolean);
 
     const analyzed = await analyzeLegacyShifts({
-      viewer: { role: decoded.role, name: decoded.name || '' },
+      viewer: { role: decoded.role, name: decoded.name || '', code: (decoded as any).code || '' },
       allowedSupervisorNames,
       files: await Promise.all(fileList.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() }))),
       rangeStart,

@@ -341,7 +341,7 @@ export function filterEmployeesWakeel3Cities(employees: LegacyEmployeeRow[]): Le
 
 export function filterEmployeesForViewer(
   employees: LegacyEmployeeRow[],
-  decoded: { role?: string; name?: string } | null,
+  decoded: { role?: string; name?: string; code?: string } | null,
   opts?: { allowedSupervisorNames?: Set<string> | null }
 ): LegacyEmployeeRow[] {
   if (!decoded) return employees;
@@ -352,18 +352,31 @@ export function filterEmployeesForViewer(
     }
     return employees;
   }
-  const viewer = normLower(decoded.name);
-  return employees.filter((e) => normLower(e.supervisors) === viewer);
+  // For supervisors: match by name OR code
+  const viewerName = normLower(decoded.name || '');
+  const viewerCode = normLower(decoded.code || '');
+  return employees.filter((e) => {
+    const sup = normLower(e.supervisors);
+    return sup === viewerName || sup === viewerCode;
+  });
 }
 
 export function buildEmployeesFromAllSheet(matrix: any[][]): LegacyEmployeeRow[] {
   if (!matrix?.length) return [];
   const headers = (matrix[0] || []).map((h) => norm(h));
-  const idxId = headers.findIndex((h) => normLower(h) === 'employee_id' || normLower(h) === 'employee id');
-  const idxName = headers.findIndex((h) => normLower(h) === 'employee_name' || normLower(h) === 'employee name');
-  const idxContract = headers.findIndex((h) => normLower(h) === 'contract_name' || normLower(h) === 'contract name');
-  const idxCity = headers.findIndex((h) => normLower(h) === 'city');
-  const idxSup = headers.findIndex((h) => normLower(h) === 'supervisors' || normLower(h) === 'supervisor');
+  const idxId = headers.findIndex((h) => normLower(h) === 'employee_id' || normLower(h) === 'employee id' || normLower(h) === 'كود المندوب' || normLower(h) === 'رقم المندوب');
+  const idxName = headers.findIndex((h) => normLower(h) === 'employee_name' || normLower(h) === 'employee name' || normLower(h) === 'اسم المندوب' || normLower(h) === 'الاسم');
+  const idxContract = headers.findIndex((h) => normLower(h) === 'contract_name' || normLower(h) === 'contract name' || normLower(h) === 'العقد' || normLower(h) === 'نوع العقد');
+  const idxCity = headers.findIndex((h) => normLower(h) === 'city' || normLower(h) === 'المحافظة' || normLower(h) === 'المدينة');
+  const idxSup = headers.findIndex((h) => 
+    normLower(h) === 'supervisors' || 
+    normLower(h) === 'supervisor' || 
+    normLower(h) === 'كود المشرف' || 
+    normLower(h) === 'المشرف' || 
+    normLower(h) === 'اسم المشرف' ||
+    normLower(h) === 'supervisor_code' ||
+    normLower(h) === 'supervisor code'
+  );
 
   const out: LegacyEmployeeRow[] = [];
   const seen = new Set<string>();
