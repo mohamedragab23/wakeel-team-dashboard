@@ -148,14 +148,12 @@ export default function LiveRidersPage() {
                   <span className="text-sm text-[rgba(234,240,255,0.7)]">عرض:</span>
                   <Button
                     variant={viewMode === 'riders' ? 'primary' : 'secondary'}
-                    size="sm"
                     onClick={() => setViewMode('riders')}
                   >
                     المناديب الفردية
                   </Button>
                   <Button
                     variant={viewMode === 'supervisors' ? 'primary' : 'secondary'}
-                    size="sm"
                     onClick={() => setViewMode('supervisors')}
                   >
                     ملخص المشرفين
