@@ -25,7 +25,8 @@ export type AdminFeatureKey =
   | 'recruitment'
   | 'strategic_ops'
   | 'rider_strategic_profiles'
-  | 'ticketing';
+  | 'ticketing'
+  | 'live_riders';
 
 const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   main_inventory: 'main_inventory',
@@ -48,6 +49,7 @@ const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   strategic_ops: 'strategic_ops',
   rider_strategic_profiles: 'rider_strategic_profiles',
   ticketing: 'ticketing',
+  live_riders: 'live_riders',
 };
 
 export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
@@ -72,6 +74,7 @@ export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
   strategic_ops: 'مركز العمليات الاستراتيجي',
   rider_strategic_profiles: 'إدارة بيانات المناديب',
   ticketing: 'نظام التذاكر التشغيلية',
+  live_riders: 'العمليات المباشرة',
 };
 
 export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
@@ -96,6 +99,7 @@ export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
   'strategic_ops',
   'rider_strategic_profiles',
   'ticketing',
+  'live_riders',
 ];
 
 export type AdminMenuDef = { href: string; label: string; icon: string; feature: AdminFeatureKey };
@@ -103,6 +107,7 @@ export type AdminMenuDef = { href: string; label: string; icon: string; feature:
 export function getAdminMenuDefs(): AdminMenuDef[] {
   return [
     { href: '/admin/dashboard', label: 'لوحة التحكم', icon: '📊', feature: 'dashboard' },
+    { href: '/live-riders', label: 'العمليات المباشرة', icon: '📡', feature: 'live_riders' },
     { href: '/admin/supervisors', label: 'إدارة المشرفين', icon: '👔', feature: 'supervisors' },
     { href: '/admin/riders', label: 'إدارة المناديب', icon: '👥', feature: 'riders' },
     { href: '/admin/termination-requests', label: 'طلبات الإقالة', icon: '🚫', feature: 'termination_requests' },
