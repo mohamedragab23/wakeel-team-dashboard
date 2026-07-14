@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isCronAuthorized } from '@/lib/cronAuth';
 import { runRoosterLiveSync } from '@/lib/roosterLive/syncService';
 import { logStructured } from '@/lib/requestTrace';
+import { sendAdminTelegramNotificationSafe } from '@/lib/adminTelegramNotifier';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,5 +21,16 @@ export async function GET(req: NextRequest) {
   }
 
   const result = await runRoosterLiveSync();
+  
+  // Send Telegram alert on failure
+  if (!result.success) {
+    await sendAdminTelegramNotificationSafe({
+      title: '🚨 تنبيه: فشل مزامنة العمليات المباشرة',
+      message: `فشلت عملية مزامنة البيانات المباشرة من طلبات (Rooster Live Sync).\n\n**السبب:** ${result.error}\n\n**الإجراء المطلوب:** تحديث cookies في Google Sheet (cron_config → ROOSTER_EXPORT_HEADERS_JSON)`,
+      priority: 'high',
+      url: `${process.env.NEXT_PUBLIC_APP_URL || ''}/live-riders`,
+    });
+  }
+
   return NextResponse.json(result, { status: result.success ? 200 : 502 });
 }
