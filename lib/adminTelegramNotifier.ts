@@ -54,7 +54,6 @@ export type NotificationPayload = {
   riders?: Array<{ name: string; code: string }>;
   url?: string;
   requestDate?: string;
-  // Generic fields for system_alert type
   alertTitle?: string;
   alertMessage?: string;
 };
@@ -184,14 +183,13 @@ function formatNotificationMessage(payload: NotificationPayload): string {
       break;
 
     case 'system_alert':
-      const alertPriorityEmoji = payload.priority === 'high' ? '🚨' : payload.priority === 'medium' ? '⚠️' : 'ℹ️';
-      lines[0] = payload.alertTitle ? `${alertPriorityEmoji} *${payload.alertTitle}*` : `${alertPriorityEmoji} *تنبيه نظام*`;
-      lines.push('');
+      if (payload.alertTitle) {
+        lines[0] = payload.alertTitle;
+        lines.push('');
+      }
       if (payload.alertMessage) {
         lines.push(payload.alertMessage);
       }
-      lines.push('');
-      lines.push(`📅 *الوقت:* ${new Date().toLocaleString('ar-EG')}`);
       break;
   }
 

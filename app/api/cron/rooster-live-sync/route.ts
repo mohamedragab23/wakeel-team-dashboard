@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   if (!result.success) {
     await sendAdminTelegramNotificationSafe({
       type: 'system_alert',
-      alertTitle: 'فشل مزامنة العمليات المباشرة',
+      alertTitle: '🚨 *تنبيه: فشل مزامنة العمليات المباشرة*',
       alertMessage: `فشلت عملية مزامنة البيانات المباشرة من طلبات (Rooster Live Sync).\n\n*السبب:* ${result.error}\n\n*الإجراء المطلوب:* تحديث cookies في Google Sheet\n(cron_config → ROOSTER_EXPORT_HEADERS_JSON)`,
       priority: 'high',
       url: `${process.env.NEXT_PUBLIC_APP_URL || ''}/live-riders`,
