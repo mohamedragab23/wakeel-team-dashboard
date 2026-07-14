@@ -34,7 +34,8 @@ export type NotificationType =
   | 'equipment_delivery'
   | 'equipment_return'
   | 'new_ticket'
-  | 'incomplete_rider_data';
+  | 'incomplete_rider_data'
+  | 'system_alert';
 
 export type NotificationPayload = {
   type: NotificationType;
@@ -53,6 +54,9 @@ export type NotificationPayload = {
   riders?: Array<{ name: string; code: string }>;
   url?: string;
   requestDate?: string;
+  // Generic fields for system_alert type
+  alertTitle?: string;
+  alertMessage?: string;
 };
 
 /**
@@ -177,6 +181,17 @@ function formatNotificationMessage(payload: NotificationPayload): string {
       }
       lines.push('');
       lines.push('⚠️ *مطلوب:* إكمال تاريخ التعيين (Join Date) للطيارين');
+      break;
+
+    case 'system_alert':
+      const alertPriorityEmoji = payload.priority === 'high' ? '🚨' : payload.priority === 'medium' ? '⚠️' : 'ℹ️';
+      lines[0] = payload.alertTitle ? `${alertPriorityEmoji} *${payload.alertTitle}*` : `${alertPriorityEmoji} *تنبيه نظام*`;
+      lines.push('');
+      if (payload.alertMessage) {
+        lines.push(payload.alertMessage);
+      }
+      lines.push('');
+      lines.push(`📅 *الوقت:* ${new Date().toLocaleString('ar-EG')}`);
       break;
   }
 
