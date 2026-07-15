@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
-import Button from '@/components/ui-v2/Button';
 import { authFetch } from '@/lib/authFetch';
 import { usePageNotify } from '@/lib/usePageNotify';
 import type { CommentCategory } from '@/lib/riderComments/types';
@@ -12,6 +11,7 @@ type Rider = {
   code: string;
   name: string;
   region: string;
+  supervisorName?: string;
 };
 
 type Comment = {
@@ -26,21 +26,35 @@ type Comment = {
   createdAt: string;
 };
 
+type QuickCommentState = {
+  riderCode: string;
+  category: CommentCategory;
+  notes: string;
+  expectedReturnDate: string;
+  estimatedReturnDays: string;
+};
+
 export default function RiderCommentsPage() {
   const notify = usePageNotify();
   const [riders, setRiders] = useState<Rider[]>([]);
   const [recentComments, setRecentComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  // Form state
-  const [selectedRider, setSelectedRider] = useState('');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [category, setCategory] = useState<CommentCategory>('other');
-  const [expectedReturnDate, setExpectedReturnDate] = useState('');
-  const [estimatedReturnDays, setEstimatedReturnDays] = useState('');
-  const [notes, setNotes] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [quickComments, setQuickComments] = useState<Record<string, QuickCommentState>>({});
+  const [submittingRider, setSubmittingRider] = useState<string | null>(null);
+
+  const categoryOptions: { value: CommentCategory; label: string; icon: string }[] = [
+    { value: 'other', label: COMMENT_CATEGORY_LABELS_AR.other, icon: COMMENT_CATEGORY_ICONS.other },
+    { value: 'accident', label: COMMENT_CATEGORY_LABELS_AR.accident, icon: COMMENT_CATEGORY_ICONS.accident },
+    { value: 'medical_leave', label: COMMENT_CATEGORY_LABELS_AR.medical_leave, icon: COMMENT_CATEGORY_ICONS.medical_leave },
+    { value: 'family_emergency', label: COMMENT_CATEGORY_LABELS_AR.family_emergency, icon: COMMENT_CATEGORY_ICONS.family_emergency },
+    { value: 'equipment_issue', label: COMMENT_CATEGORY_LABELS_AR.equipment_issue, icon: COMMENT_CATEGORY_ICONS.equipment_issue },
+    { value: 'frequent_absences', label: COMMENT_CATEGORY_LABELS_AR.frequent_absences, icon: COMMENT_CATEGORY_ICONS.frequent_absences },
+    { value: 'vacation', label: COMMENT_CATEGORY_LABELS_AR.vacation, icon: COMMENT_CATEGORY_ICONS.vacation },
+    { value: 'poor_performance', label: COMMENT_CATEGORY_LABELS_AR.poor_performance, icon: COMMENT_CATEGORY_ICONS.poor_performance },
+    { value: 'terminated', label: COMMENT_CATEGORY_LABELS_AR.terminated, icon: COMMENT_CATEGORY_ICONS.terminated },
+  ];
 
   useEffect(() => {
     loadRiders();
@@ -49,6 +63,7 @@ export default function RiderCommentsPage() {
 
   const loadRiders = async () => {
     try {
+      setLoading(true);
       const response = await authFetch('/api/riders');
       if (!response.ok) throw new Error('Failed to load riders');
       const data = await response.json();
@@ -56,48 +71,61 @@ export default function RiderCommentsPage() {
     } catch (error) {
       console.error('Error loading riders:', error);
       notify.error('فشل تحميل قائمة المناديب');
+    } finally {
+      setLoading(false);
     }
   };
 
   const loadRecentComments = async () => {
     try {
-      setLoading(true);
       const response = await authFetch('/api/rider-comments');
       if (!response.ok) throw new Error('Failed to load comments');
       const data = await response.json();
       setRecentComments(data.comments || []);
     } catch (error) {
       console.error('Error loading comments:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleQuickComment = (riderCode: string, field: keyof QuickCommentState, value: string) => {
+    setQuickComments((prev) => ({
+      ...prev,
+      [riderCode]: {
+        ...prev[riderCode],
+        riderCode,
+        category: prev[riderCode]?.category || 'other',
+        notes: prev[riderCode]?.notes || '',
+        expectedReturnDate: prev[riderCode]?.expectedReturnDate || '',
+        estimatedReturnDays: prev[riderCode]?.estimatedReturnDays || '',
+        [field]: value,
+      },
+    }));
+  };
 
-    if (!selectedRider || !category) {
-      notify.error('يرجى اختيار المندوب والفئة');
-      return;
-    }
-
-    const selectedRiderData = riders.find((r) => r.code === selectedRider);
-    if (!selectedRiderData) {
+  const handleSubmitQuickComment = async (riderCode: string) => {
+    const rider = riders.find((r) => r.code === riderCode);
+    if (!rider) {
       notify.error('المندوب غير موجود');
       return;
     }
 
+    const quickComment = quickComments[riderCode];
+    if (!quickComment || !quickComment.category) {
+      notify.error('يرجى اختيار الفئة');
+      return;
+    }
+
     try {
-      setSubmitting(true);
+      setSubmittingRider(riderCode);
 
       const payload = {
-        riderCode: selectedRider,
-        riderName: selectedRiderData.name,
+        riderCode: rider.code,
+        riderName: rider.name,
         date: selectedDate,
-        category,
-        expectedReturnDate: expectedReturnDate || undefined,
-        estimatedReturnDays: estimatedReturnDays ? Number(estimatedReturnDays) : undefined,
-        notes: notes.trim(),
+        category: quickComment.category,
+        expectedReturnDate: quickComment.expectedReturnDate || undefined,
+        estimatedReturnDays: quickComment.estimatedReturnDays ? Number(quickComment.estimatedReturnDays) : undefined,
+        notes: quickComment.notes.trim() || '',
       };
 
       const response = await authFetch('/api/rider-comments', {
@@ -111,14 +139,14 @@ export default function RiderCommentsPage() {
         throw new Error(error.error || 'Failed to add comment');
       }
 
-      notify.success('تم حفظ التعليق بنجاح');
+      notify.success(`✅ تم حفظ تعليق ${rider.name}`);
 
-      // Reset form
-      setSelectedRider('');
-      setCategory('other');
-      setExpectedReturnDate('');
-      setEstimatedReturnDays('');
-      setNotes('');
+      // Clear quick comment
+      setQuickComments((prev) => {
+        const updated = { ...prev };
+        delete updated[riderCode];
+        return updated;
+      });
 
       // Reload comments
       loadRecentComments();
@@ -126,7 +154,7 @@ export default function RiderCommentsPage() {
       console.error('Error adding comment:', error);
       notify.error(`فشل حفظ التعليق: ${error}`);
     } finally {
-      setSubmitting(false);
+      setSubmittingRider(null);
     }
   };
 
@@ -136,209 +164,183 @@ export default function RiderCommentsPage() {
       r.code.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const categoryOptions: { value: CommentCategory; label: string; icon: string }[] = [
-    { value: 'accident', label: COMMENT_CATEGORY_LABELS_AR.accident, icon: COMMENT_CATEGORY_ICONS.accident },
-    { value: 'medical_leave', label: COMMENT_CATEGORY_LABELS_AR.medical_leave, icon: COMMENT_CATEGORY_ICONS.medical_leave },
-    { value: 'family_emergency', label: COMMENT_CATEGORY_LABELS_AR.family_emergency, icon: COMMENT_CATEGORY_ICONS.family_emergency },
-    { value: 'equipment_issue', label: COMMENT_CATEGORY_LABELS_AR.equipment_issue, icon: COMMENT_CATEGORY_ICONS.equipment_issue },
-    { value: 'frequent_absences', label: COMMENT_CATEGORY_LABELS_AR.frequent_absences, icon: COMMENT_CATEGORY_ICONS.frequent_absences },
-    { value: 'vacation', label: COMMENT_CATEGORY_LABELS_AR.vacation, icon: COMMENT_CATEGORY_ICONS.vacation },
-    { value: 'poor_performance', label: COMMENT_CATEGORY_LABELS_AR.poor_performance, icon: COMMENT_CATEGORY_ICONS.poor_performance },
-    { value: 'terminated', label: COMMENT_CATEGORY_LABELS_AR.terminated, icon: COMMENT_CATEGORY_ICONS.terminated },
-    { value: 'other', label: COMMENT_CATEGORY_LABELS_AR.other, icon: COMMENT_CATEGORY_ICONS.other },
-  ];
+  const showReturnFields = (riderCode: string) => {
+    const category = quickComments[riderCode]?.category;
+    return category === 'accident' || category === 'medical_leave';
+  };
 
-  const showReturnFields = category === 'accident' || category === 'medical_leave';
+  const getRiderRecentComment = (riderCode: string) => {
+    return recentComments.find((c) => c.riderCode === riderCode);
+  };
 
   return (
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-[#0f172a] p-6">
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-7xl mx-auto">
           {/* Header */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-[#EAF0FF] mb-2">
               💬 التعليقات اليومية للمناديب
             </h1>
             <p className="text-[#94A3B8]">
-              سجل حالة المناديب يومياً (غياب، حوادث، أعذار، إلخ) لتحليل أدق
+              سجل حالة كل مندوب يومياً بسرعة (غياب، حادث، إجازة، إلخ)
             </p>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-6">
-            {/* Add Comment Form */}
-            <div className="rounded-2xl border border-white/10 bg-[rgba(255,255,255,0.04)] p-6">
-              <h2 className="text-xl font-semibold text-[#EAF0FF] mb-4">إضافة تعليق جديد</h2>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Date */}
-                <div>
-                  <label className="block text-sm font-medium text-[#94A3B8] mb-2">التاريخ</label>
-                  <input
-                    type="date"
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-[#EAF0FF] focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-
-                {/* Rider Selection */}
-                <div>
-                  <label className="block text-sm font-medium text-[#94A3B8] mb-2">المندوب</label>
-                  <input
-                    type="text"
-                    placeholder="ابحث بالاسم أو الكود..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-[#EAF0FF] focus:outline-none focus:border-cyan-500 mb-2"
-                  />
-                  <select
-                    value={selectedRider}
-                    onChange={(e) => setSelectedRider(e.target.value)}
-                    required
-                    className="w-full px-4 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-[#EAF0FF] focus:outline-none focus:border-cyan-500"
-                  >
-                    <option value="">-- اختر المندوب --</option>
-                    {filteredRiders.map((rider) => (
-                      <option key={rider.code} value={rider.code}>
-                        {rider.name} ({rider.code}) - {rider.region}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Category */}
-                <div>
-                  <label className="block text-sm font-medium text-[#94A3B8] mb-2">الفئة / السبب</label>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value as CommentCategory)}
-                    required
-                    className="w-full px-4 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-[#EAF0FF] focus:outline-none focus:border-cyan-500"
-                  >
-                    {categoryOptions.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.icon} {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Return Date (only for accidents/medical) */}
-                {showReturnFields && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-[#94A3B8] mb-2">
-                        تاريخ العودة المتوقع (اختياري)
-                      </label>
-                      <input
-                        type="date"
-                        value={expectedReturnDate}
-                        onChange={(e) => setExpectedReturnDate(e.target.value)}
-                        className="w-full px-4 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-[#EAF0FF] focus:outline-none focus:border-cyan-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-[#94A3B8] mb-2">
-                        عدد الأيام المتوقعة (اختياري)
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={estimatedReturnDays}
-                        onChange={(e) => setEstimatedReturnDays(e.target.value)}
-                        placeholder="مثال: 3 أيام"
-                        className="w-full px-4 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-[#EAF0FF] focus:outline-none focus:border-cyan-500"
-                      />
-                    </div>
-                  </>
-                )}
-
-                {/* Notes */}
-                <div>
-                  <label className="block text-sm font-medium text-[#94A3B8] mb-2">ملاحظات</label>
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={3}
-                    placeholder="اكتب ملاحظات إضافية هنا..."
-                    className="w-full px-4 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-[#EAF0FF] focus:outline-none focus:border-cyan-500 resize-none"
-                  />
-                </div>
-
-                {/* Submit */}
-                <Button type="submit" variant="primary" disabled={submitting}>
-                  {submitting ? '⏳ جاري الحفظ...' : '💾 حفظ التعليق'}
-                </Button>
-              </form>
+          {/* Date Selector */}
+          <div className="rounded-2xl border border-white/10 bg-[rgba(255,255,255,0.04)] p-6 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-[#94A3B8] mb-2">📅 التاريخ</label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="w-full px-4 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-[#EAF0FF] focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[#94A3B8] mb-2">🔍 بحث</label>
+                <input
+                  type="text"
+                  placeholder="ابحث بالاسم أو الكود..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full px-4 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-[#EAF0FF] focus:outline-none focus:border-cyan-500"
+                />
+              </div>
             </div>
+          </div>
 
-            {/* Recent Comments */}
-            <div className="rounded-2xl border border-white/10 bg-[rgba(255,255,255,0.04)] p-6">
-              <h2 className="text-xl font-semibold text-[#EAF0FF] mb-4">
-                التعليقات الأخيرة ({recentComments.length})
-              </h2>
+          {/* Riders Table */}
+          <div className="rounded-2xl border border-white/10 bg-[rgba(255,255,255,0.04)] p-6">
+            <h2 className="text-xl font-semibold text-[#EAF0FF] mb-4">
+              قائمة المناديب ({filteredRiders.length})
+            </h2>
 
-              {loading ? (
-                <p className="text-[#94A3B8] text-center py-8">⏳ جاري التحميل...</p>
-              ) : recentComments.length === 0 ? (
-                <p className="text-[#94A3B8] text-center py-8">لا توجد تعليقات بعد</p>
-              ) : (
-                <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                  {recentComments.slice(0, 20).map((comment) => {
-                    const categoryOpt = categoryOptions.find((c) => c.value === comment.category);
-                    return (
-                      <div
-                        key={comment.id}
-                        className="rounded-lg border border-white/10 bg-[#1e293b] p-4"
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex-1">
-                            <p className="text-[#EAF0FF] font-semibold">{comment.riderName}</p>
-                            <p className="text-xs text-[#64748B]">
-                              {comment.riderCode} • {comment.date}
-                            </p>
-                          </div>
-                          <span className="text-xl">{categoryOpt?.icon || '📝'}</span>
-                        </div>
-                        <p className="text-sm text-[#94A3B8] mb-2">
-                          <strong>{categoryOpt?.label || comment.category}</strong>
-                        </p>
-                        {comment.expectedReturnDate && (
-                          <p className="text-xs text-cyan-300 mb-1">
-                            🔄 عودة متوقعة: {comment.expectedReturnDate}
-                          </p>
-                        )}
-                        {comment.notes && (
-                          <p className="text-sm text-[#CBD5E1] mt-2 italic">
-                            "{comment.notes}"
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            {loading ? (
+              <p className="text-center text-[#94A3B8] py-8">⏳ جاري التحميل...</p>
+            ) : filteredRiders.length === 0 ? (
+              <p className="text-center text-[#94A3B8] py-8">لا توجد مناديب</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/10">
+                      <th className="text-right p-3 text-[#94A3B8] font-medium">المندوب</th>
+                      <th className="text-right p-3 text-[#94A3B8] font-medium">المنطقة</th>
+                      <th className="text-right p-3 text-[#94A3B8] font-medium">الفئة</th>
+                      <th className="text-right p-3 text-[#94A3B8] font-medium">ملاحظات</th>
+                      <th className="text-center p-3 text-[#94A3B8] font-medium">إجراء</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRiders.map((rider) => {
+                      const recentComment = getRiderRecentComment(rider.code);
+                      const quickComment = quickComments[rider.code];
+                      const isSubmitting = submittingRider === rider.code;
+
+                      return (
+                        <tr key={rider.code} className="border-b border-white/5 hover:bg-white/5">
+                          <td className="p-3 text-[#EAF0FF]">
+                            <p className="font-semibold">{rider.name}</p>
+                            <p className="text-xs text-[#64748B]">{rider.code}</p>
+                            {recentComment && (
+                              <p className="text-xs text-cyan-300 mt-1">
+                                آخر تعليق: {COMMENT_CATEGORY_ICONS[recentComment.category]}{' '}
+                                {COMMENT_CATEGORY_LABELS_AR[recentComment.category]} ({recentComment.date})
+                              </p>
+                            )}
+                          </td>
+                          <td className="p-3 text-[#94A3B8]">{rider.region}</td>
+                          <td className="p-3">
+                            <select
+                              value={quickComment?.category || 'other'}
+                              onChange={(e) =>
+                                handleQuickComment(rider.code, 'category', e.target.value as CommentCategory)
+                              }
+                              disabled={isSubmitting}
+                              className="w-full px-3 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-[#EAF0FF] text-sm focus:outline-none focus:border-cyan-500"
+                            >
+                              {categoryOptions.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.icon} {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                            {showReturnFields(rider.code) && (
+                              <div className="mt-2 space-y-1">
+                                <input
+                                  type="date"
+                                  value={quickComment?.expectedReturnDate || ''}
+                                  onChange={(e) =>
+                                    handleQuickComment(rider.code, 'expectedReturnDate', e.target.value)
+                                  }
+                                  placeholder="تاريخ العودة"
+                                  disabled={isSubmitting}
+                                  className="w-full px-2 py-1 rounded bg-[#0f172a] border border-white/10 text-[#EAF0FF] text-xs focus:outline-none focus:border-cyan-500"
+                                />
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={quickComment?.estimatedReturnDays || ''}
+                                  onChange={(e) =>
+                                    handleQuickComment(rider.code, 'estimatedReturnDays', e.target.value)
+                                  }
+                                  placeholder="عدد الأيام"
+                                  disabled={isSubmitting}
+                                  className="w-full px-2 py-1 rounded bg-[#0f172a] border border-white/10 text-[#EAF0FF] text-xs focus:outline-none focus:border-cyan-500"
+                                />
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            <textarea
+                              value={quickComment?.notes || ''}
+                              onChange={(e) => handleQuickComment(rider.code, 'notes', e.target.value)}
+                              placeholder="ملاحظات (اختياري)"
+                              disabled={isSubmitting}
+                              rows={2}
+                              className="w-full px-3 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-[#EAF0FF] text-sm focus:outline-none focus:border-cyan-500 resize-none"
+                            />
+                          </td>
+                          <td className="p-3 text-center">
+                            <button
+                              onClick={() => handleSubmitQuickComment(rider.code)}
+                              disabled={isSubmitting}
+                              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                                isSubmitting
+                                  ? 'bg-gray-600 text-gray-300 cursor-not-allowed'
+                                  : 'bg-cyan-500 hover:bg-cyan-600 text-white'
+                              }`}
+                            >
+                              {isSubmitting ? '⏳' : '💾 حفظ'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Info Box */}
           <div className="mt-6 rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-4">
-            <h3 className="text-lg font-semibold text-cyan-300 mb-2">💡 أهمية التعليقات اليومية</h3>
+            <h3 className="text-lg font-semibold text-cyan-300 mb-2">💡 نصائح سريعة</h3>
             <ul className="space-y-2 text-sm text-[#94A3B8]">
               <li>
-                ✅ <strong>تحليل أدق:</strong> معرفة السبب الحقيقي وراء غياب المندوب (حادث، إجازة، عذر...)
+                ✅ <strong>اختر الفئة:</strong> من القائمة المنسدلة لكل مندوب
               </li>
               <li>
-                ✅ <strong>توقع العودة:</strong> معرفة متى سيعود المناديب المصابون/المرضى
+                ✅ <strong>حادث/إجازة مرضية:</strong> ستظهر حقول إضافية لتاريخ العودة
               </li>
               <li>
-                ✅ <strong>تحذيرات مبكرة:</strong> اكتشاف المناديب الذين يأخذون إجازات متكررة
+                ✅ <strong>ملاحظات:</strong> اختيارية - أضف أي تفاصيل إضافية
               </li>
               <li>
-                ✅ <strong>قرارات أفضل:</strong> توصيات مبنية على أسباب حقيقية وليس مجرد أرقام
-              </li>
-              <li>
-                🔒 <strong>سجل دائم:</strong> التعليقات لا تُحذف، مما يوفر سجلاً كاملاً لحالة كل مندوب
+                ✅ <strong>احفظ:</strong> اضغط "حفظ" بعد كل مندوب
               </li>
             </ul>
           </div>
