@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const fromDate = searchParams.get('from');
     const toDate = searchParams.get('to');
+    const zone = searchParams.get('zone');
 
     // Fetch data from Google Sheets
     const [assignmentData, reactivationData, terminationData] = await Promise.all([
@@ -53,13 +54,13 @@ export async function GET(request: NextRequest) {
     ]);
 
     // Parse assignment requests (new hires)
-    const newHires = parseRequests(assignmentData, fromDate, toDate, 'approved');
+    const newHires = parseRequests(assignmentData, fromDate, toDate, zone, 'approved');
     
     // Parse reactivation requests
-    const reactivations = parseRequests(reactivationData, fromDate, toDate, 'approved');
+    const reactivations = parseRequests(reactivationData, fromDate, toDate, zone, 'approved');
     
     // Parse termination requests
-    const terminations = parseTerminations(terminationData, fromDate, toDate);
+    const terminations = parseTerminations(terminationData, fromDate, toDate, zone);
 
     // Calculate delta
     const delta = (newHires.length + reactivations.length) - terminations.length;
@@ -116,6 +117,7 @@ function parseRequests(
   data: any[][], 
   fromDate: string | null, 
   toDate: string | null,
+  zone: string | null,
   statusFilter?: string
 ): Array<{ code: string; name: string; date: string }> {
   if (data.length <= 1) return [];
@@ -125,6 +127,7 @@ function parseRequests(
   const nameIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('اسم') || h.toString().toLowerCase().includes('name')));
   const dateIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('تاريخ') || h.toString().toLowerCase().includes('date')));
   const statusIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('حالة') || h.toString().toLowerCase().includes('status')));
+  const zoneIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('منطقة') || h.toString().toLowerCase().includes('zone') || h.toString().toLowerCase().includes('city') || h.toString().toLowerCase().includes('مدينة')));
 
   const results: Array<{ code: string; name: string; date: string }> = [];
 
@@ -145,6 +148,12 @@ function parseRequests(
     if (fromDate && dateStr && dateStr < fromDate) continue;
     if (toDate && dateStr && dateStr > toDate) continue;
 
+    // Filter by zone
+    if (zone && zoneIdx >= 0) {
+      const rowZone = String(row[zoneIdx] || '').trim();
+      if (rowZone && rowZone !== zone) continue;
+    }
+
     const code = codeIdx >= 0 ? String(row[codeIdx] || '').trim() : '';
     const name = nameIdx >= 0 ? String(row[nameIdx] || '').trim() : '';
 
@@ -159,7 +168,8 @@ function parseRequests(
 function parseTerminations(
   data: any[][],
   fromDate: string | null,
-  toDate: string | null
+  toDate: string | null,
+  zone: string | null
 ): Array<{ code: string; name: string; date: string; reason: string }> {
   if (data.length <= 1) return [];
 
@@ -169,6 +179,7 @@ function parseTerminations(
   const dateIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('تاريخ') || h.toString().toLowerCase().includes('date')));
   const reasonIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('سبب') || h.toString().toLowerCase().includes('reason')));
   const statusIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('حالة') || h.toString().toLowerCase().includes('status')));
+  const zoneIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('منطقة') || h.toString().toLowerCase().includes('zone') || h.toString().toLowerCase().includes('city') || h.toString().toLowerCase().includes('مدينة')));
 
   const results: Array<{ code: string; name: string; date: string; reason: string }> = [];
 
@@ -188,6 +199,12 @@ function parseTerminations(
     // Filter by date range
     if (fromDate && dateStr && dateStr < fromDate) continue;
     if (toDate && dateStr && dateStr > toDate) continue;
+
+    // Filter by zone
+    if (zone && zoneIdx >= 0) {
+      const rowZone = String(row[zoneIdx] || '').trim();
+      if (rowZone && rowZone !== zone) continue;
+    }
 
     const code = codeIdx >= 0 ? String(row[codeIdx] || '').trim() : '';
     const name = nameIdx >= 0 ? String(row[nameIdx] || '').trim() : '';

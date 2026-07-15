@@ -131,17 +131,20 @@ export default function LogisticsIntelligencePage() {
 
   const [fromDate, setFromDate] = useState(defaultStart);
   const [toDate, setToDate] = useState(today);
+  const [zone, setZone] = useState('all');
   const [targetHours, setTargetHours] = useState('1500');
+  const [targetFinalHours, setTargetFinalHours] = useState('2000');
   const [growthMonths, setGrowthMonths] = useState('4');
   const [activeTab, setActiveTab] = useState<'overview' | 'segments' | 'issues' | 'planning' | 'supervisors'>('overview');
 
   // Fetch analytics data
   const { data: analytics, isLoading: loadingAnalytics, refetch: refetchAnalytics } = useQuery({
-    queryKey: ['logistics-analytics', fromDate, toDate],
+    queryKey: ['logistics-analytics', fromDate, toDate, zone],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (fromDate) params.set('from', fromDate);
       if (toDate) params.set('to', toDate);
+      if (zone && zone !== 'all') params.set('zone', zone);
       const res = await authFetch(`/api/admin/performance/analytics?${params}`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
@@ -152,11 +155,12 @@ export default function LogisticsIntelligencePage() {
 
   // Fetch delta data
   const { data: delta, refetch: refetchDelta } = useQuery({
-    queryKey: ['logistics-delta', fromDate, toDate],
+    queryKey: ['logistics-delta', fromDate, toDate, zone],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (fromDate) params.set('from', fromDate);
       if (toDate) params.set('to', toDate);
+      if (zone && zone !== 'all') params.set('zone', zone);
       const res = await authFetch(`/api/admin/performance/delta?${params}`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
@@ -206,7 +210,7 @@ export default function LogisticsIntelligencePage() {
   };
 
   const generateGrowthPlan = async () => {
-    if (!analytics || !targetHours || !growthMonths) {
+    if (!analytics || !targetFinalHours || !growthMonths) {
       notify.error('يرجى إدخال جميع البيانات المطلوبة');
       return;
     }
@@ -218,7 +222,7 @@ export default function LogisticsIntelligencePage() {
         body: JSON.stringify({
           type: 'growth_plan',
           data: {
-            targetHoursPerDay: parseFloat(targetHours),
+            targetHoursPerDay: parseFloat(targetFinalHours),
             currentTotalHours: analytics.totalWorkHours / (analytics.dailyStats?.length || 1),
             currentActiveRiders: analytics.avgActiveRiders,
             avgWorkHoursPerRider: analytics.avgWorkHours,
@@ -297,7 +301,7 @@ export default function LogisticsIntelligencePage() {
 
         {/* Filters */}
         <Card className="p-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div>
               <label className="text-xs text-[#94A3B8] block mb-2 font-medium">من تاريخ</label>
               <input
@@ -317,7 +321,27 @@ export default function LogisticsIntelligencePage() {
               />
             </div>
             <div>
-              <label className="text-xs text-[#94A3B8] block mb-2 font-medium">Target (ساعة/يوم)</label>
+              <label className="text-xs text-[#94A3B8] block mb-2 font-medium">المنطقة</label>
+              <select
+                value={zone}
+                onChange={(e) => setZone(e.target.value)}
+                className="w-full rounded-lg bg-black/30 border border-white/10 px-3 py-2.5 text-[#EAF0FF] text-sm focus:border-cyan-500/50 focus:outline-none"
+              >
+                <option value="all">جميع المناطق</option>
+                <option value="Alexandria">Alexandria</option>
+                <option value="Cairo">Cairo</option>
+                <option value="Giza">Giza</option>
+                <option value="Mansoura">Mansoura</option>
+                <option value="Tanta">Tanta</option>
+                <option value="Zagazig">Zagazig</option>
+                <option value="Assiut">Assiut</option>
+                <option value="Port Said">Port Said</option>
+                <option value="Suez">Suez</option>
+                <option value="Ismailia">Ismailia</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-[#94A3B8] block mb-2 font-medium">Target الحالي (ساعة/يوم)</label>
               <input
                 type="number"
                 value={targetHours}
@@ -698,8 +722,8 @@ export default function LogisticsIntelligencePage() {
                       <label className="text-sm text-[#94A3B8] block mb-2">Target النهائي (ساعات/يوم)</label>
                       <input
                         type="number"
-                        value={targetHours}
-                        onChange={(e) => setTargetHours(e.target.value)}
+                        value={targetFinalHours}
+                        onChange={(e) => setTargetFinalHours(e.target.value)}
                         className="w-full rounded-lg bg-black/30 border border-white/10 px-4 py-3 text-[#EAF0FF]"
                         placeholder="2000"
                       />

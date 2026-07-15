@@ -11,6 +11,7 @@ interface RiderDayRecord {
   riderId: string;
   riderName: string;
   supervisor: string;
+  zone: string;
   orders: number;
   workedHours: number;
   breakHours: number;
@@ -112,6 +113,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const fromDate = searchParams.get('from');
     const toDate = searchParams.get('to');
+    const zone = searchParams.get('zone');
 
     // Fetch data from Google Sheets
     const dailyData = await getSheetData('البيانات اليومية');
@@ -134,6 +136,7 @@ export async function GET(request: NextRequest) {
     const riderIdIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('كود') || h.toString().toLowerCase().includes('id')));
     const riderNameIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('اسم') || h.toString().toLowerCase().includes('name')));
     const supervisorIdx = headers.findIndex((h: string) => h && h.toString().toLowerCase().includes('مشرف') || h.toString().toLowerCase().includes('supervisor'));
+    const zoneIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('منطقة') || h.toString().toLowerCase().includes('zone') || h.toString().toLowerCase().includes('city') || h.toString().toLowerCase().includes('مدينة')));
     const ordersIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('أوردر') || h.toString().toLowerCase().includes('order')));
     const workedHoursIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('ساعات') || h.toString().toLowerCase().includes('hour')) && !h.toString().toLowerCase().includes('استراحة') && !h.toString().toLowerCase().includes('break'));
     const breakHoursIdx = headers.findIndex((h: string) => h && (h.toString().toLowerCase().includes('استراحة') || h.toString().toLowerCase().includes('break')));
@@ -152,11 +155,17 @@ export async function GET(request: NextRequest) {
       if (fromDate && dateStr < fromDate) continue;
       if (toDate && dateStr > toDate) continue;
 
+      const riderZone = zoneIdx >= 0 ? String(row[zoneIdx] || '').trim() : '';
+      
+      // Filter by zone if provided
+      if (zone && riderZone && riderZone !== zone) continue;
+
       const record: RiderDayRecord = {
         date: dateStr,
         riderId: riderIdIdx >= 0 ? String(row[riderIdIdx] || '').trim() : '',
         riderName: riderNameIdx >= 0 ? String(row[riderNameIdx] || '').trim() : '',
         supervisor: supervisorIdx >= 0 ? String(row[supervisorIdx] || '').trim() : '',
+        zone: riderZone,
         orders: ordersIdx >= 0 ? parseFloat(String(row[ordersIdx] || 0)) : 0,
         workedHours: workedHoursIdx >= 0 ? parseFloat(String(row[workedHoursIdx] || 0)) : 0,
         breakHours: breakHoursIdx >= 0 ? parseFloat(String(row[breakHoursIdx] || 0)) : 0,
