@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const report = await buildStrategicOpsReport(filters);
 
     // Extract Ghost Riders data
-    const ghostRiders = report.ghostRiderAudit.ghostRiderListFull || [];
+    const ghostRiders = report.ghostRiderAudit.riders || [];
 
     if (ghostRiders.length === 0) {
       return NextResponse.json(
@@ -47,14 +47,17 @@ export async function GET(request: NextRequest) {
 
     // Prepare data for Excel
     const excelData = ghostRiders.map((ghost) => ({
-      'كود المندوب (في ملف الأداء)': ghost.codeInPerformanceSheet,
-      'الاسم (إن وُجد)': ghost.name || '-',
-      'عدد الأيام في الفترة': ghost.daysInPeriod,
-      'إجمالي الساعات': ghost.totalHours,
+      'كود المندوب (في ملف الأداء)': ghost.rawRiderCode,
+      'الاسم (إن وُجد)': ghost.riderName || '-',
+      'عدد أيام العمل': ghost.workDays,
+      'إجمالي الساعات': ghost.totalHours.toFixed(2),
       'إجمالي الأوردرات': ghost.totalOrders,
-      'متوسط يومي (ساعات)': ghost.avgDailyHours,
-      'الحالة': ghost.found ? 'موجود في قائمة المناديب' : 'غير موجود (شبح)',
-      'ملاحظات': ghost.found
+      'متوسط يومي (ساعات)': ghost.workDays > 0 ? (ghost.totalHours / ghost.workDays).toFixed(2) : '0',
+      'الفئة': ghost.category,
+      'السبب': ghost.reasonAr,
+      'الحالة': ghost.masterCodeIfFound ? 'موجود في قائمة المناديب' : 'غير موجود (شبح)',
+      'كود في القائمة الرسمية': ghost.masterCodeIfFound || '-',
+      'ملاحظات': ghost.masterCodeIfFound
         ? 'هذا المندوب موجود في القائمة الرسمية'
         : 'هذا المندوب غير موجود في قائمة المناديب - يجب إضافته أو تصحيح الكود',
     }));
@@ -67,11 +70,14 @@ export async function GET(request: NextRequest) {
     ws['!cols'] = [
       { wch: 30 }, // كود المندوب
       { wch: 35 }, // الاسم
-      { wch: 20 }, // عدد الأيام
+      { wch: 18 }, // عدد أيام العمل
       { wch: 18 }, // إجمالي الساعات
       { wch: 20 }, // إجمالي الأوردرات
       { wch: 22 }, // متوسط يومي
+      { wch: 30 }, // الفئة
+      { wch: 50 }, // السبب
       { wch: 30 }, // الحالة
+      { wch: 25 }, // كود في القائمة الرسمية
       { wch: 60 }, // ملاحظات
     ];
 
