@@ -1872,6 +1872,151 @@ export default function StrategicOpsCenterPage() {
               </div>
             </Section>
 
+            {/* ── Fleet Statistics (Basic Metrics) ──────────────────────────────── */}
+            <Section title="الإحصائيات الأساسية للأسطول">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <StatCard
+                  label="المناديب النشطون (متوسط يومي)"
+                  value={report.fleetStatistics.avgDailyActiveRiders}
+                  sub="أوردرات > 0 وساعات > 0"
+                />
+                <StatCard
+                  label="الطيارين الغائبون (متوسط يومي)"
+                  value={report.fleetStatistics.avgDailyAbsentRiders}
+                  sub="أوردرات = 0 وساعات = 0"
+                />
+                <StatCard
+                  label="نسبة النشطين من الإجمالي"
+                  value={`${report.fleetStatistics.activePercentage}%`}
+                  sub={`${report.fleetStatistics.avgDailyActiveRiders} / ${report.executiveSummary.totalRegisteredRiders}`}
+                />
+                <StatCard
+                  label="إجمالي ساعات البريك (الفترة)"
+                  value={`${Math.round(report.fleetStatistics.totalBreakMinutes / 60)} ساعة`}
+                  sub={`${report.fleetStatistics.totalBreakMinutes} دقيقة`}
+                />
+                <StatCard
+                  label="متوسط البريك/مندوب (الفترة)"
+                  value={`${Math.round(report.fleetStatistics.avgBreakMinutesPerRider)} دقيقة`}
+                />
+                <StatCard
+                  label="متوسط البريك/يوم (الأسطول)"
+                  value={`${Math.round(report.fleetStatistics.avgBreakMinutesPerDay)} دقيقة`}
+                />
+                <StatCard
+                  label="متوسط ساعات العمل/مندوب"
+                  value={report.fleetStatistics.avgWorkHoursPerRider}
+                  sub="جميع المناديب"
+                />
+                <StatCard
+                  label="متوسط ساعات العمل/مندوب نشط"
+                  value={report.fleetStatistics.avgWorkHoursPerActiveRider}
+                  sub="المناديب النشطون فقط"
+                />
+              </div>
+            </Section>
+
+            {/* ── Work Hours Segments (Detailed) ──────────────────────────────────── */}
+            <Section title="تفصيل المناديب حسب شرائح ساعات العمل">
+              <div className="space-y-6">
+                {/* Below 4 Hours */}
+                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4">
+                  <h3 className="text-lg font-semibold text-red-300 mb-3">
+                    🔴 أقل من 4 ساعات/يوم ({report.workHoursSegments.below4Hours.count} مندوب)
+                  </h3>
+                  {report.workHoursSegments.below4Hours.count > 0 ? (
+                    <MiniTable
+                      headers={['الكود', 'الاسم', 'المشرف', 'المنطقة', 'متوسط يومي', 'إجمالي ساعات', 'إجمالي أوردرات', 'أيام عمل']}
+                      rows={report.workHoursSegments.below4Hours.riders.map((r) => [
+                        r.code,
+                        r.name,
+                        `${r.supervisorName} (${r.supervisorCode})`,
+                        r.region,
+                        r.avgDailyHours,
+                        r.totalHours,
+                        r.totalOrders,
+                        r.workDays,
+                      ])}
+                    />
+                  ) : (
+                    <p className="text-sm text-[#64748B]">لا يوجد مناديب في هذه الفئة.</p>
+                  )}
+                </div>
+
+                {/* 4-6 Hours */}
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                  <h3 className="text-lg font-semibold text-amber-300 mb-3">
+                    🟡 من 4 إلى 6 ساعات/يوم ({report.workHoursSegments.between4And6Hours.count} مندوب)
+                  </h3>
+                  {report.workHoursSegments.between4And6Hours.count > 0 ? (
+                    <MiniTable
+                      headers={['الكود', 'الاسم', 'المشرف', 'المنطقة', 'متوسط يومي', 'إجمالي ساعات', 'إجمالي أوردرات', 'أيام عمل']}
+                      rows={report.workHoursSegments.between4And6Hours.riders.map((r) => [
+                        r.code,
+                        r.name,
+                        `${r.supervisorName} (${r.supervisorCode})`,
+                        r.region,
+                        r.avgDailyHours,
+                        r.totalHours,
+                        r.totalOrders,
+                        r.workDays,
+                      ])}
+                    />
+                  ) : (
+                    <p className="text-sm text-[#64748B]">لا يوجد مناديب في هذه الفئة.</p>
+                  )}
+                </div>
+
+                {/* 6-8 Hours */}
+                <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-4">
+                  <h3 className="text-lg font-semibold text-cyan-300 mb-3">
+                    🔵 من 6 إلى 8 ساعات/يوم ({report.workHoursSegments.between6And8Hours.count} مندوب)
+                  </h3>
+                  {report.workHoursSegments.between6And8Hours.count > 0 ? (
+                    <MiniTable
+                      headers={['الكود', 'الاسم', 'المشرف', 'المنطقة', 'متوسط يومي', 'إجمالي ساعات', 'إجمالي أوردرات', 'أيام عمل']}
+                      rows={report.workHoursSegments.between6And8Hours.riders.map((r) => [
+                        r.code,
+                        r.name,
+                        `${r.supervisorName} (${r.supervisorCode})`,
+                        r.region,
+                        r.avgDailyHours,
+                        r.totalHours,
+                        r.totalOrders,
+                        r.workDays,
+                      ])}
+                    />
+                  ) : (
+                    <p className="text-sm text-[#64748B]">لا يوجد مناديب في هذه الفئة.</p>
+                  )}
+                </div>
+
+                {/* Above 8 Hours */}
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+                  <h3 className="text-lg font-semibold text-emerald-300 mb-3">
+                    🟢 8 ساعات/يوم فأكثر ({report.workHoursSegments.above8Hours.count} مندوب)
+                  </h3>
+                  {report.workHoursSegments.above8Hours.count > 0 ? (
+                    <MiniTable
+                      headers={['الكود', 'الاسم', 'المشرف', 'المنطقة', 'متوسط يومي', 'إجمالي ساعات', 'إجمالي أوردرات', 'أيام عمل']}
+                      rows={report.workHoursSegments.above8Hours.riders.map((r) => [
+                        r.code,
+                        r.name,
+                        `${r.supervisorName} (${r.supervisorCode})`,
+                        r.region,
+                        r.avgDailyHours,
+                        r.totalHours,
+                        r.totalOrders,
+                        r.workDays,
+                      ])}
+                    />
+                  ) : (
+                    <p className="text-sm text-[#64748B]">لا يوجد مناديب في هذه الفئة.</p>
+                  )}
+                </div>
+              </div>
+            </Section>
+
             <Section title={L.activityDistribution}>
               <div className="grid lg:grid-cols-2 gap-6">
                 <div className="h-72">

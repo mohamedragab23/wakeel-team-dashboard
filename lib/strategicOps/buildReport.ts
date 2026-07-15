@@ -369,6 +369,74 @@ export type StrategicOpsReport = {
     terminations: number;
     netChange: number;
   };
+  workHoursSegments: {
+    below4Hours: {
+      count: number;
+      riders: Array<{
+        code: string;
+        name: string;
+        supervisorCode: string;
+        supervisorName: string;
+        region: string;
+        avgDailyHours: number;
+        totalHours: number;
+        totalOrders: number;
+        workDays: number;
+      }>;
+    };
+    between4And6Hours: {
+      count: number;
+      riders: Array<{
+        code: string;
+        name: string;
+        supervisorCode: string;
+        supervisorName: string;
+        region: string;
+        avgDailyHours: number;
+        totalHours: number;
+        totalOrders: number;
+        workDays: number;
+      }>;
+    };
+    between6And8Hours: {
+      count: number;
+      riders: Array<{
+        code: string;
+        name: string;
+        supervisorCode: string;
+        supervisorName: string;
+        region: string;
+        avgDailyHours: number;
+        totalHours: number;
+        totalOrders: number;
+        workDays: number;
+      }>;
+    };
+    above8Hours: {
+      count: number;
+      riders: Array<{
+        code: string;
+        name: string;
+        supervisorCode: string;
+        supervisorName: string;
+        region: string;
+        avgDailyHours: number;
+        totalHours: number;
+        totalOrders: number;
+        workDays: number;
+      }>;
+    };
+  };
+  fleetStatistics: {
+    avgDailyActiveRiders: number;
+    avgDailyAbsentRiders: number;
+    activePercentage: number;
+    totalBreakMinutes: number;
+    avgBreakMinutesPerRider: number;
+    avgBreakMinutesPerDay: number;
+    avgWorkHoursPerRider: number;
+    avgWorkHoursPerActiveRider: number;
+  };
   growthOpportunities: {
     disabled: boolean;
     disabledReason?: string;
@@ -1738,7 +1806,71 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     netChange: newHires + reactivations - approvedResignations,
   };
 
-  const below4 = aggList.filter((a) => { const avg = operationalPeriodDays > 0 ? a.totalHours / operationalPeriodDays : 0; return avg > 0 && avg < 4; });
+  // ── Work Hours Segments (with detailed rider data) ──────────────────
+  const below4Aggs = aggList.filter((a) => {
+    const avg = operationalPeriodDays > 0 ? a.totalHours / operationalPeriodDays : 0;
+    return avg > 0 && avg < 4;
+  });
+  const between4And6Aggs = aggList.filter((a) => {
+    const avg = operationalPeriodDays > 0 ? a.totalHours / operationalPeriodDays : 0;
+    return avg >= 4 && avg < 6;
+  });
+  const between6And8Aggs = aggList.filter((a) => {
+    const avg = operationalPeriodDays > 0 ? a.totalHours / operationalPeriodDays : 0;
+    return avg >= 6 && avg < 8;
+  });
+  const above8Aggs = aggList.filter((a) => {
+    const avg = operationalPeriodDays > 0 ? a.totalHours / operationalPeriodDays : 0;
+    return avg >= 8;
+  });
+
+  const mapToSegmentRider = (agg: RiderAgg) => ({
+    code: agg.code,
+    name: agg.name,
+    supervisorCode: agg.supervisorCode,
+    supervisorName: agg.supervisorName,
+    region: agg.region,
+    avgDailyHours: operationalPeriodDays > 0 ? round2(agg.totalHours / operationalPeriodDays) : 0,
+    totalHours: round2(agg.totalHours),
+    totalOrders: agg.totalOrders,
+    workDays: agg.workDays,
+  });
+
+  const workHoursSegments = {
+    below4Hours: {
+      count: below4Aggs.length,
+      riders: below4Aggs.map(mapToSegmentRider),
+    },
+    between4And6Hours: {
+      count: between4And6Aggs.length,
+      riders: between4And6Aggs.map(mapToSegmentRider),
+    },
+    between6And8Hours: {
+      count: between6And8Aggs.length,
+      riders: between6And8Aggs.map(mapToSegmentRider),
+    },
+    above8Hours: {
+      count: above8Aggs.length,
+      riders: above8Aggs.map(mapToSegmentRider),
+    },
+  };
+
+  // ── Fleet Statistics (Basic Metrics Summary) ──────────────────────
+  const totalBreakMinutes = aggList.reduce((sum, agg) => sum + agg.totalBreakMinutes, 0);
+  const ridersWithBreaks = aggList.filter((a) => a.totalBreakMinutes > 0).length;
+  
+  const fleetStatistics = {
+    avgDailyActiveRiders: periodActiveRiders,
+    avgDailyAbsentRiders: fleetTalabat.noShowRiders,
+    activePercentage: pct(periodActiveRiders, totalRegistered),
+    totalBreakMinutes: round2(totalBreakMinutes),
+    avgBreakMinutesPerRider: aggList.length > 0 ? round2(totalBreakMinutes / aggList.length) : 0,
+    avgBreakMinutesPerDay: operationalPeriodDays > 0 ? round2(totalBreakMinutes / operationalPeriodDays) : 0,
+    avgWorkHoursPerRider: round2(hoursAnalysis.averageHoursPerRider),
+    avgWorkHoursPerActiveRider: round2(hoursAnalysis.averageHoursPerActiveRider),
+  };
+
+  const below4 = below4Aggs;
   const below6 = aggList.filter((a) => { const avg = operationalPeriodDays > 0 ? a.totalHours / operationalPeriodDays : 0; return avg > 0 && avg < 6; });
   const inactiveAggs = aggList.filter(isRiderInactive);
 
@@ -2134,6 +2266,8 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     topAbsentRiders,
     inactive3DaysPlus,
     delta,
+    workHoursSegments,
+    fleetStatistics,
     growthOpportunities,
     growthExpansion,
     hoursRoadmap,
