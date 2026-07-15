@@ -1,4 +1,4 @@
-import { getSheetData, appendSheetRows } from '@/lib/googleSheets';
+import { getSheetData, appendToSheet } from '@/lib/googleSheets';
 import type { RiderDailyComment, CommentCategory } from './types';
 
 const SHEET_NAME = 'rider_daily_comments';
@@ -169,7 +169,7 @@ export async function addRiderComment(
       now, // updatedAt
     ];
 
-    await appendSheetRows(SHEET_NAME, [newRow]);
+    await appendToSheet(SHEET_NAME, [newRow]);
 
     return { success: true };
   } catch (error) {
