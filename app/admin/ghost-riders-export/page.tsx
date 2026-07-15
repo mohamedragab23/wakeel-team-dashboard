@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Layout from '@/components/Layout';
-import { Button } from '@/components/Button';
+import Button from '@/components/ui-v2/Button';
 
 export default function GhostRidersExportPage() {
   const [startDate, setStartDate] = useState(
