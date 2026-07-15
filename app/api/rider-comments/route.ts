@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken } from '@/lib/jwt';
+import { verifyToken } from '@/lib/auth';
 import { addRiderComment, getSupervisorComments, getRiderComments } from '@/lib/riderComments/service';
 
 export const runtime = 'nodejs';
