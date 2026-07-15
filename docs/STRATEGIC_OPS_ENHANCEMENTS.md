@@ -5,6 +5,65 @@ This document describes the new features added to the Strategic Operations Cente
 
 ## New Features
 
+### 0. Fleet Statistics (الإحصائيات الأساسية للأسطول)
+**NEW** - Displays key fleet-wide metrics at a glance.
+
+**Metrics:**
+- **Average Daily Active Riders (المناديب النشطون)**: Average number of active riders per day (orders > 0 AND hours > 0)
+- **Average Daily Absent Riders (الطيارين الغائبون)**: Average number of absent riders per day (orders = 0 AND hours = 0)
+- **Active Percentage (نسبة النشطين)**: Percentage of active riders from total registered riders
+- **Total Break Minutes (إجمالي ساعات البريك)**: Total break time for the entire fleet in the selected period
+- **Average Break Minutes per Rider (متوسط البريك/مندوب)**: Average break minutes per rider across the period
+- **Average Break Minutes per Day (متوسط البريك/يوم)**: Average break minutes per day for the entire fleet
+- **Average Work Hours per Rider (متوسط ساعات العمل/مندوب)**: Average work hours per rider (all riders)
+- **Average Work Hours per Active Rider (متوسط ساعات العمل/مندوب نشط)**: Average work hours per active rider only
+
+**Data Source:** Google Sheet "البيانات اليومية" - Daily performance records
+
+**Use Case:** Quick overview of fleet-wide performance metrics to answer questions like:
+- How many riders are actively working each day on average?
+- What percentage of the fleet is absent?
+- How much break time is being taken?
+- What's the average productivity per rider?
+
+**UI Location:** Displayed immediately after the "Executive Summary" section.
+
+---
+
+### 0B. Work Hours Segments (تفصيل المناديب حسب شرائح ساعات العمل)
+**NEW** - Breaks down riders into 4 segments based on average daily work hours, with full rider details.
+
+**Segments:**
+1. **< 4 hours/day** 🔴 (Red - Critical)
+2. **4-6 hours/day** 🟡 (Amber - Needs Improvement)
+3. **6-8 hours/day** 🔵 (Cyan - Good)
+4. **8+ hours/day** 🟢 (Green - Excellent)
+
+**Fields for Each Rider:**
+- **Code (الكود)**: Rider code
+- **Name (الاسم)**: Rider name
+- **Supervisor (المشرف)**: Assigned supervisor
+- **Region (المنطقة)**: Operating region
+- **Average Daily Hours (متوسط يومي)**: Average hours per day
+- **Total Hours (إجمالي ساعات)**: Total hours in period
+- **Total Orders (إجمالي أوردرات)**: Total orders in period
+- **Work Days (أيام عمل)**: Number of days worked
+
+**Calculation:**
+- Average Daily Hours = Total Hours / Calendar Days in Period
+
+**Data Source:** Google Sheet "البيانات اليومية" - Daily performance records
+
+**Use Case:** 
+- Identify low-performing riders (< 4 hours) who need intervention
+- Target riders in 4-6 hour range for coaching to reach 8 hours
+- Recognize top performers (8+ hours)
+- Plan resource allocation and scheduling
+
+**UI Location:** Displayed after "Fleet Statistics" and before "Activity Distribution".
+
+---
+
 ### 1. Top Break Takers (أعلى 10 مناديب في الاستراحة)
 Displays the top 10 riders who take the most break time, helping identify riders who may need intervention.
 
