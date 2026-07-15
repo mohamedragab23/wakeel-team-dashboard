@@ -205,6 +205,52 @@ export async function getAbsenceReasonsSummary(
 }
 
 /**
+ * Get all comments for a date range (Admin only)
+ */
+export async function getAllComments(
+  startDate?: string,
+  endDate?: string
+): Promise<RiderDailyComment[]> {
+  try {
+    const sheet = await getSheetData(SHEET_NAME, false);
+    if (sheet.length < 2) return [];
+
+    const comments: RiderDailyComment[] = [];
+    
+    for (let i = 1; i < sheet.length; i++) {
+      const row = sheet[i];
+      if (!row || row.length < 10) continue;
+
+      const comment: RiderDailyComment = {
+        id: String(row[0] || ''),
+        riderCode: String(row[1] || ''),
+        riderName: String(row[2] || ''),
+        supervisorCode: String(row[3] || ''),
+        supervisorName: String(row[4] || ''),
+        date: String(row[5] || ''),
+        category: (row[6] as CommentCategory) || 'other',
+        expectedReturnDate: row[7] ? String(row[7]) : undefined,
+        estimatedReturnDays: row[8] ? Number(row[8]) : undefined,
+        notes: String(row[9] || ''),
+        createdAt: String(row[10] || ''),
+        updatedAt: String(row[11] || ''),
+      };
+
+      // Filter by date range if provided
+      if (startDate && comment.date < startDate) continue;
+      if (endDate && comment.date > endDate) continue;
+
+      comments.push(comment);
+    }
+
+    return comments.sort((a, b) => b.date.localeCompare(a.date));
+  } catch (error) {
+    console.error('[getAllComments] Error:', error);
+    return [];
+  }
+}
+
+/**
  * Get all comments for a date range
  */
 async function getCommentsForDateRange(
@@ -301,3 +347,100 @@ export async function getRidersExpectedToReturn(
     return [];
   }
 }
+
+/**
+ * Get comments summary for Strategic Ops integration
+ * Returns aggregated comment data for a date range
+ */
+export async function getCommentsSummaryForStrategicOps(
+  startDate: string,
+  endDate: string,
+  zone?: string
+): Promise<{
+  totalComments: number;
+  riderBreakdown: {
+    riderCode: string;
+    riderName: string;
+    totalComments: number;
+    mostFrequentCategory: CommentCategory;
+    categoryBreakdown: Record<CommentCategory, number>;
+  }[];
+  categoryBreakdown: Record<CommentCategory, number>;
+  expectedReturns: { riderCode: string; riderName: string; date: string }[];
+}> {
+  try {
+    const comments = await getAllComments(startDate, endDate);
+    
+    // Calculate totals
+    const categoryBreakdown: Record<CommentCategory, number> = {} as Record<CommentCategory, number>;
+    const riderMap = new Map<string, {
+      riderCode: string;
+      riderName: string;
+      totalComments: number;
+      categoryBreakdown: Record<CommentCategory, number>;
+    }>();
+
+    for (const comment of comments) {
+      // Category totals
+      categoryBreakdown[comment.category] = (categoryBreakdown[comment.category] || 0) + 1;
+
+      // Rider totals
+      if (!riderMap.has(comment.riderCode)) {
+        riderMap.set(comment.riderCode, {
+          riderCode: comment.riderCode,
+          riderName: comment.riderName,
+          totalComments: 0,
+          categoryBreakdown: {} as Record<CommentCategory, number>,
+        });
+      }
+
+      const riderData = riderMap.get(comment.riderCode)!;
+      riderData.totalComments += 1;
+      riderData.categoryBreakdown[comment.category] = (riderData.categoryBreakdown[comment.category] || 0) + 1;
+    }
+
+    // Calculate most frequent category for each rider
+    const riderBreakdown = Array.from(riderMap.values()).map((rider) => {
+      let maxCount = 0;
+      let mostFrequent: CommentCategory = 'other';
+      
+      for (const [category, count] of Object.entries(rider.categoryBreakdown)) {
+        if (count > maxCount) {
+          maxCount = count;
+          mostFrequent = category as CommentCategory;
+        }
+      }
+
+      return {
+        ...rider,
+        mostFrequentCategory: mostFrequent,
+      };
+    });
+
+    // Expected returns
+    const expectedReturns = comments
+      .filter((c) => c.expectedReturnDate && c.expectedReturnDate >= startDate)
+      .map((c) => ({
+        riderCode: c.riderCode,
+        riderName: c.riderName,
+        date: c.expectedReturnDate!,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    return {
+      totalComments: comments.length,
+      riderBreakdown,
+      categoryBreakdown,
+      expectedReturns,
+    };
+  } catch (error) {
+    console.error('[getCommentsSummaryForStrategicOps] Error:', error);
+    return {
+      totalComments: 0,
+      riderBreakdown: [],
+      categoryBreakdown: {} as Record<CommentCategory, number>,
+      expectedReturns: [],
+    };
+  }
+}
+

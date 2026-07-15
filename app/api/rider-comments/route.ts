@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { addRiderComment, getSupervisorComments, getRiderComments } from '@/lib/riderComments/service';
+import { addRiderComment, getSupervisorComments, getRiderComments, getAllComments } from '@/lib/riderComments/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
 
-    // If admin or requesting specific rider
+    // If admin requesting specific rider
     if (riderCode) {
       const comments = await getRiderComments(riderCode, startDate || undefined, endDate || undefined);
       return NextResponse.json({ comments });
@@ -46,6 +46,12 @@ export async function GET(request: NextRequest) {
         startDate || undefined,
         endDate || undefined
       );
+      return NextResponse.json({ comments });
+    }
+
+    // If admin without filters, get ALL comments
+    if (decoded.role === 'admin') {
+      const comments = await getAllComments(startDate || undefined, endDate || undefined);
       return NextResponse.json({ comments });
     }
 

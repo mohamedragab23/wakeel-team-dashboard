@@ -29,6 +29,7 @@ export type AdminFeatureKey =
   | 'live_riders'
   | 'ghost_riders_export'
   | 'rider_comments'
+  | 'rider_comments_dashboard'
   | 'missing_data_audit';
 
 const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
@@ -55,6 +56,7 @@ const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   live_riders: 'live_riders',
   ghost_riders_export: 'ghost_riders_export',
   rider_comments: 'rider_comments',
+  rider_comments_dashboard: 'rider_comments_dashboard',
   missing_data_audit: 'missing_data_audit',
 };
 
@@ -83,6 +85,7 @@ export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
   live_riders: 'العمليات المباشرة',
   ghost_riders_export: 'تصدير المناديب الأشباح',
   rider_comments: 'التعليقات اليومية',
+  rider_comments_dashboard: 'لوحة التعليقات اليومية',
   missing_data_audit: 'تدقيق البيانات الناقصة',
 };
 
@@ -111,6 +114,7 @@ export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
   'live_riders',
   'ghost_riders_export',
   'rider_comments',
+  'rider_comments_dashboard',
   'missing_data_audit',
 ];
 
@@ -131,6 +135,7 @@ export function getAdminMenuDefs(): AdminMenuDef[] {
     { href: '/admin/ghost-riders-export', label: 'المناديب الأشباح', icon: '🚨', feature: 'ghost_riders_export' },
     { href: '/admin/missing-data-audit', label: 'تدقيق البيانات الناقصة', icon: '📋', feature: 'missing_data_audit' },
     { href: '/rider-comments', label: 'التعليقات اليومية', icon: '💬', feature: 'rider_comments' },
+    { href: '/admin/rider-comments-dashboard', label: 'لوحة التعليقات (أدمن)', icon: '📊', feature: 'rider_comments_dashboard' },
     { href: '/admin/rider-strategic-profiles', label: 'إدارة بيانات المناديب', icon: '📋', feature: 'rider_strategic_profiles' },
     { href: '/admin/salary-config', label: 'إعدادات الرواتب', icon: '⚙️', feature: 'salary_config' },
     { href: '/admin/equipment-pricing', label: 'أسعار المعدات', icon: '🛠️', feature: 'equipment_pricing' },
