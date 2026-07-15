@@ -327,6 +327,48 @@ export type StrategicOpsReport = {
     riderLifetimeDisabledReason?: string;
     attritionTrend: Array<{ period: string; resignations: number }>;
   };
+  topBreakTakers: {
+    riders: Array<{
+      code: string;
+      name: string;
+      supervisorCode: string;
+      supervisorName: string;
+      region: string;
+      totalBreakMinutes: number;
+      totalHours: number;
+      avgDailyBreakMinutes: number;
+      workDays: number;
+    }>;
+  };
+  topAbsentRiders: {
+    riders: Array<{
+      code: string;
+      name: string;
+      supervisorCode: string;
+      supervisorName: string;
+      region: string;
+      absentDays: number;
+      totalDaysInPeriod: number;
+      absentPercent: number;
+    }>;
+  };
+  inactive3DaysPlus: {
+    riders: Array<{
+      code: string;
+      name: string;
+      supervisorCode: string;
+      supervisorName: string;
+      region: string;
+      inactiveDays: number;
+      lastActivityDate: string | null;
+    }>;
+  };
+  delta: {
+    newHires: number;
+    reactivations: number;
+    terminations: number;
+    netChange: number;
+  };
   growthOpportunities: {
     disabled: boolean;
     disabledReason?: string;
@@ -1578,6 +1620,124 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     attritionTrend: Array.from(trendMap.entries()).map(([period, resignations]) => ({ period, resignations })).sort((a, b) => a.period.localeCompare(b.period)),
   };
 
+  // ── Top Break Takers ──────────────────────────────────────────────
+  const topBreakTakers = {
+    riders: [...aggList]
+      .filter((agg) => agg.totalBreakMinutes > 0)
+      .sort((a, b) => b.totalBreakMinutes - a.totalBreakMinutes)
+      .slice(0, 10)
+      .map((agg) => ({
+        code: agg.code,
+        name: agg.name,
+        supervisorCode: agg.supervisorCode,
+        supervisorName: agg.supervisorName,
+        region: agg.region,
+        totalBreakMinutes: agg.totalBreakMinutes,
+        totalHours: round2(agg.totalHours),
+        avgDailyBreakMinutes: operationalPeriodDays > 0 ? round2(agg.totalBreakMinutes / operationalPeriodDays) : 0,
+        workDays: agg.workDays,
+      })),
+  };
+
+  // ── Top Absent Riders ──────────────────────────────────────────────
+  const dailyAbsenceByRider = new Map<string, Set<string>>();
+  for (const dateStr of calendarDates) {
+    const activeOnDate = new Set(
+      performance.filter((p) => p.date === dateStr && (p.hours > 0 || p.orders > 0)).map((p) => normalizeRiderCodeForPerformance(p.riderCode))
+    );
+    for (const agg of aggList) {
+      const norm = normalizeRiderCodeForPerformance(agg.code);
+      if (norm && !activeOnDate.has(norm)) {
+        if (!dailyAbsenceByRider.has(norm)) dailyAbsenceByRider.set(norm, new Set());
+        dailyAbsenceByRider.get(norm)!.add(dateStr);
+      }
+    }
+  }
+  const topAbsentRiders = {
+    riders: [...aggList]
+      .map((agg) => {
+        const norm = normalizeRiderCodeForPerformance(agg.code);
+        const absentDays = norm ? dailyAbsenceByRider.get(norm)?.size ?? 0 : 0;
+        return {
+          code: agg.code,
+          name: agg.name,
+          supervisorCode: agg.supervisorCode,
+          supervisorName: agg.supervisorName,
+          region: agg.region,
+          absentDays,
+          totalDaysInPeriod: calendarDates.length,
+          absentPercent: calendarDates.length > 0 ? round2((absentDays / calendarDates.length) * 100) : 0,
+        };
+      })
+      .filter((r) => r.absentDays > 0)
+      .sort((a, b) => b.absentDays - a.absentDays)
+      .slice(0, 10),
+  };
+
+  // ── Inactive 3+ Days ──────────────────────────────────────────────
+  const inactive3DaysPlus = {
+    riders: [...aggList]
+      .map((agg) => {
+        const norm = normalizeRiderCodeForPerformance(agg.code);
+        const absentDays = norm ? dailyAbsenceByRider.get(norm)?.size ?? 0 : 0;
+        const lastActivityDates = performance
+          .filter((p) => normalizeRiderCodeForPerformance(p.riderCode) === norm && (p.hours > 0 || p.orders > 0))
+          .map((p) => p.date)
+          .sort();
+        const lastActivityDate = lastActivityDates.length > 0 ? lastActivityDates[lastActivityDates.length - 1] : null;
+        return {
+          code: agg.code,
+          name: agg.name,
+          supervisorCode: agg.supervisorCode,
+          supervisorName: agg.supervisorName,
+          region: agg.region,
+          inactiveDays: absentDays,
+          lastActivityDate,
+        };
+      })
+      .filter((r) => r.inactiveDays >= 3)
+      .sort((a, b) => b.inactiveDays - a.inactiveDays),
+  };
+
+  // ── Delta Calculation ──────────────────────────────────────────────
+  // We need to read assignment, reactivation, and termination sheets to calculate delta
+  const SHEET_ASSIGNMENT = 'طلبات التعيين';
+  const SHEET_REACTIVATION = 'طلبات إعادة التفعيل';
+  
+  const [assignmentSheet, reactivationSheet] = await Promise.all([
+    getSheetData(SHEET_ASSIGNMENT, false).catch(() => [] as unknown[][]),
+    getSheetData(SHEET_REACTIVATION, false).catch(() => [] as unknown[][]),
+  ]);
+
+  // Count assignments in period
+  let newHires = 0;
+  for (let i = 1; i < assignmentSheet.length; i++) {
+    const row = assignmentSheet[i];
+    if (!row || row.length < 8) continue;
+    const approvalDate = parseDailySheetDate(row[7]) ?? parseDailySheetDate(row[6]);
+    if (inDateRange(approvalDate, startDate, endDate)) {
+      newHires++;
+    }
+  }
+
+  // Count reactivations in period
+  let reactivations = 0;
+  for (let i = 1; i < reactivationSheet.length; i++) {
+    const row = reactivationSheet[i];
+    if (!row || row.length < 8) continue;
+    const approvalDate = parseDailySheetDate(row[7]) ?? parseDailySheetDate(row[6]);
+    if (inDateRange(approvalDate, startDate, endDate)) {
+      reactivations++;
+    }
+  }
+
+  const delta = {
+    newHires,
+    reactivations,
+    terminations: approvedResignations,
+    netChange: newHires + reactivations - approvedResignations,
+  };
+
   const below4 = aggList.filter((a) => { const avg = operationalPeriodDays > 0 ? a.totalHours / operationalPeriodDays : 0; return avg > 0 && avg < 4; });
   const below6 = aggList.filter((a) => { const avg = operationalPeriodDays > 0 ? a.totalHours / operationalPeriodDays : 0; return avg > 0 && avg < 6; });
   const inactiveAggs = aggList.filter(isRiderInactive);
@@ -1970,6 +2130,10 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     supervisorRisk,
     recruitment,
     attrition,
+    topBreakTakers,
+    topAbsentRiders,
+    inactive3DaysPlus,
+    delta,
     growthOpportunities,
     growthExpansion,
     hoursRoadmap,

@@ -1943,6 +1943,105 @@ export default function StrategicOpsCenterPage() {
               </div>
             </Section>
 
+            {/* ── Top Break Takers ──────────────────────────────────────────────── */}
+            <Section title="أعلى 10 مناديب في الاستراحة">
+              {report.topBreakTakers.riders.length > 0 ? (
+                <div className="space-y-3">
+                  <MiniTable
+                    headers={['الكود', 'الاسم', 'المشرف', 'المنطقة', 'إجمالي الاستراحة (دقيقة)', 'متوسط يومي (دقيقة)', 'إجمالي الساعات', 'أيام العمل']}
+                    rows={report.topBreakTakers.riders.map((r) => [
+                      r.code,
+                      r.name,
+                      `${r.supervisorName} (${r.supervisorCode})`,
+                      r.region,
+                      r.totalBreakMinutes,
+                      r.avgDailyBreakMinutes,
+                      r.totalHours,
+                      r.workDays,
+                    ])}
+                  />
+                </div>
+              ) : (
+                <p className="text-sm text-[#64748B]">لا توجد بيانات عن الاستراحات.</p>
+              )}
+            </Section>
+
+            {/* ── Top Absent Riders ──────────────────────────────────────────────── */}
+            <Section title="أعلى 10 مناديب في الغياب">
+              {report.topAbsentRiders.riders.length > 0 ? (
+                <div className="space-y-3">
+                  <MiniTable
+                    headers={['الكود', 'الاسم', 'المشرف', 'المنطقة', 'أيام الغياب', 'إجمالي الأيام', 'نسبة الغياب %']}
+                    rows={report.topAbsentRiders.riders.map((r) => [
+                      r.code,
+                      r.name,
+                      `${r.supervisorName} (${r.supervisorCode})`,
+                      r.region,
+                      r.absentDays,
+                      r.totalDaysInPeriod,
+                      `${r.absentPercent}%`,
+                    ])}
+                  />
+                </div>
+              ) : (
+                <p className="text-sm text-[#64748B]">لا توجد بيانات عن الغياب.</p>
+              )}
+            </Section>
+
+            {/* ── Inactive 3+ Days ──────────────────────────────────────────────── */}
+            <Section title="المناديب غير النشطين لـ 3 أيام فأكثر">
+              {report.inactive3DaysPlus.riders.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-amber-300 mb-3">
+                    ⚠ يوجد {report.inactive3DaysPlus.riders.length} طيار غير نشط لمدة 3 أيام أو أكثر (لا أوردرات ولا ساعات عمل).
+                  </p>
+                  <MiniTable
+                    headers={['الكود', 'الاسم', 'المشرف', 'المنطقة', 'أيام عدم النشاط', 'آخر نشاط']}
+                    rows={report.inactive3DaysPlus.riders.map((r) => [
+                      r.code,
+                      r.name,
+                      `${r.supervisorName} (${r.supervisorCode})`,
+                      r.region,
+                      r.inactiveDays,
+                      r.lastActivityDate ?? 'لا يوجد نشاط',
+                    ])}
+                  />
+                </div>
+              ) : (
+                <p className="text-sm text-emerald-300">✓ جميع المناديب نشطون.</p>
+              )}
+            </Section>
+
+            {/* ── Delta Calculation ──────────────────────────────────────────────── */}
+            <Section title="Delta (التغير الصافي في عدد المناديب)">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <StatCard label="تعيينات جديدة" value={report.delta.newHires} />
+                <StatCard label="إعادة تفعيل" value={report.delta.reactivations} />
+                <StatCard label="إقالات" value={report.delta.terminations} />
+                <StatCard
+                  label="Delta (التغير الصافي)"
+                  value={report.delta.netChange}
+                  sub={report.delta.netChange >= 0 ? 'إيجابي ✓' : 'سلبي ⚠'}
+                />
+              </div>
+              <div className="mt-4 p-4 rounded-xl border border-white/10 bg-white/5">
+                <p className="text-sm text-[#CBD5E1]">
+                  <span className="font-semibold text-[#94A3B8]">الحساب: </span>
+                  {report.delta.newHires} (تعيينات) + {report.delta.reactivations} (إعادة تفعيل) - {report.delta.terminations} (إقالات) = {report.delta.netChange}
+                </p>
+                {report.delta.netChange < 0 && (
+                  <p className="text-sm text-amber-300 mt-2">
+                    ⚠ التغير الصافي سلبي — أنت تخسر مناديب أكثر مما تضيف. يُنصح بزيادة التعيينات وإعادة التفعيل.
+                  </p>
+                )}
+                {report.delta.netChange > 0 && (
+                  <p className="text-sm text-emerald-300 mt-2">
+                    ✓ التغير الصافي إيجابي — الأسطول ينمو. استمر في هذا الاتجاه.
+                  </p>
+                )}
+              </div>
+            </Section>
+
             <Section title={L.hoursAnalysis}>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 <StatCard label="متوسط الساعات اليومية (الأسطول)" value={report.hoursAnalysis.averageDailyHours} sub={`فترة: ${report.hoursAnalysis.totalHours}`} />
