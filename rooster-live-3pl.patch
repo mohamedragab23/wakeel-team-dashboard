@@ -1,0 +1,1293 @@
+diff --git a/.env.example b/.env.example
+index 8415aca..db63f24 100644
+--- a/.env.example
++++ b/.env.example
+@@ -49,6 +49,16 @@ CRON_SECRET=
+ # TICKETING_S3_ENDPOINT=
+ # TICKETING_S3_PREFIX=ticketing
+ 
++# Talabat Live 3PL (rooster-live) — required: shared Redis snapshot store.
++# Reuses the Upstash Redis vars above (UPSTASH_REDIS_REST_URL/_TOKEN or Vercel KV_*).
++# ROOSTER_LIVE_CITY_ID=200                # falls back to ROOSTER_CITY_ID if unset
++# ROOSTER_LIVE_URL_TEMPLATE=https://eg.me.logisticsbackoffice.com/api/rider-live-operations/v1/external/city/{city_id}/riders
++# ROOSTER_LIVE_HEADERS_JSON={"Cookie":"CF_Authorization=...; session=..."}
++# ^ Optional: if unset, falls back to ROOSTER_EXPORT_HEADERS_JSON (env or cron_config sheet) —
++#   same Cloudflare Access session already used by the historical rooster export.
++# See docs/ROOSTER_LIVE.md for the external minute-scheduler setup.
++
++
+ # Auto-write when Tableau data looks healthy (default true)
+ PERFORMANCE_SYNC_AUTO_APPLY_GOOD=true
+ PERFORMANCE_SYNC_ZERO_RATIO_THRESHOLD=0.9
+diff --git a/app/api/cron/rooster-live-sync/route.ts b/app/api/cron/rooster-live-sync/route.ts
+new file mode 100644
+index 0000000..fc48591
+--- /dev/null
++++ b/app/api/cron/rooster-live-sync/route.ts
+@@ -0,0 +1,24 @@
++import { NextRequest, NextResponse } from 'next/server';
++import { isCronAuthorized } from '@/lib/cronAuth';
++import { runRoosterLiveSync } from '@/lib/roosterLive/syncService';
++import { logStructured } from '@/lib/requestTrace';
++
++export const dynamic = 'force-dynamic';
++
++/**
++ * Triggered every ~60s by an EXTERNAL scheduler (cron-job.org / GitHub
++ * Actions / QStash) — Vercel Cron cannot reliably guarantee 60s resolution,
++ * so this route is intentionally not (only) wired into vercel.json.
++ *
++ * Auth: identical mechanism to the existing crons (`lib/cronAuth.ts`,
++ * `CRON_SECRET`) — no new auth logic introduced.
++ */
++export async function GET(req: NextRequest) {
++  if (!isCronAuthorized(req)) {
++    logStructured('warn', 'cron_unauthorized', { route: 'rooster-live-sync' });
++    return NextResponse.json({ success: false, error: 'Unauthorized cron' }, { status: 401 });
++  }
++
++  const result = await runRoosterLiveSync();
++  return NextResponse.json(result, { status: result.success ? 200 : 502 });
++}
+diff --git a/app/api/live-riders/route.ts b/app/api/live-riders/route.ts
+new file mode 100644
+index 0000000..26d88ef
+--- /dev/null
++++ b/app/api/live-riders/route.ts
+@@ -0,0 +1,169 @@
++/**
++ * Live 3PL read API. Supervisors and the dashboard NEVER call Talabat
++ * directly — this route only ever reads the shared Redis snapshot written
++ * by `app/api/cron/rooster-live-sync`.
++ *
++ * Auth/scoping intentionally mirrors `app/api/riders/route.ts` exactly:
++ * same token extraction, same admin-zone-scoping helpers, same
++ * `getSupervisorRiders()` call — nothing new invented here.
++ */
++import { NextRequest, NextResponse } from 'next/server';
++import { extractBearerToken } from '@/lib/requestAuth';
++import { verifyToken } from '@/lib/auth';
++import { getSupervisorRiders, getAllAssignedRiders } from '@/lib/dataService';
++import { parseAdminAllowedZonesList } from '@/lib/zones';
++import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
++import { normalizeRiderCodeForPerformance } from '@/lib/riderCodeUtils';
++import { getLiveRidersSnapshot, isRoosterLiveStoreReady, STALE_AFTER_MS } from '@/lib/roosterLive/store';
++import { getRoosterLiveCityId } from '@/lib/roosterLive/tokenProvider';
++import type {
++  LiveRider,
++  LiveRiderWithAssignment,
++  LiveRidersApiResponse,
++  LiveRidersDistributionBucket,
++  LiveRidersKpis,
++} from '@/lib/roosterLive/types';
++
++export const dynamic = 'force-dynamic';
++
++const WALLET_ALERT_THRESHOLD = 0; // negative or zero wallet balance counts as an alert
++
++function buildDistribution(riders: LiveRiderWithAssignment[], keyOf: (r: LiveRiderWithAssignment) => string, labels: Record<string, string>): LiveRidersDistributionBucket[] {
++  const counts = new Map<string, number>();
++  for (const r of riders) {
++    const key = keyOf(r);
++    counts.set(key, (counts.get(key) || 0) + 1);
++  }
++  return Array.from(counts.entries())
++    .map(([key, count]) => ({ key, label: labels[key] || key, count }))
++    .sort((a, b) => b.count - a.count);
++}
++
++function computeKpis(riders: LiveRiderWithAssignment[]): LiveRidersKpis {
++  return riders.reduce<LiveRidersKpis>(
++    (acc, r) => {
++      acc.total += 1;
++      if (r.statusBucket === 'online') acc.online += 1;
++      else if (r.statusBucket === 'offline') acc.offline += 1;
++      else if (r.statusBucket === 'busy') acc.busy += 1;
++      else if (r.statusBucket === 'on_break') acc.onBreak += 1;
++      if (r.statusBucket === 'late' || r.lateTimeSeconds > 0) acc.late += 1;
++      if (r.walletBalance <= WALLET_ALERT_THRESHOLD) acc.walletAlerts += 1;
++      return acc;
++    },
++    { total: 0, online: 0, offline: 0, busy: 0, onBreak: 0, late: 0, walletAlerts: 0 }
++  );
++}
++
++const STATUS_LABELS: Record<string, string> = {
++  online: 'متصل',
++  busy: 'مشغول',
++  on_break: 'في استراحة',
++  late: 'متأخر',
++  offline: 'غير متصل',
++  unknown: 'غير معروف',
++};
++
++export async function GET(request: NextRequest) {
++  try {
++    const token = extractBearerToken(request);
++    if (!token) {
++      return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
++    }
++    const decoded = verifyToken(token);
++    if (!decoded) {
++      return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
++    }
++
++    if (!isRoosterLiveStoreReady()) {
++      return NextResponse.json(
++        { success: false, error: 'خدمة العمليات المباشرة غير مُفعّلة بعد (Redis غير مُهيأ).' },
++        { status: 503 }
++      );
++    }
++
++    // Scope to this viewer's riders — identical logic to /api/riders.
++    let internalRiders =
++      decoded.role === 'admin' ? await getAllAssignedRiders(true) : await getSupervisorRiders(decoded.code, true);
++
++    if (decoded.role === 'admin') {
++      const allowedSup = await getSupervisorCodesInAdminDataScope(
++        decoded as Parameters<typeof getSupervisorCodesInAdminDataScope>[0]
++      );
++      if (allowedSup) {
++        internalRiders = internalRiders.filter((r) => allowedSup.has(String(r.supervisorCode ?? '').trim()));
++      } else {
++        const zones = parseAdminAllowedZonesList((decoded as { dataZone?: string }).dataZone);
++        if (zones.length > 0) {
++          const allow = new Set<string>(zones);
++          internalRiders = internalRiders.filter((r) => allow.has((r.region || '').trim()));
++        }
++      }
++    }
++
++    const byNormalizedCode = new Map<string, (typeof internalRiders)[number]>();
++    for (const r of internalRiders) {
++      byNormalizedCode.set(normalizeRiderCodeForPerformance(r.code), r);
++    }
++    const allowedNormalizedCodes = new Set(byNormalizedCode.keys());
++
++    const cityId = getRoosterLiveCityId();
++    const snapshot = await getLiveRidersSnapshot(cityId);
++
++    const liveByNormalizedId = new Map<string, LiveRider>();
++    for (const lr of snapshot?.riders ?? []) {
++      liveByNormalizedId.set(normalizeRiderCodeForPerformance(lr.riderId), lr);
++    }
++
++    // Only riders assigned to this viewer are ever returned — riders present
++    // in the Talabat snapshot but not in this viewer's scope are dropped here.
++    const scoped: LiveRiderWithAssignment[] = [];
++    for (const normCode of allowedNormalizedCodes) {
++      const internal = byNormalizedCode.get(normCode)!;
++      const live = liveByNormalizedId.get(normCode);
++      if (!live) continue; // rider assigned but not currently present in the live feed (e.g. not logged into Rooster today)
++      scoped.push({
++        ...live,
++        supervisorCode: internal.supervisorCode || null,
++        supervisorName: internal.supervisorName || null,
++        unmapped: false,
++      });
++    }
++
++    const kpis = computeKpis(scoped);
++    const distributions = {
++      status: buildDistribution(scoped, (r) => r.statusBucket, STATUS_LABELS),
++      wallet: buildDistribution(
++        scoped,
++        (r) => (r.walletBalance <= WALLET_ALERT_THRESHOLD ? 'alert' : r.walletBalance < 200 ? 'low' : 'ok'),
++        { alert: 'تنبيه رصيد', low: 'رصيد منخفض', ok: 'رصيد جيد' }
++      ),
++      breaks: buildDistribution(scoped, (r) => (r.breaksCount > 0 ? 'has_breaks' : 'no_breaks'), {
++        has_breaks: 'أخذ استراحة',
++        no_breaks: 'بدون استراحة',
++      }),
++      late: buildDistribution(scoped, (r) => (r.lateTimeSeconds > 0 ? 'late' : 'on_time'), {
++        late: 'متأخر',
++        on_time: 'في الوقت',
++      }),
++    };
++
++    const lastSyncAt = snapshot?.lastSyncAt ?? null;
++    const ageMs = lastSyncAt ? Date.now() - new Date(lastSyncAt).getTime() : null;
++    const stale = ageMs === null ? true : ageMs > STALE_AFTER_MS;
++
++    const response: LiveRidersApiResponse = {
++      success: true,
++      data: scoped,
++      kpis,
++      distributions,
++      lastSyncAt,
++      ageMs,
++      stale,
++    };
++    return NextResponse.json(response);
++  } catch (error: any) {
++    console.error('Get live riders error:', error);
++    return NextResponse.json({ success: false, error: error.message || 'حدث خطأ' }, { status: 500 });
++  }
++}
+diff --git a/app/live-riders/page.tsx b/app/live-riders/page.tsx
+new file mode 100644
+index 0000000..a90b95d
+--- /dev/null
++++ b/app/live-riders/page.tsx
+@@ -0,0 +1,161 @@
++'use client';
++
++import { useMemo, useState } from 'react';
++import { useQuery } from '@tanstack/react-query';
++import Layout from '@/components/Layout';
++import Card from '@/components/ui-v2/Card';
++import Badge from '@/components/ui-v2/Badge';
++import { authFetch } from '@/lib/authFetch';
++import LiveRidersKpiCards from '@/components/liveRiders/LiveRidersKpiCards';
++import LiveRidersDonut from '@/components/liveRiders/LiveRidersDonut';
++import LiveRidersTable from '@/components/liveRiders/LiveRidersTable';
++import LiveRiderDrawer from '@/components/liveRiders/LiveRiderDrawer';
++import type { LiveRidersApiResponse, LiveRiderStatusBucket, LiveRiderWithAssignment } from '@/lib/roosterLive/types';
++
++const REFRESH_INTERVAL_MS = 60_000;
++
++const STATUS_FILTER_OPTIONS: { value: LiveRiderStatusBucket | 'all'; label: string }[] = [
++  { value: 'all', label: 'كل الحالات' },
++  { value: 'online', label: 'متصل' },
++  { value: 'busy', label: 'مشغول' },
++  { value: 'on_break', label: 'استراحة' },
++  { value: 'late', label: 'متأخر' },
++  { value: 'offline', label: 'غير متصل' },
++];
++
++async function fetchLiveRiders(): Promise<LiveRidersApiResponse> {
++  const res = await authFetch('/api/live-riders');
++  const json = await res.json();
++  if (!res.ok || !json.success) {
++    throw new Error(json.error || 'تعذر تحميل بيانات العمليات المباشرة');
++  }
++  return json as LiveRidersApiResponse;
++}
++
++export default function LiveRidersPage() {
++  const [search, setSearch] = useState('');
++  const [statusFilter, setStatusFilter] = useState<LiveRiderStatusBucket | 'all'>('all');
++  const [sortKey, setSortKey] = useState<'name' | 'wallet' | 'late' | 'breaks'>('name');
++  const [selectedRider, setSelectedRider] = useState<LiveRiderWithAssignment | null>(null);
++
++  const { data, isLoading, isError, error, dataUpdatedAt, isFetching } = useQuery({
++    queryKey: ['live-riders'],
++    queryFn: fetchLiveRiders,
++    refetchInterval: REFRESH_INTERVAL_MS,
++    refetchIntervalInBackground: true,
++    staleTime: REFRESH_INTERVAL_MS - 5_000,
++    retry: 1,
++  });
++
++  const filteredRiders = useMemo(() => {
++    const all = data?.data ?? [];
++    const term = search.trim().toLowerCase();
++    let rows = all.filter((r) => {
++      if (statusFilter !== 'all' && r.statusBucket !== statusFilter) return false;
++      if (!term) return true;
++      return r.riderName.toLowerCase().includes(term) || r.riderId.toLowerCase().includes(term);
++    });
++
++    rows = [...rows].sort((a, b) => {
++      switch (sortKey) {
++        case 'wallet':
++          return a.walletBalance - b.walletBalance;
++        case 'late':
++          return b.lateTimeSeconds - a.lateTimeSeconds;
++        case 'breaks':
++          return b.breaksCount - a.breaksCount;
++        default:
++          return a.riderName.localeCompare(b.riderName, 'ar');
++      }
++    });
++    return rows;
++  }, [data, search, statusFilter, sortKey]);
++
++  const secondsSinceRefresh = Math.max(0, Math.round((Date.now() - dataUpdatedAt) / 1000));
++
++  return (
++    <Layout>
++      <div className="flex flex-col gap-5">
++        <div className="flex flex-wrap items-center justify-between gap-3">
++          <div>
++            <h1 className="text-xl font-bold text-[#EAF0FF]">العمليات المباشرة — Live 3PL</h1>
++            <p className="text-sm text-[rgba(234,240,255,0.6)] mt-1">بيانات مباشرة من طلبات، تُحدَّث تلقائياً كل دقيقة تقريباً</p>
++          </div>
++          <div className="flex items-center gap-2 text-xs text-[rgba(234,240,255,0.6)]">
++            {isFetching && <Badge variant="info">جارِ التحديث…</Badge>}
++            {data?.stale && !isFetching && <Badge variant="warning">تحديث متأخر</Badge>}
++            {data?.lastSyncAt && (
++              <span>آخر مزامنة: {new Date(data.lastSyncAt).toLocaleTimeString('ar-EG')}</span>
++            )}
++            <span>· آخر عرض منذ {secondsSinceRefresh} ثانية</span>
++          </div>
++        </div>
++
++        {isLoading && (
++          <Card>
++            <div className="py-10 text-center text-[rgba(234,240,255,0.6)]">جارِ تحميل بيانات العمليات المباشرة…</div>
++          </Card>
++        )}
++
++        {isError && !isLoading && (
++          <Card>
++            <div className="py-10 text-center text-[#FB7185]">
++              {(error as Error)?.message || 'حدث خطأ أثناء تحميل البيانات'}
++            </div>
++          </Card>
++        )}
++
++        {!isLoading && !isError && data && (
++          <>
++            <LiveRidersKpiCards kpis={data.kpis} loading={isFetching && !data} />
++
++            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
++              <LiveRidersDonut title="توزيع الحالة" data={data.distributions.status} />
++              <LiveRidersDonut title="توزيع الرصيد" data={data.distributions.wallet} />
++              <LiveRidersDonut title="توزيع الاستراحات" data={data.distributions.breaks} />
++              <LiveRidersDonut title="توزيع التأخير" data={data.distributions.late} />
++            </div>
++
++            <Card>
++              <div className="flex flex-wrap items-center gap-3 mb-4">
++                <input
++                  type="text"
++                  placeholder="بحث بالاسم أو الكود…"
++                  value={search}
++                  onChange={(e) => setSearch(e.target.value)}
++                  className="flex-1 min-w-[200px] rounded-lg border border-[rgba(255,255,255,0.10)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-sm text-[#EAF0FF] placeholder:text-[rgba(234,240,255,0.4)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,245,255,0.35)]"
++                />
++                <select
++                  value={statusFilter}
++                  onChange={(e) => setStatusFilter(e.target.value as LiveRiderStatusBucket | 'all')}
++                  className="rounded-lg border border-[rgba(255,255,255,0.10)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-sm text-[#EAF0FF] focus:outline-none focus:ring-2 focus:ring-[rgba(0,245,255,0.35)]"
++                >
++                  {STATUS_FILTER_OPTIONS.map((opt) => (
++                    <option key={opt.value} value={opt.value} className="bg-[#0f1524]">
++                      {opt.label}
++                    </option>
++                  ))}
++                </select>
++                <select
++                  value={sortKey}
++                  onChange={(e) => setSortKey(e.target.value as typeof sortKey)}
++                  className="rounded-lg border border-[rgba(255,255,255,0.10)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-sm text-[#EAF0FF] focus:outline-none focus:ring-2 focus:ring-[rgba(0,245,255,0.35)]"
++                >
++                  <option value="name" className="bg-[#0f1524]">ترتيب: الاسم</option>
++                  <option value="wallet" className="bg-[#0f1524]">ترتيب: الرصيد (الأقل أولاً)</option>
++                  <option value="late" className="bg-[#0f1524]">ترتيب: التأخير (الأعلى أولاً)</option>
++                  <option value="breaks" className="bg-[#0f1524]">ترتيب: الاستراحات (الأعلى أولاً)</option>
++                </select>
++                <span className="text-xs text-[rgba(234,240,255,0.55)]">{filteredRiders.length} مندوب</span>
++              </div>
++
++              <LiveRidersTable riders={filteredRiders} onSelect={setSelectedRider} />
++            </Card>
++          </>
++        )}
++      </div>
++
++      <LiveRiderDrawer rider={selectedRider} onClose={() => setSelectedRider(null)} />
++    </Layout>
++  );
++}
+diff --git a/components/Layout.tsx b/components/Layout.tsx
+index 3d96f53..b28de6b 100644
+--- a/components/Layout.tsx
++++ b/components/Layout.tsx
+@@ -133,6 +133,7 @@ export default function Layout({ children }: LayoutProps) {
+       // Supervisor menu - Reports tab removed as per requirements
+       return [
+         { href: '/dashboard', label: 'لوحة التحكم', icon: '📊' },
++        { href: '/live-riders', label: 'العمليات المباشرة', icon: '📡' },
+         { href: '/riders', label: 'المناديب', icon: '👥' },
+         { href: '/equipment-delivery', label: 'تسليم معدات', icon: '📤' },
+         { href: '/equipment-return', label: 'استرجاع معدات', icon: '📥' },
+diff --git a/components/liveRiders/LiveRiderDrawer.tsx b/components/liveRiders/LiveRiderDrawer.tsx
+new file mode 100644
+index 0000000..04875aa
+--- /dev/null
++++ b/components/liveRiders/LiveRiderDrawer.tsx
+@@ -0,0 +1,66 @@
++'use client';
++
++import AccessibleModal from '@/components/ui-v2/AccessibleModal';
++import LiveStatusBadge from '@/components/liveRiders/LiveStatusBadge';
++import type { LiveRiderWithAssignment } from '@/lib/roosterLive/types';
++
++function formatDuration(totalSeconds: number): string {
++  if (!totalSeconds) return '00:00:00';
++  const h = Math.floor(totalSeconds / 3600);
++  const m = Math.floor((totalSeconds % 3600) / 60);
++  const s = Math.floor(totalSeconds % 60);
++  return [h, m, s].map((n) => String(n).padStart(2, '0')).join(':');
++}
++
++function Row({ label, value }: { label: string; value: React.ReactNode }) {
++  return (
++    <div className="flex items-center justify-between py-2 border-b border-[rgba(255,255,255,0.06)] last:border-0">
++      <span className="text-sm text-[rgba(234,240,255,0.65)]">{label}</span>
++      <span className="text-sm font-semibold text-[#EAF0FF]">{value}</span>
++    </div>
++  );
++}
++
++export default function LiveRiderDrawer({
++  rider,
++  onClose,
++}: {
++  rider: LiveRiderWithAssignment | null;
++  onClose: () => void;
++}) {
++  return (
++    <AccessibleModal
++      open={!!rider}
++      onClose={onClose}
++      title={rider?.riderName || 'تفاصيل المندوب'}
++      description={rider ? `كود المندوب: ${rider.riderId}` : undefined}
++      maxWidthClass="max-w-md"
++    >
++      {rider && (
++        <div className="flex flex-col">
++          <div className="flex items-center justify-between mb-3">
++            <LiveStatusBadge status={rider.statusBucket} />
++            <span className="text-xs text-[rgba(234,240,255,0.55)]">{rider.riderState}</span>
++          </div>
++
++          <Row label="المشرف" value={rider.supervisorName || '—'} />
++          <Row label="رصيد المحفظة" value={`${rider.walletBalance.toLocaleString('ar-EG')} ج.م`} />
++          <Row label="الجلسة الحالية" value={rider.currentSessionLabel || '—'} />
++          <Row label="وقت العمل" value={rider.timeWorkedLabel || '—'} />
++          <Row label="عدد الاستراحات" value={rider.breaksCount} />
++          <Row label="وقت الاستراحة" value={formatDuration(rider.breakTimeSeconds)} />
++          <Row label="وقت التأخير" value={formatDuration(rider.lateTimeSeconds)} />
++          {rider.acceptanceRate !== null && <Row label="نسبة القبول" value={`${rider.acceptanceRate}%`} />}
++          {rider.performance !== null && <Row label="الأداء (UTR)" value={String(rider.performance)} />}
++          {rider.ordersToday !== null && <Row label="عدد الطلبات" value={rider.ordersToday} />}
++          {rider.vehicle && <Row label="نوع المركبة" value={rider.vehicle} />}
++          {rider.zone && <Row label="المنطقة" value={rider.zone} />}
++
++          <div className="mt-4 pt-3 border-t border-[rgba(255,255,255,0.08)] text-xs text-[rgba(234,240,255,0.5)]">
++            آخر تحديث: {new Date(rider.lastSyncAt).toLocaleTimeString('ar-EG')}
++          </div>
++        </div>
++      )}
++    </AccessibleModal>
++  );
++}
+diff --git a/components/liveRiders/LiveRidersDonut.tsx b/components/liveRiders/LiveRidersDonut.tsx
+new file mode 100644
+index 0000000..97ff3ba
+--- /dev/null
++++ b/components/liveRiders/LiveRidersDonut.tsx
+@@ -0,0 +1,66 @@
++'use client';
++
++import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
++import Card from '@/components/ui-v2/Card';
++import type { LiveRidersDistributionBucket } from '@/lib/roosterLive/types';
++
++const PALETTE = ['#00F5FF', '#A855F7', '#34D399', '#FBBF24', '#FB7185', '#38BDF8', 'rgba(234,240,255,0.55)'];
++
++export default function LiveRidersDonut({
++  title,
++  data,
++  loading,
++}: {
++  title: string;
++  data: LiveRidersDistributionBucket[];
++  loading?: boolean;
++}) {
++  const total = data.reduce((sum, d) => sum + d.count, 0);
++
++  return (
++    <Card title={title}>
++      {loading ? (
++        <div className="h-[220px] flex items-center justify-center text-[rgba(234,240,255,0.55)] text-sm">
++          جارِ التحميل...
++        </div>
++      ) : total === 0 ? (
++        <div className="h-[220px] flex items-center justify-center text-[rgba(234,240,255,0.55)] text-sm">
++          لا توجد بيانات لعرضها
++        </div>
++      ) : (
++        <div className="h-[220px]">
++          <ResponsiveContainer width="100%" height="100%">
++            <PieChart>
++              <Pie
++                data={data}
++                dataKey="count"
++                nameKey="label"
++                innerRadius="55%"
++                outerRadius="80%"
++                paddingAngle={2}
++                strokeWidth={0}
++              >
++                {data.map((entry, idx) => (
++                  <Cell key={entry.key} fill={PALETTE[idx % PALETTE.length]} />
++                ))}
++              </Pie>
++              <Tooltip
++                contentStyle={{
++                  background: '#0f1524',
++                  border: '1px solid rgba(255,255,255,0.10)',
++                  borderRadius: 8,
++                  color: '#EAF0FF',
++                }}
++              />
++              <Legend
++                verticalAlign="bottom"
++                height={36}
++                formatter={(value) => <span style={{ color: 'rgba(234,240,255,0.85)', fontSize: 12 }}>{value}</span>}
++              />
++            </PieChart>
++          </ResponsiveContainer>
++        </div>
++      )}
++    </Card>
++  );
++}
+diff --git a/components/liveRiders/LiveRidersKpiCards.tsx b/components/liveRiders/LiveRidersKpiCards.tsx
+new file mode 100644
+index 0000000..95cbd90
+--- /dev/null
++++ b/components/liveRiders/LiveRidersKpiCards.tsx
+@@ -0,0 +1,37 @@
++'use client';
++
++import Card from '@/components/ui-v2/Card';
++import type { LiveRidersKpis } from '@/lib/roosterLive/types';
++
++interface KpiDef {
++  key: keyof LiveRidersKpis;
++  label: string;
++  accent: string;
++}
++
++const KPI_DEFS: KpiDef[] = [
++  { key: 'total', label: 'إجمالي المناديب', accent: '#00F5FF' },
++  { key: 'online', label: 'متصل', accent: '#34D399' },
++  { key: 'busy', label: 'مشغول', accent: '#38BDF8' },
++  { key: 'onBreak', label: 'في استراحة', accent: '#FBBF24' },
++  { key: 'late', label: 'متأخر', accent: '#FB7185' },
++  { key: 'offline', label: 'غير متصل', accent: 'rgba(234,240,255,0.55)' },
++  { key: 'walletAlerts', label: 'تنبيهات الرصيد', accent: '#A855F7' },
++];
++
++export default function LiveRidersKpiCards({ kpis, loading }: { kpis: LiveRidersKpis | null; loading?: boolean }) {
++  return (
++    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
++      {KPI_DEFS.map((def) => (
++        <Card key={def.key}>
++          <div className="flex flex-col gap-1">
++            <span className="text-xs text-[rgba(234,240,255,0.65)]">{def.label}</span>
++            <span className="text-2xl font-bold" style={{ color: def.accent }}>
++              {loading ? '—' : (kpis?.[def.key] ?? 0)}
++            </span>
++          </div>
++        </Card>
++      ))}
++    </div>
++  );
++}
+diff --git a/components/liveRiders/LiveRidersTable.tsx b/components/liveRiders/LiveRidersTable.tsx
+new file mode 100644
+index 0000000..c90466b
+--- /dev/null
++++ b/components/liveRiders/LiveRidersTable.tsx
+@@ -0,0 +1,68 @@
++'use client';
++
++import VirtualTable from '@/components/ui-v2/VirtualTable';
++import LiveStatusBadge from '@/components/liveRiders/LiveStatusBadge';
++import type { LiveRiderWithAssignment } from '@/lib/roosterLive/types';
++
++function formatDuration(totalSeconds: number): string {
++  if (!totalSeconds) return '00:00';
++  const h = Math.floor(totalSeconds / 3600);
++  const m = Math.floor((totalSeconds % 3600) / 60);
++  return h > 0 ? `${h}س ${m}د` : `${m}د`;
++}
++
++const HEADER = (
++  <div className="grid grid-cols-[1.6fr_1fr_0.9fr_0.9fr_0.9fr_0.9fr] gap-2 px-4 py-3 bg-[rgba(255,255,255,0.04)] text-xs font-semibold text-[rgba(234,240,255,0.65)]">
++    <span>المندوب</span>
++    <span>الحالة</span>
++    <span>الرصيد</span>
++    <span>الاستراحات</span>
++    <span>التأخير</span>
++    <span>آخر تحديث</span>
++  </div>
++);
++
++export default function LiveRidersTable({
++  riders,
++  onSelect,
++}: {
++  riders: LiveRiderWithAssignment[];
++  onSelect: (rider: LiveRiderWithAssignment) => void;
++}) {
++  return (
++    <VirtualTable
++      items={riders}
++      rowHeight={56}
++      maxHeight={640}
++      header={HEADER}
++      emptyMessage="لا يوجد مناديب مطابقين للبحث/الفلاتر الحالية"
++      renderRow={(rider) => (
++        <button
++          key={rider.riderId}
++          onClick={() => onSelect(rider)}
++          className="w-full grid grid-cols-[1.6fr_1fr_0.9fr_0.9fr_0.9fr_0.9fr] gap-2 px-4 py-3 items-center text-right border-t border-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.04)] transition-colors"
++        >
++          <span className="min-w-0">
++            <span className="block text-sm font-medium text-[#EAF0FF] truncate">{rider.riderName || '—'}</span>
++            <span className="block text-xs text-[rgba(234,240,255,0.5)]">#{rider.riderId}</span>
++          </span>
++          <span>
++            <LiveStatusBadge status={rider.statusBucket} />
++          </span>
++          <span
++            className={`text-sm font-semibold ${rider.walletBalance <= 0 ? 'text-[#FB7185]' : 'text-[#EAF0FF]'}`}
++          >
++            {rider.walletBalance.toLocaleString('ar-EG')}
++          </span>
++          <span className="text-sm text-[#EAF0FF]">{rider.breaksCount}</span>
++          <span className={`text-sm ${rider.lateTimeSeconds > 0 ? 'text-[#FBBF24]' : 'text-[rgba(234,240,255,0.5)]'}`}>
++            {formatDuration(rider.lateTimeSeconds)}
++          </span>
++          <span className="text-xs text-[rgba(234,240,255,0.5)]">
++            {new Date(rider.lastSyncAt).toLocaleTimeString('ar-EG')}
++          </span>
++        </button>
++      )}
++    />
++  );
++}
+diff --git a/components/liveRiders/LiveStatusBadge.tsx b/components/liveRiders/LiveStatusBadge.tsx
+new file mode 100644
+index 0000000..029e518
+--- /dev/null
++++ b/components/liveRiders/LiveStatusBadge.tsx
+@@ -0,0 +1,18 @@
++'use client';
++
++import Badge from '@/components/ui-v2/Badge';
++import type { LiveRiderStatusBucket } from '@/lib/roosterLive/types';
++
++const STATUS_CONFIG: Record<LiveRiderStatusBucket, { label: string; variant: 'success' | 'warning' | 'danger' | 'info' | 'default' }> = {
++  online: { label: 'متصل', variant: 'success' },
++  busy: { label: 'مشغول', variant: 'info' },
++  on_break: { label: 'استراحة', variant: 'warning' },
++  late: { label: 'متأخر', variant: 'danger' },
++  offline: { label: 'غير متصل', variant: 'default' },
++  unknown: { label: 'غير معروف', variant: 'default' },
++};
++
++export default function LiveStatusBadge({ status }: { status: LiveRiderStatusBucket }) {
++  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.unknown;
++  return <Badge variant={cfg.variant}>{cfg.label}</Badge>;
++}
+diff --git a/docs/ROOSTER_LIVE.md b/docs/ROOSTER_LIVE.md
+new file mode 100644
+index 0000000..e07250e
+--- /dev/null
++++ b/docs/ROOSTER_LIVE.md
+@@ -0,0 +1,57 @@
++# Talabat Live 3PL Integration (`rooster-live`)
++
++## What this is
++Displays Talabat's Live 3PL rider-ops state (wallet, breaks, late time, rider
++state) inside the dashboard, scoped per supervisor, refreshed ~every 60s.
++This is a separate, additive feature — it does not touch Google Sheets,
++the existing `rooster-sync` (historical shifts export), auth, or any
++existing page/route.
++
++## Architecture
++```
++Talabat Live 3PL API
++   │  (1 call/min — the ONLY process that talks to Talabat)
++   ▼
++External minute-scheduler (cron-job.org / GitHub Actions / QStash)
++   │  Authorization: Bearer CRON_SECRET
++   ▼
++GET /api/cron/rooster-live-sync
++   │  fetch all pages → map → overwrite one Redis key
++   ▼
++Redis (Upstash / Vercel KV) — single snapshot key, ~6 min TTL, no history stored
++   ▲
++   │  read-only, JWT-scoped
++GET /api/live-riders
++   ▲
++   │  React Query, refetchInterval: 60s
++/live-riders page (supervisor + admin)
++```
++
++No Postgres: the product requirement is "current state," not history, so a
++relational store adds infrastructure without benefit here. See the
++architecture discussion in-repo commit history / PR description for the
++full reasoning.
++
++## Required environment variables
++| Var | Required | Notes |
++|---|---|---|
++| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` (or `KV_REST_API_URL`/`KV_REST_API_TOKEN`) | **Yes** | Shared snapshot store. Without this, `/api/live-riders` returns 503. One-click "Upstash" or "KV" integration in the Vercel dashboard. |
++| `CRON_SECRET` | Yes (already set for existing crons) | Authorizes the sync trigger. |
++| `ROOSTER_LIVE_CITY_ID` | No | Falls back to `ROOSTER_CITY_ID` (currently `200` = Alexandria). |
++| `ROOSTER_LIVE_URL_TEMPLATE` | No | Defaults to the documented endpoint; override only if Talabat changes the path. |
++| `ROOSTER_LIVE_HEADERS_JSON` | No | Falls back to `ROOSTER_EXPORT_HEADERS_JSON` (env or `cron_config` sheet) — same Cloudflare Access cookie already used by the historical export job. Only set this separately if the live endpoint turns out to need different headers. |
++
++## One-time setup
++1. Enable Upstash Redis (or Vercel KV) on the Vercel project; env vars are auto-injected.
++2. Confirm `ROOSTER_EXPORT_HEADERS_JSON` (or the `cron_config` sheet row) is current — if the historical export cron is working today, this is very likely already valid for the live endpoint too, since both are the same host/session.
++3. **Verify the raw field names** in `lib/roosterLive/mapper.ts` against one real response (open DevTools → Network → the live endpoint → copy one rider row's JSON). Add any missing key names to `FIELD_CANDIDATES` — this is the only file that should need adjusting.
++4. Point an external scheduler at:
++   `GET https://<your-domain>/api/cron/rooster-live-sync`
++   Header: `Authorization: Bearer <CRON_SECRET>`
++   Interval: 60 seconds.
++5. Open `/live-riders` as a supervisor and confirm riders + KPIs populate within ~2 sync cycles.
++
++## Operational notes
++- If the sync job's cookie expires, `/api/cron/rooster-live-sync` returns `502` with the error message — check your scheduler's failure notifications.
++- A single missed sync self-heals on the next successful run (TTL is 6 minutes, cadence is 60s).
++- The dashboard flags data as "stale" if it's older than 150 seconds (`STALE_AFTER_MS` in `lib/roosterLive/store.ts`), independent of the Redis TTL.
+diff --git a/lib/roosterLive/client.ts b/lib/roosterLive/client.ts
+new file mode 100644
+index 0000000..eb6d420
+--- /dev/null
++++ b/lib/roosterLive/client.ts
+@@ -0,0 +1,122 @@
++/**
++ * Fetches ALL pages of the Talabat Live 3PL rider-ops endpoint for one city.
++ *
++ * This is the ONLY module in the codebase that should ever call this Talabat
++ * endpoint directly — the sync job is the single backend process allowed to
++ * talk to Talabat, per the architecture decision. Never import this from a
++ * page or from `app/api/live-riders`.
++ */
++import { getRoosterLiveHeaders, getRoosterLiveCityId } from '@/lib/roosterLive/tokenProvider';
++import { logStructured } from '@/lib/requestTrace';
++
++const DEFAULT_PAGE_SIZE = 100;
++const MAX_PAGES_SAFETY_CAP = 50; // 50 * 100 = 5,000 riders ceiling, well above any single city
++const RETRY_ATTEMPTS = 3;
++const RETRY_BASE_DELAY_MS = 500;
++
++function baseUrl(): string {
++  const template = process.env.ROOSTER_LIVE_URL_TEMPLATE?.trim();
++  if (template) return template;
++  // Default matches the endpoint documented in the integration request.
++  return 'https://eg.me.logisticsbackoffice.com/api/rider-live-operations/v1/external/city/{city_id}/riders';
++}
++
++function buildPageUrl(page: number, size: number): string {
++  const cityId = getRoosterLiveCityId();
++  const url = new URL(baseUrl().replace('{city_id}', encodeURIComponent(cityId)));
++  url.searchParams.set('page', String(page));
++  url.searchParams.set('size', String(size));
++  return url.toString();
++}
++
++function sleep(ms: number): Promise<void> {
++  return new Promise((resolve) => setTimeout(resolve, ms));
++}
++
++async function fetchWithRetry(url: string, headers: Record<string, string>): Promise<Response> {
++  let lastError: unknown;
++  for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
++    try {
++      const res = await fetch(url, {
++        method: 'GET',
++        headers: { Accept: 'application/json', ...headers },
++        cache: 'no-store',
++      });
++      if (res.ok) return res;
++      // Retry on 429/5xx, fail fast on 401/403 (cookie is dead — retrying won't help).
++      if (res.status === 401 || res.status === 403) {
++        const body = await res.text().catch(() => '');
++        throw new Error(`Rooster live auth rejected (${res.status}): ${body.slice(0, 300)}`);
++      }
++      if (res.status !== 429 && res.status < 500) {
++        const body = await res.text().catch(() => '');
++        throw new Error(`Rooster live request failed (${res.status}): ${body.slice(0, 300)}`);
++      }
++      lastError = new Error(`Rooster live transient error (${res.status})`);
++    } catch (err) {
++      lastError = err;
++    }
++    if (attempt < RETRY_ATTEMPTS) {
++      const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
++      logStructured('warn', 'rooster_live_fetch_retry', { attempt, delay, url });
++      await sleep(delay);
++    }
++  }
++  throw lastError instanceof Error ? lastError : new Error('Rooster live fetch failed after retries');
++}
++
++/** Extracts the array of rider rows regardless of which wrapper shape the API uses. */
++function extractRows(payload: unknown): unknown[] {
++  if (Array.isArray(payload)) return payload;
++  if (payload && typeof payload === 'object') {
++    const obj = payload as Record<string, unknown>;
++    for (const key of ['content', 'data', 'items', 'riders', 'results']) {
++      if (Array.isArray(obj[key])) return obj[key] as unknown[];
++    }
++  }
++  return [];
++}
++
++/** True when the payload's own pagination metadata says this was the last page. */
++function isLastPageByMetadata(payload: unknown): boolean | null {
++  if (payload && typeof payload === 'object') {
++    const obj = payload as Record<string, unknown>;
++    if (typeof obj.last === 'boolean') return obj.last;
++    if (typeof obj.totalPages === 'number' && typeof obj.number === 'number') {
++      return obj.number >= obj.totalPages - 1;
++    }
++  }
++  return null;
++}
++
++export async function fetchAllRoosterLiveRiders(options?: {
++  pageSize?: number;
++}): Promise<{ rawRiders: unknown[]; pagesFetched: number }> {
++  const size = options?.pageSize ?? DEFAULT_PAGE_SIZE;
++  const headers = await getRoosterLiveHeaders();
++
++  const rawRiders: unknown[] = [];
++  let page = 0;
++
++  while (page < MAX_PAGES_SAFETY_CAP) {
++    const url = buildPageUrl(page, size);
++    const res = await fetchWithRetry(url, headers);
++    const payload = await res.json();
++    const rows = extractRows(payload);
++    rawRiders.push(...rows);
++
++    const lastByMeta = isLastPageByMetadata(payload);
++    const lastByRowCount = rows.length < size;
++    page += 1;
++
++    if (rows.length === 0 || lastByMeta === true || (lastByMeta === null && lastByRowCount)) {
++      break;
++    }
++  }
++
++  if (page >= MAX_PAGES_SAFETY_CAP) {
++    logStructured('warn', 'rooster_live_page_cap_hit', { pagesFetched: page, riderCount: rawRiders.length });
++  }
++
++  return { rawRiders, pagesFetched: page };
++}
+diff --git a/lib/roosterLive/mapper.ts b/lib/roosterLive/mapper.ts
+new file mode 100644
+index 0000000..299a9c8
+--- /dev/null
++++ b/lib/roosterLive/mapper.ts
+@@ -0,0 +1,123 @@
++/**
++ * Maps a raw Talabat Live 3PL rider row into our normalized `LiveRider` type.
++ *
++ * IMPORTANT — verify against the real response before going live:
++ * we have not yet captured the exact JSON field names returned by
++ * `/api/rider-live-operations/v1/external/city/{cityId}/riders` (only the
++ * *rendered UI columns* from the Rooster screen were available: ID, Name,
++ * Current Session, Performance, Time worked, Acceptance Rate, Wallet
++ * Balance, Breaks, Breaks time, Late time, Rider state, Location).
++ *
++ * `FIELD_CANDIDATES` below tries the common shapes (camelCase, snake_case,
++ * a couple of likely nested paths). If Talabat's real field names differ,
++ * this is the ONLY file that needs a one-line edit — add the real key to
++ * the relevant candidate list.
++ */
++import type { LiveRider, LiveRiderStatusBucket } from '@/lib/roosterLive/types';
++
++type RawRider = Record<string, any>;
++
++function pick(row: RawRider, candidates: readonly string[]): any {
++  for (const key of candidates) {
++    const value = key.includes('.') ? key.split('.').reduce<any>((acc, k) => acc?.[k], row) : row[key];
++    if (value !== undefined && value !== null && value !== '') return value;
++  }
++  return null;
++}
++
++function toNumber(value: any, fallback = 0): number {
++  if (value === null || value === undefined || value === '') return fallback;
++  const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^\d.-]/g, ''));
++  return Number.isFinite(n) ? n : fallback;
++}
++
++/** Accepts seconds, "HH:MM:SS", or "HH:MM" and returns seconds. */
++function toSeconds(value: any): number {
++  if (value === null || value === undefined || value === '') return 0;
++  if (typeof value === 'number') return value;
++  const str = String(value).trim();
++  const parts = str.split(':').map((p) => parseInt(p, 10));
++  if (parts.length >= 2 && parts.every((p) => Number.isFinite(p))) {
++    const [h, m, s = 0] = parts.length === 2 ? [0, parts[0], parts[1]] : parts;
++    return h * 3600 + m * 60 + s;
++  }
++  const n = parseFloat(str);
++  return Number.isFinite(n) ? n : 0;
++}
++
++const FIELD_CANDIDATES = {
++  riderId: ['id', 'riderId', 'rider_id', 'employeeId', 'employee_id'],
++  riderName: ['name', 'riderName', 'rider_name', 'fullName', 'full_name'],
++  riderState: ['riderState', 'rider_state', 'state', 'status'],
++  walletBalance: ['walletBalance', 'wallet_balance', 'wallet', 'walletAmount'],
++  breaksCount: ['breaksCount', 'breaks_count', 'breaks', 'numberOfBreaks', 'number_of_breaks'],
++  breakTime: ['breaksTime', 'breaks_time', 'breakTime', 'break_time'],
++  lateTime: ['lateTime', 'late_time'],
++  currentSession: ['currentSession', 'current_session', 'sessionLabel', 'session'],
++  performance: ['performance', 'utr', 'UTR'],
++  timeWorked: ['timeWorked', 'time_worked', 'workedTime', 'worked_time'],
++  acceptanceRate: ['acceptanceRate', 'acceptance_rate', 'acceptance'],
++  ordersToday: ['orders', 'deliveries', 'ordersToday', 'orders_today'],
++  vehicle: ['vehicle', 'vehicleType', 'vehicle_type'],
++  zone: ['zone', 'area', 'startingPoint', 'starting_point'],
++} as const;
++
++/** Best-effort status bucket from Talabat's free-text state + breaks/late signals. */
++function classifyStatusBucket(rawState: string, breaksCount: number, lateTimeSeconds: number): LiveRiderStatusBucket {
++  const s = rawState.trim().toLowerCase();
++  if (!s) return 'unknown';
++  if (lateTimeSeconds > 0) return 'late';
++  if (breaksCount > 0 && /break/.test(s)) return 'on_break';
++  if (/working|active|online|busy|delivering/.test(s)) return 'online';
++  if (/ending|offline|inactive|logged.?out/.test(s)) return 'offline';
++  if (/break/.test(s)) return 'on_break';
++  return 'unknown';
++}
++
++export function mapRawRoosterLiveRider(row: RawRider, lastSyncAt: string): LiveRider | null {
++  const riderId = pick(row, FIELD_CANDIDATES.riderId);
++  if (riderId === null) return null;
++
++  const rawState = String(pick(row, FIELD_CANDIDATES.riderState) ?? '').trim();
++  const breaksCount = toNumber(pick(row, FIELD_CANDIDATES.breaksCount), 0);
++  const lateTimeSeconds = toSeconds(pick(row, FIELD_CANDIDATES.lateTime));
++
++  return {
++    riderId: String(riderId).trim(),
++    riderName: String(pick(row, FIELD_CANDIDATES.riderName) ?? '').trim(),
++    riderState: rawState,
++    statusBucket: classifyStatusBucket(rawState, breaksCount, lateTimeSeconds),
++    walletBalance: toNumber(pick(row, FIELD_CANDIDATES.walletBalance), 0),
++    breaksCount,
++    breakTimeSeconds: toSeconds(pick(row, FIELD_CANDIDATES.breakTime)),
++    lateTimeSeconds,
++    currentSessionLabel: String(pick(row, FIELD_CANDIDATES.currentSession) ?? '').trim(),
++    performance: pick(row, FIELD_CANDIDATES.performance),
++    timeWorkedLabel: String(pick(row, FIELD_CANDIDATES.timeWorked) ?? '').trim(),
++    acceptanceRate: (() => {
++      const raw = pick(row, FIELD_CANDIDATES.acceptanceRate);
++      if (raw === null) return null;
++      const n = toNumber(raw, NaN);
++      return Number.isFinite(n) ? n : null;
++    })(),
++    ordersToday: (() => {
++      const raw = pick(row, FIELD_CANDIDATES.ordersToday);
++      if (raw === null) return null;
++      const n = toNumber(raw, NaN);
++      return Number.isFinite(n) ? n : null;
++    })(),
++    vehicle: pick(row, FIELD_CANDIDATES.vehicle) ? String(pick(row, FIELD_CANDIDATES.vehicle)) : null,
++    zone: pick(row, FIELD_CANDIDATES.zone) ? String(pick(row, FIELD_CANDIDATES.zone)) : null,
++    lastSyncAt,
++  };
++}
++
++export function mapRawRoosterLiveRiders(rows: unknown[], lastSyncAt: string): LiveRider[] {
++  const mapped: LiveRider[] = [];
++  for (const row of rows) {
++    if (!row || typeof row !== 'object') continue;
++    const rider = mapRawRoosterLiveRider(row as RawRider, lastSyncAt);
++    if (rider) mapped.push(rider);
++  }
++  return mapped;
++}
+diff --git a/lib/roosterLive/store.ts b/lib/roosterLive/store.ts
+new file mode 100644
+index 0000000..712ce71
+--- /dev/null
++++ b/lib/roosterLive/store.ts
+@@ -0,0 +1,48 @@
++/**
++ * Shared snapshot storage for Live 3PL data.
++ *
++ * Deliberately Redis-only, no Postgres: the product requirement is "current
++ * state, ~60s latency," not history/timelines, so there is nothing here that
++ * benefits from a relational store. One key is overwritten every sync cycle.
++ *
++ * Reuses the existing tiered cache (`lib/tieredCache.ts` → in-memory L1 +
++ * Upstash Redis L2, `lib/redisCache.optional.ts`) rather than adding a new
++ * Redis client — same env vars (`UPSTASH_REDIS_REST_URL`/`_TOKEN`, or
++ * Vercel's `KV_REST_API_URL`/`_TOKEN`) already used elsewhere in the app.
++ *
++ * IMPORTANT: unlike the Sheets cache, this is NOT an optional speed layer.
++ * If Redis isn't configured, there is no fallback (we deliberately never
++ * call Talabat from the read path) — `isRoosterLiveStoreReady()` lets the
++ * API/UI fail loudly and clearly instead of silently returning nothing.
++ */
++import { tieredCacheGet, tieredCacheSet } from '@/lib/tieredCache';
++import { isRedisCacheConfigured } from '@/lib/redisCache.optional';
++import type { LiveRidersSnapshot } from '@/lib/roosterLive/types';
++
++/** Snapshot outlives one sync interval so a single missed run self-heals silently. */
++const SNAPSHOT_TTL_MS = 6 * 60 * 1000; // 6 minutes
++/** Past this age, the read API flags the data as stale in its response. */
++export const STALE_AFTER_MS = 150 * 1000; // 2.5 minutes — 2x+ the 60s cadence
++
++function snapshotKey(cityId: string): string {
++  return `rooster_live:snapshot:${cityId}`;
++}
++
++export function isRoosterLiveStoreReady(): boolean {
++  return isRedisCacheConfigured();
++}
++
++export async function saveLiveRidersSnapshot(snapshot: LiveRidersSnapshot): Promise<void> {
++  if (!isRoosterLiveStoreReady()) {
++    throw new Error(
++      'Redis is not configured (UPSTASH_REDIS_REST_URL/_TOKEN or Vercel KV). ' +
++        'The Live 3PL sync requires shared storage across serverless invocations — see docs.'
++    );
++  }
++  await tieredCacheSet(snapshotKey(snapshot.cityId), snapshot, SNAPSHOT_TTL_MS);
++}
++
++export async function getLiveRidersSnapshot(cityId: string): Promise<LiveRidersSnapshot | null> {
++  if (!isRoosterLiveStoreReady()) return null;
++  return tieredCacheGet<LiveRidersSnapshot>(snapshotKey(cityId), 30 * 1000);
++}
+diff --git a/lib/roosterLive/syncService.ts b/lib/roosterLive/syncService.ts
+new file mode 100644
+index 0000000..35009b6
+--- /dev/null
++++ b/lib/roosterLive/syncService.ts
+@@ -0,0 +1,68 @@
++import { fetchAllRoosterLiveRiders } from '@/lib/roosterLive/client';
++import { mapRawRoosterLiveRiders } from '@/lib/roosterLive/mapper';
++import { saveLiveRidersSnapshot, isRoosterLiveStoreReady } from '@/lib/roosterLive/store';
++import { getRoosterLiveCityId } from '@/lib/roosterLive/tokenProvider';
++import { logStructured } from '@/lib/requestTrace';
++import type { LiveRidersSnapshot } from '@/lib/roosterLive/types';
++
++export interface RunLiveSyncResult {
++  success: boolean;
++  cityId: string;
++  riderCount: number;
++  syncDurationMs: number;
++  lastSyncAt: string;
++  error?: string;
++}
++
++/** One full sync cycle: fetch all pages from Talabat, map, and store the snapshot. */
++export async function runRoosterLiveSync(): Promise<RunLiveSyncResult> {
++  const startedAt = Date.now();
++  const cityId = getRoosterLiveCityId();
++
++  if (!isRoosterLiveStoreReady()) {
++    const error = 'Redis is not configured — cannot store the live snapshot. See docs/ROOSTER_LIVE.md.';
++    logStructured('error', 'rooster_live_sync_skipped_no_store', { cityId, error });
++    return { success: false, cityId, riderCount: 0, syncDurationMs: 0, lastSyncAt: new Date().toISOString(), error };
++  }
++
++  try {
++    const { rawRiders, pagesFetched } = await fetchAllRoosterLiveRiders();
++    const lastSyncAt = new Date().toISOString();
++    const riders = mapRawRoosterLiveRiders(rawRiders, lastSyncAt);
++    const syncDurationMs = Date.now() - startedAt;
++
++    const snapshot: LiveRidersSnapshot = {
++      cityId,
++      riders,
++      lastSyncAt,
++      syncDurationMs,
++      riderCount: riders.length,
++    };
++    await saveLiveRidersSnapshot(snapshot);
++
++    logStructured('info', 'rooster_live_sync_ok', {
++      cityId,
++      riderCount: riders.length,
++      rawCount: rawRiders.length,
++      pagesFetched,
++      syncDurationMs,
++    });
++
++    return { success: true, cityId, riderCount: riders.length, syncDurationMs, lastSyncAt };
++  } catch (error: any) {
++    const syncDurationMs = Date.now() - startedAt;
++    logStructured('error', 'rooster_live_sync_failed', {
++      cityId,
++      syncDurationMs,
++      error: error?.message || String(error),
++    });
++    return {
++      success: false,
++      cityId,
++      riderCount: 0,
++      syncDurationMs,
++      lastSyncAt: new Date().toISOString(),
++      error: error?.message || 'Live sync failed',
++    };
++  }
++}
+diff --git a/lib/roosterLive/tokenProvider.ts b/lib/roosterLive/tokenProvider.ts
+new file mode 100644
+index 0000000..0374295
+--- /dev/null
++++ b/lib/roosterLive/tokenProvider.ts
+@@ -0,0 +1,57 @@
++/**
++ * Auth headers for the Talabat Live 3PL endpoint.
++ *
++ * Deliberately reuses the SAME mechanism already built for the historical
++ * rooster export (`lib/roosterSessionStore.ts`): a Cookie/header set that can
++ * live in an env var OR in a Google Sheet cell, so an expired Cloudflare
++ * Access session can be rotated without a redeploy.
++ *
++ * We do NOT duplicate the cookie-parsing logic — if a live-specific override
++ * isn't configured, we fall back to the exact same headers used by the
++ * existing export job, since both hit the same host
++ * (eg.me.logisticsbackoffice.com) and are very likely gated by the same
++ * Cloudflare Access session.
++ */
++import { getRoosterExportHeadersFromSheet } from '@/lib/roosterSessionStore';
++
++function parseJsonHeaders(raw: string | undefined, sourceLabel: string): Record<string, string> | null {
++  const trimmed = raw?.trim();
++  if (!trimmed) return null;
++  try {
++    const parsed = JSON.parse(trimmed);
++    if (!parsed || typeof parsed !== 'object') return null;
++    return Object.fromEntries(Object.entries(parsed).map(([k, v]) => [String(k), String(v)]));
++  } catch {
++    throw new Error(`${sourceLabel} must be valid JSON object of headers.`);
++  }
++}
++
++/**
++ * Resolution order (first non-empty wins):
++ * 1. ROOSTER_LIVE_HEADERS_JSON env var (live-endpoint-specific override)
++ * 2. ROOSTER_EXPORT_HEADERS_JSON env var (shared with the export job)
++ * 3. Google Sheet `cron_config` tab, key ROOSTER_EXPORT_HEADERS_JSON (no-redeploy rotation)
++ */
++export async function getRoosterLiveHeaders(): Promise<Record<string, string>> {
++  const liveOverride = parseJsonHeaders(process.env.ROOSTER_LIVE_HEADERS_JSON, 'ROOSTER_LIVE_HEADERS_JSON');
++  if (liveOverride) return liveOverride;
++
++  const sharedEnv = parseJsonHeaders(process.env.ROOSTER_EXPORT_HEADERS_JSON, 'ROOSTER_EXPORT_HEADERS_JSON');
++  if (sharedEnv) return sharedEnv;
++
++  const fromSheet = await getRoosterExportHeadersFromSheet();
++  if (fromSheet) return fromSheet;
++
++  throw new Error(
++    'No Rooster auth headers configured. Set ROOSTER_LIVE_HEADERS_JSON or ROOSTER_EXPORT_HEADERS_JSON, ' +
++      'or add ROOSTER_EXPORT_HEADERS_JSON to the cron_config Google Sheet tab.'
++  );
++}
++
++export function getRoosterLiveCityId(): string {
++  const cityId = (process.env.ROOSTER_LIVE_CITY_ID || process.env.ROOSTER_CITY_ID || '').trim();
++  if (!cityId) {
++    throw new Error('Missing env: ROOSTER_LIVE_CITY_ID (or ROOSTER_CITY_ID as fallback)');
++  }
++  return cityId;
++}
+diff --git a/lib/roosterLive/types.ts b/lib/roosterLive/types.ts
+new file mode 100644
+index 0000000..9dc41f7
+--- /dev/null
++++ b/lib/roosterLive/types.ts
+@@ -0,0 +1,86 @@
++/**
++ * Shared types for the Talabat Live 3PL integration.
++ *
++ * Naming: "roosterLive" to distinguish from the existing historical
++ * `roosterExport`/`roosterSession` (CSV shifts export) modules — this is a
++ * separate, additive feature. Nothing here is imported by, or imports from,
++ * the existing rooster export/session code.
++ */
++
++/** One rider's live snapshot, normalized from the raw Talabat payload. */
++export interface LiveRider {
++  /** Talabat Rider ID (used to match against المناديب sheet code). */
++  riderId: string;
++  riderName: string;
++  /** Raw state string as returned by Talabat (e.g. "Working", "Ending", "Offline"). */
++  riderState: string;
++  /** Normalized status bucket used for KPIs / donut charts / badge color. */
++  statusBucket: LiveRiderStatusBucket;
++  walletBalance: number;
++  breaksCount: number;
++  /** Total break time, in seconds. */
++  breakTimeSeconds: number;
++  /** Total late time, in seconds. */
++  lateTimeSeconds: number;
++  currentSessionLabel: string;
++  performance: string | number | null;
++  timeWorkedLabel: string;
++  acceptanceRate: number | null;
++  ordersToday: number | null;
++  vehicle: string | null;
++  zone: string | null;
++  /** ISO timestamp of when this row was last refreshed by the sync job. */
++  lastSyncAt: string;
++}
++
++export type LiveRiderStatusBucket = 'online' | 'busy' | 'on_break' | 'late' | 'offline' | 'unknown';
++
++/** Rider enriched with internal supervisor mapping (added by the read API, not the sync job). */
++export interface LiveRiderWithAssignment extends LiveRider {
++  supervisorCode: string | null;
++  supervisorName: string | null;
++  /** True when the Talabat rider could not be matched to a rider in المناديب. */
++  unmapped: boolean;
++}
++
++export interface LiveRidersSnapshot {
++  cityId: string;
++  riders: LiveRider[];
++  lastSyncAt: string;
++  /** How long the fetch+map+store cycle took, ms — for health/observability. */
++  syncDurationMs: number;
++  riderCount: number;
++}
++
++export interface LiveRidersKpis {
++  total: number;
++  online: number;
++  offline: number;
++  busy: number;
++  onBreak: number;
++  late: number;
++  walletAlerts: number;
++}
++
++export interface LiveRidersDistributionBucket {
++  key: string;
++  label: string;
++  count: number;
++}
++
++export interface LiveRidersApiResponse {
++  success: true;
++  data: LiveRiderWithAssignment[];
++  kpis: LiveRidersKpis;
++  distributions: {
++    status: LiveRidersDistributionBucket[];
++    wallet: LiveRidersDistributionBucket[];
++    breaks: LiveRidersDistributionBucket[];
++    late: LiveRidersDistributionBucket[];
++  };
++  lastSyncAt: string | null;
++  /** ms since lastSyncAt — lets the client decide "stale" without clock-skew guessing twice. */
++  ageMs: number | null;
++  /** If true, data is older than the expected sync cadence — show a "sync delayed" banner. */
++  stale: boolean;
++}

@@ -5,7 +5,7 @@ export const ZONE_OPTIONS = [
   'Heliopolis',
   'Mansoura',
   'Nasr city',
-  'Tagammoa golden square',
+  'Tagammaa golden square',
 ] as const;
 
 export type ZoneOption = (typeof ZONE_OPTIONS)[number];

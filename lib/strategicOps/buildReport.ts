@@ -590,7 +590,7 @@ function inDateRange(d: Date | null, start: Date, end: Date): boolean {
 }
 
 function isRiderActive(agg: RiderAgg): boolean {
-  return agg.totalHours > 0;
+  return agg.totalHours > 0 && agg.totalOrders > 0;
 }
 
 function isRiderInactive(agg: RiderAgg): boolean {
