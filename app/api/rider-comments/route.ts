@@ -1,0 +1,125 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { verifyToken } from '@/lib/jwt';
+import { addRiderComment, getSupervisorComments, getRiderComments } from '@/lib/riderComments/service';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: NextRequest) {
+  try {
+    const token = request.cookies.get('token')?.value;
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const decoded = verifyToken(token);
+    if (!decoded) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const riderCode = searchParams.get('riderCode');
+    const supervisorCode = searchParams.get('supervisorCode');
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
+
+    // If admin or requesting specific rider
+    if (riderCode) {
+      const comments = await getRiderComments(riderCode, startDate || undefined, endDate || undefined);
+      return NextResponse.json({ comments });
+    }
+
+    // If supervisor, get their comments
+    if (decoded.role === 'supervisor') {
+      const comments = await getSupervisorComments(
+        decoded.code || '',
+        startDate || undefined,
+        endDate || undefined
+      );
+      return NextResponse.json({ comments });
+    }
+
+    // If admin requesting supervisor's comments
+    if (decoded.role === 'admin' && supervisorCode) {
+      const comments = await getSupervisorComments(
+        supervisorCode,
+        startDate || undefined,
+        endDate || undefined
+      );
+      return NextResponse.json({ comments });
+    }
+
+    return NextResponse.json({ comments: [] });
+  } catch (error) {
+    console.error('[GET /api/rider-comments] Error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const token = request.cookies.get('token')?.value;
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const decoded = verifyToken(token);
+    if (!decoded) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+
+    // Only supervisors and admins can add comments
+    if (decoded.role !== 'supervisor' && decoded.role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const body = await request.json();
+    const {
+      riderCode,
+      riderName,
+      date,
+      category,
+      expectedReturnDate,
+      estimatedReturnDays,
+      notes,
+    } = body;
+
+    // Validation
+    if (!riderCode || !riderName || !date || !category) {
+      return NextResponse.json(
+        { error: 'Missing required fields' },
+        { status: 400 }
+      );
+    }
+
+    const result = await addRiderComment({
+      riderCode,
+      riderName,
+      supervisorCode: decoded.code || '',
+      supervisorName: decoded.name || '',
+      date,
+      category,
+      expectedReturnDate,
+      estimatedReturnDays,
+      notes: notes || '',
+    });
+
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.error || 'Failed to add comment' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('[POST /api/rider-comments] Error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}

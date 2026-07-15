@@ -1,11 +1,45 @@
-/** Match rider codes across "00123" vs "123" styles (client + server safe). */
+/**
+ * Checks if a code is a supervisor code (starts with WA-, e.g., WA-001, WA-016).
+ */
+export function isSupervisorCode(code: unknown): boolean {
+  const str = String(code ?? '').trim().toUpperCase();
+  return str.startsWith('WA-');
+}
+
+/**
+ * Checks if a code is a rider code (numeric only, e.g., 877614, 2520149).
+ */
+export function isRiderCode(code: unknown): boolean {
+  const str = String(code ?? '').trim();
+  // Remove common quotes/formatting
+  const cleaned = str
+    .replace(/^[''`]+/, '')
+    .replace(/^"(.*)"$/, '$1')
+    .replace(/\s+/g, '')
+    .trim();
+  // Check if it's purely numeric (may have leading zeros)
+  return /^\d+$/.test(cleaned);
+}
+
+/**
+ * Normalizes a code for matching purposes.
+ * - If the code is a supervisor code (WA-xxx), returns it as-is (uppercase, trimmed).
+ * - If the code is a rider code (numeric), normalizes it by removing leading zeros.
+ * - Otherwise, attempts numeric normalization.
+ */
 export function normalizeRiderCodeForPerformance(code: unknown): string {
   const raw = String(code ?? '')
     .replace(/\uFEFF/g, '')
     .trim();
   if (!raw) return '';
+
+  // If it's a supervisor code, return it normalized (uppercase, trimmed) but NOT stripped
+  if (isSupervisorCode(raw)) {
+    return raw.toUpperCase().trim();
+  }
+
   const cleaned = raw
-    .replace(/^['’`]+/, '')
+    .replace(/^[''`]+/, '')
     .replace(/^"(.*)"$/, '$1')
     .replace(/\s+/g, '')
     .trim();

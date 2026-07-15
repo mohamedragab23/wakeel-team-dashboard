@@ -26,7 +26,10 @@ export type AdminFeatureKey =
   | 'strategic_ops'
   | 'rider_strategic_profiles'
   | 'ticketing'
-  | 'live_riders';
+  | 'live_riders'
+  | 'ghost_riders_export'
+  | 'rider_comments'
+  | 'missing_data_audit';
 
 const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   main_inventory: 'main_inventory',
@@ -50,6 +53,9 @@ const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   rider_strategic_profiles: 'rider_strategic_profiles',
   ticketing: 'ticketing',
   live_riders: 'live_riders',
+  ghost_riders_export: 'ghost_riders_export',
+  rider_comments: 'rider_comments',
+  missing_data_audit: 'missing_data_audit',
 };
 
 export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
@@ -75,6 +81,9 @@ export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
   rider_strategic_profiles: 'إدارة بيانات المناديب',
   ticketing: 'نظام التذاكر التشغيلية',
   live_riders: 'العمليات المباشرة',
+  ghost_riders_export: 'تصدير المناديب الأشباح',
+  rider_comments: 'التعليقات اليومية',
+  missing_data_audit: 'تدقيق البيانات الناقصة',
 };
 
 export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
@@ -100,6 +109,9 @@ export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
   'rider_strategic_profiles',
   'ticketing',
   'live_riders',
+  'ghost_riders_export',
+  'rider_comments',
+  'missing_data_audit',
 ];
 
 export type AdminMenuDef = { href: string; label: string; icon: string; feature: AdminFeatureKey };
@@ -116,6 +128,9 @@ export function getAdminMenuDefs(): AdminMenuDef[] {
     { href: '/admin/performance', label: 'رفع بيانات الأداء', icon: '📈', feature: 'performance_upload' },
     { href: '/admin/supervisor-performance', label: 'أداء المشرفين', icon: '📊', feature: 'supervisor_performance' },
     { href: '/admin/strategic-ops', label: 'مركز العمليات الاستراتيجي', icon: '🎯', feature: 'strategic_ops' },
+    { href: '/admin/ghost-riders-export', label: 'المناديب الأشباح', icon: '🚨', feature: 'ghost_riders_export' },
+    { href: '/admin/missing-data-audit', label: 'تدقيق البيانات الناقصة', icon: '📋', feature: 'missing_data_audit' },
+    { href: '/rider-comments', label: 'التعليقات اليومية', icon: '💬', feature: 'rider_comments' },
     { href: '/admin/rider-strategic-profiles', label: 'إدارة بيانات المناديب', icon: '📋', feature: 'rider_strategic_profiles' },
     { href: '/admin/salary-config', label: 'إعدادات الرواتب', icon: '⚙️', feature: 'salary_config' },
     { href: '/admin/equipment-pricing', label: 'أسعار المعدات', icon: '🛠️', feature: 'equipment_pricing' },
