@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
-import { Button } from '@/components/Button';
+import Button from '@/components/ui-v2/Button';
 import { authFetch } from '@/lib/authFetch';
 import { usePageNotify } from '@/lib/usePageNotify';
 import type { CommentCategory } from '@/lib/riderComments/types';
