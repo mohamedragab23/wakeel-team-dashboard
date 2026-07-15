@@ -29,7 +29,7 @@ type Summary = {
 };
 
 export default function MissingDataAuditPage() {
-  const { setMessage } = usePageNotify();
+  const notify = usePageNotify();
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [riders, setRiders] = useState<MissingDataRider[]>([]);
@@ -49,7 +49,7 @@ export default function MissingDataAuditPage() {
       setRiders(data.riders);
     } catch (error) {
       console.error('Error loading data:', error);
-      setMessage('فشل تحميل البيانات', 'error');
+      notify.error('فشل تحميل البيانات');
     } finally {
       setLoading(false);
     }

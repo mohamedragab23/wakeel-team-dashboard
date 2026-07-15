@@ -27,7 +27,7 @@ type Comment = {
 };
 
 export default function RiderCommentsPage() {
-  const { setMessage } = usePageNotify();
+  const notify = usePageNotify();
   const [riders, setRiders] = useState<Rider[]>([]);
   const [recentComments, setRecentComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -55,7 +55,7 @@ export default function RiderCommentsPage() {
       setRiders(data.riders || []);
     } catch (error) {
       console.error('Error loading riders:', error);
-      setMessage('فشل تحميل قائمة المناديب', 'error');
+      notify.error('فشل تحميل قائمة المناديب');
     }
   };
 
@@ -77,13 +77,13 @@ export default function RiderCommentsPage() {
     e.preventDefault();
 
     if (!selectedRider || !category) {
-      setMessage('يرجى اختيار المندوب والفئة', 'error');
+      notify.error('يرجى اختيار المندوب والفئة');
       return;
     }
 
     const selectedRiderData = riders.find((r) => r.code === selectedRider);
     if (!selectedRiderData) {
-      setMessage('المندوب غير موجود', 'error');
+      notify.error('المندوب غير موجود');
       return;
     }
 
@@ -111,7 +111,7 @@ export default function RiderCommentsPage() {
         throw new Error(error.error || 'Failed to add comment');
       }
 
-      setMessage('✅ تم حفظ التعليق بنجاح', 'success');
+      notify.success('تم حفظ التعليق بنجاح');
 
       // Reset form
       setSelectedRider('');
@@ -124,7 +124,7 @@ export default function RiderCommentsPage() {
       loadRecentComments();
     } catch (error) {
       console.error('Error adding comment:', error);
-      setMessage(`فشل حفظ التعليق: ${error}`, 'error');
+      notify.error(`فشل حفظ التعليق: ${error}`);
     } finally {
       setSubmitting(false);
     }
