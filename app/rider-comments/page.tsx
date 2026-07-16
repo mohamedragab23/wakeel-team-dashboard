@@ -159,6 +159,17 @@ export default function RiderCommentsPage() {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'خطأ غير معروف' }));
         console.error('[rider-comments] Error:', errorData);
+        
+        // Special handling for 401 Unauthorized
+        if (response.status === 401) {
+          notify.error('⚠️ انتهت صلاحية الجلسة - يرجى تسجيل الدخول من جديد');
+          // Redirect to login after 2 seconds
+          setTimeout(() => {
+            window.location.href = '/login';
+          }, 2000);
+          return;
+        }
+        
         throw new Error(errorData.error || `HTTP ${response.status}`);
       }
 
@@ -377,16 +388,19 @@ export default function RiderCommentsPage() {
             <h3 className="text-lg font-semibold text-cyan-300 mb-2">💡 نصائح سريعة</h3>
             <ul className="space-y-2 text-sm text-[#94A3B8]">
               <li>
-                ✅ <strong>اختر الفئة:</strong> من القائمة المنسدلة لكل مندوب
+                ✅ <strong>شغال عادي:</strong> الافتراضي - اضغط "حفظ" مباشرة بدون ملاحظات
               </li>
               <li>
-                ✅ <strong>حادث/إجازة مرضية:</strong> ستظهر حقول إضافية لتاريخ العودة
+                ✅ <strong>حادث/إجازة/غياب:</strong> اختر الفئة المناسبة من القائمة
               </li>
               <li>
-                ✅ <strong>ملاحظات:</strong> اختيارية - أضف أي تفاصيل إضافية
+                ✅ <strong>تاريخ العودة:</strong> سيظهر تلقائياً لكل الفئات ما عدا "شغال عادي"
               </li>
               <li>
-                ✅ <strong>احفظ:</strong> اضغط "حفظ" بعد كل مندوب
+                ✅ <strong>ملاحظات:</strong> اختيارية - أضف تفاصيل إضافية إذا أردت
+              </li>
+              <li>
+                ⚠️ <strong>مهم:</strong> إذا ظهر خطأ 401، قم بتسجيل الدخول من جديد
               </li>
             </ul>
           </div>

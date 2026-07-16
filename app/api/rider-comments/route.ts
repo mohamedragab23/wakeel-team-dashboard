@@ -68,15 +68,19 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const token = request.cookies.get('token')?.value;
+    console.log('[POST /api/rider-comments] Token present:', !!token);
+    
     if (!token) {
-      console.error('[POST /api/rider-comments] No token');
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      console.error('[POST /api/rider-comments] No token found in cookies');
+      return NextResponse.json({ error: 'Unauthorized - No token' }, { status: 401 });
     }
 
     const decoded = verifyToken(token);
+    console.log('[POST /api/rider-comments] Token decoded:', !!decoded);
+    
     if (!decoded) {
-      console.error('[POST /api/rider-comments] Invalid token');
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+      console.error('[POST /api/rider-comments] Invalid or expired token');
+      return NextResponse.json({ error: 'Unauthorized - Invalid token' }, { status: 401 });
     }
 
     console.log('[POST /api/rider-comments] User:', decoded.code, decoded.role);
