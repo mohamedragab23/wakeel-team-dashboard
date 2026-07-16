@@ -114,6 +114,94 @@ export default function AdminRiderCommentsDashboard() {
 
   const frequencyData = calculateFrequency();
 
+  // Calculate repetition warnings
+  const getRepetitionWarnings = () => {
+    const warnings: {
+      riderCode: string;
+      riderName: string;
+      supervisorName: string;
+      issue: string;
+      count: number;
+      severity: 'high' | 'medium' | 'low';
+    }[] = [];
+
+    for (const freq of frequencyData) {
+      // Frequent accidents (2+ times)
+      const accidents = freq.categoryBreakdown['accident'] || 0;
+      if (accidents >= 2) {
+        warnings.push({
+          riderCode: freq.riderCode,
+          riderName: freq.riderName,
+          supervisorName: freq.supervisorName,
+          issue: `حوادث متكررة (${accidents} مرة)`,
+          count: accidents,
+          severity: accidents >= 3 ? 'high' : 'medium',
+        });
+      }
+
+      // Frequent medical leaves (3+ times)
+      const medicalLeaves = freq.categoryBreakdown['medical_leave'] || 0;
+      if (medicalLeaves >= 3) {
+        warnings.push({
+          riderCode: freq.riderCode,
+          riderName: freq.riderName,
+          supervisorName: freq.supervisorName,
+          issue: `إجازات مرضية متكررة (${medicalLeaves} مرة)`,
+          count: medicalLeaves,
+          severity: 'medium',
+        });
+      }
+
+      // Frequent vacations (4+ times in filter period)
+      const vacations = freq.categoryBreakdown['vacation'] || 0;
+      if (vacations >= 4) {
+        warnings.push({
+          riderCode: freq.riderCode,
+          riderName: freq.riderName,
+          supervisorName: freq.supervisorName,
+          issue: `إجازات متكررة (${vacations} مرة)`,
+          count: vacations,
+          severity: 'low',
+        });
+      }
+
+      // Frequent absences
+      const absences = freq.categoryBreakdown['frequent_absences'] || 0;
+      if (absences >= 2) {
+        warnings.push({
+          riderCode: freq.riderCode,
+          riderName: freq.riderName,
+          supervisorName: freq.supervisorName,
+          issue: `غيابات متكررة (${absences} مرة)`,
+          count: absences,
+          severity: 'high',
+        });
+      }
+
+      // Poor performance
+      const poorPerf = freq.categoryBreakdown['poor_performance'] || 0;
+      if (poorPerf >= 3) {
+        warnings.push({
+          riderCode: freq.riderCode,
+          riderName: freq.riderName,
+          supervisorName: freq.supervisorName,
+          issue: `أداء ضعيف متكرر (${poorPerf} مرة)`,
+          count: poorPerf,
+          severity: 'high',
+        });
+      }
+    }
+
+    return warnings.sort((a, b) => {
+      const severityOrder = { high: 0, medium: 1, low: 2 };
+      return severityOrder[a.severity] - severityOrder[b.severity] || b.count - a.count;
+    });
+  };
+
+  const warnings = getRepetitionWarnings();
+
+  const frequencyData = calculateFrequency();
+
   // Get unique supervisors for filter
   const supervisors = Array.from(
     new Set(comments.map((c) => c.supervisorName).filter(Boolean))
@@ -221,6 +309,59 @@ export default function AdminRiderCommentsDashboard() {
               </button>
             </div>
           </div>
+
+          {/* Repetition Warnings */}
+          {warnings.length > 0 && (
+            <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-6 mb-6">
+              <h2 className="text-xl font-semibold text-red-300 mb-4">
+                ⚠️ تحذيرات التكرار ({warnings.length})
+              </h2>
+              <p className="text-sm text-[#94A3B8] mb-4">
+                مناديب يحتاجون متابعة فورية بسبب تكرار نفس المشكلة
+              </p>
+              <div className="space-y-3">
+                {warnings.slice(0, 10).map((warning, idx) => (
+                  <div
+                    key={idx}
+                    className={`rounded-lg border p-4 ${
+                      warning.severity === 'high'
+                        ? 'border-red-500/50 bg-red-500/10'
+                        : warning.severity === 'medium'
+                          ? 'border-amber-500/50 bg-amber-500/10'
+                          : 'border-yellow-500/50 bg-yellow-500/10'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <p className="text-[#EAF0FF] font-semibold">
+                          {warning.severity === 'high' && '🔴 '}
+                          {warning.severity === 'medium' && '🟡 '}
+                          {warning.severity === 'low' && '🟢 '}
+                          {warning.riderName}
+                        </p>
+                        <p className="text-xs text-[#64748B]">
+                          {warning.riderCode} • المشرف: {warning.supervisorName}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold text-[#EAF0FF]">{warning.issue}</p>
+                        <p className="text-xs text-[#94A3B8]">
+                          {warning.severity === 'high' && 'عاجل - يحتاج تدخل فوري'}
+                          {warning.severity === 'medium' && 'مهم - يحتاج متابعة'}
+                          {warning.severity === 'low' && 'للمراقبة'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {warnings.length > 10 && (
+                <p className="text-sm text-[#94A3B8] mt-4 text-center">
+                  + {warnings.length - 10} تحذير آخر
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
