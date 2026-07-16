@@ -127,11 +127,12 @@ export default function RiderCommentsPage() {
       return;
     }
 
+    // Get comment or use default "working_normally"
     const quickComment = quickComments[riderCode];
-    if (!quickComment || !quickComment.category) {
-      notify.error('يرجى اختيار الفئة');
-      return;
-    }
+    const category = quickComment?.category || 'working_normally';
+    const notes = quickComment?.notes?.trim() || '';
+    const expectedReturnDate = quickComment?.expectedReturnDate || undefined;
+    const estimatedReturnDays = quickComment?.estimatedReturnDays ? Number(quickComment.estimatedReturnDays) : undefined;
 
     try {
       setSubmittingRider(riderCode);
@@ -140,10 +141,10 @@ export default function RiderCommentsPage() {
         riderCode: rider.code,
         riderName: rider.name,
         date: selectedDate,
-        category: quickComment.category,
-        expectedReturnDate: quickComment.expectedReturnDate || undefined,
-        estimatedReturnDays: quickComment.estimatedReturnDays ? Number(quickComment.estimatedReturnDays) : undefined,
-        notes: quickComment.notes.trim() || '',
+        category,
+        expectedReturnDate,
+        estimatedReturnDays,
+        notes,
       };
 
       console.log('[rider-comments] Submitting:', payload);
@@ -387,20 +388,25 @@ export default function RiderCommentsPage() {
           <div className="mt-6 rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-4">
             <h3 className="text-lg font-semibold text-cyan-300 mb-2">💡 نصائح سريعة</h3>
             <ul className="space-y-2 text-sm text-[#94A3B8]">
-              <li>
-                ✅ <strong>شغال عادي:</strong> الافتراضي - اضغط "حفظ" مباشرة بدون ملاحظات
+              <li className="flex items-start gap-2">
+                <span className="text-green-400 font-bold">✅</span>
+                <span><strong>شغال عادي (افتراضي):</strong> اضغط "💾 حفظ" مباشرة بدون تغيير أي شيء - سيتم حفظ "شغال عادي" تلقائياً</span>
               </li>
-              <li>
-                ✅ <strong>حادث/إجازة/غياب:</strong> اختر الفئة المناسبة من القائمة
+              <li className="flex items-start gap-2">
+                <span className="text-yellow-400 font-bold">⚠️</span>
+                <span><strong>حادث/إجازة/غياب:</strong> اختر الفئة المناسبة من القائمة المنسدلة</span>
               </li>
-              <li>
-                ✅ <strong>تاريخ العودة:</strong> سيظهر تلقائياً لكل الفئات ما عدا "شغال عادي"
+              <li className="flex items-start gap-2">
+                <span className="text-blue-400 font-bold">📅</span>
+                <span><strong>تاريخ العودة:</strong> سيظهر تلقائياً بعد اختيار أي فئة غير "شغال عادي"</span>
               </li>
-              <li>
-                ✅ <strong>ملاحظات:</strong> اختيارية - أضف تفاصيل إضافية إذا أردت
+              <li className="flex items-start gap-2">
+                <span className="text-purple-400 font-bold">📝</span>
+                <span><strong>ملاحظات:</strong> اختيارية تماماً - يمكنك الحفظ بدونها</span>
               </li>
-              <li>
-                ⚠️ <strong>مهم:</strong> إذا ظهر خطأ 401، قم بتسجيل الدخول من جديد
+              <li className="flex items-start gap-2">
+                <span className="text-red-400 font-bold">🔐</span>
+                <span><strong>401 Error:</strong> إذا ظهر خطأ "Unauthorized"، قم بتسجيل الدخول من جديد من الصفحة الرئيسية</span>
               </li>
             </ul>
           </div>
