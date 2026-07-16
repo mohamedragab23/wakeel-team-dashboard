@@ -2,6 +2,7 @@
 // For supervisors to log daily rider status and reasons
 
 export type CommentCategory =
+  | 'working_normally' // شغال عادي - لا توجد مشاكل
   | 'accident' // حادث
   | 'medical_leave' // إجازة مرضية
   | 'family_emergency' // عذر عائلي
@@ -28,6 +29,7 @@ export type RiderDailyComment = {
 };
 
 export const COMMENT_CATEGORY_LABELS_AR: Record<CommentCategory, string> = {
+  working_normally: 'شغال عادي',
   accident: 'حادث',
   medical_leave: 'إجازة مرضية',
   family_emergency: 'عذر عائلي',
@@ -40,6 +42,7 @@ export const COMMENT_CATEGORY_LABELS_AR: Record<CommentCategory, string> = {
 };
 
 export const COMMENT_CATEGORY_ICONS: Record<CommentCategory, string> = {
+  working_normally: '✅',
   accident: '🚑',
   medical_leave: '🏥',
   family_emergency: '👨‍👩‍👧‍👦',
@@ -52,6 +55,7 @@ export const COMMENT_CATEGORY_ICONS: Record<CommentCategory, string> = {
 };
 
 export const COMMENT_CATEGORY_COLORS: Record<CommentCategory, string> = {
+  working_normally: 'green',
   accident: 'red',
   medical_leave: 'orange',
   family_emergency: 'amber',

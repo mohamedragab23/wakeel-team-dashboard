@@ -19,9 +19,9 @@
 | D | supervisorCode | كود المشرف |
 | E | supervisorName | اسم المشرف |
 | F | date | تاريخ التعليق (YYYY-MM-DD) |
-| G | category | الفئة (accident, medical_leave, etc.) |
-| H | expectedReturnDate | تاريخ العودة المتوقع |
-| I | estimatedReturnDays | عدد أيام الغياب المتوقعة |
+| G | category | الفئة (working_normally, accident, medical_leave, etc.) |
+| H | expectedReturnDate | تاريخ العودة المتوقع (لجميع الفئات ما عدا working_normally) |
+| I | estimatedReturnDays | عدد أيام الغياب المتوقعة (لجميع الفئات ما عدا working_normally) |
 | J | notes | ملاحظات |
 | K | createdAt | تاريخ الإنشاء (ISO) |
 | L | updatedAt | تاريخ التحديث (ISO) |

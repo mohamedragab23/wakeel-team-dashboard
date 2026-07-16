@@ -69,16 +69,21 @@ export async function POST(request: NextRequest) {
   try {
     const token = request.cookies.get('token')?.value;
     if (!token) {
+      console.error('[POST /api/rider-comments] No token');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const decoded = verifyToken(token);
     if (!decoded) {
+      console.error('[POST /api/rider-comments] Invalid token');
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
+    console.log('[POST /api/rider-comments] User:', decoded.code, decoded.role);
+
     // Only supervisors and admins can add comments
     if (decoded.role !== 'supervisor' && decoded.role !== 'admin') {
+      console.error('[POST /api/rider-comments] Forbidden role:', decoded.role);
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -93,8 +98,11 @@ export async function POST(request: NextRequest) {
       notes,
     } = body;
 
+    console.log('[POST /api/rider-comments] Data:', { riderCode, riderName, date, category });
+
     // Validation
     if (!riderCode || !riderName || !date || !category) {
+      console.error('[POST /api/rider-comments] Missing fields:', { riderCode, riderName, date, category });
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
@@ -114,12 +122,14 @@ export async function POST(request: NextRequest) {
     });
 
     if (!result.success) {
+      console.error('[POST /api/rider-comments] Failed:', result.error);
       return NextResponse.json(
         { error: result.error || 'Failed to add comment' },
         { status: 500 }
       );
     }
 
+    console.log('[POST /api/rider-comments] Success!');
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('[POST /api/rider-comments] Error:', error);

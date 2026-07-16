@@ -45,27 +45,33 @@ export default function RiderCommentsPage() {
   const [submittingRider, setSubmittingRider] = useState<string | null>(null);
 
   const categoryOptions: { value: CommentCategory; label: string; icon: string }[] = [
-    { value: 'other', label: COMMENT_CATEGORY_LABELS_AR.other, icon: COMMENT_CATEGORY_ICONS.other },
-    { value: 'accident', label: COMMENT_CATEGORY_LABELS_AR.accident, icon: COMMENT_CATEGORY_ICONS.accident },
+    { value: 'working_normally', label: COMMENT_CATEGORY_LABELS_AR.working_normally, icon: COMMENT_CATEGORY_ICONS.working_normally },
+    { value: 'vacation', label: COMMENT_CATEGORY_LABELS_AR.vacation, icon: COMMENT_CATEGORY_ICONS.vacation },
     { value: 'medical_leave', label: COMMENT_CATEGORY_LABELS_AR.medical_leave, icon: COMMENT_CATEGORY_ICONS.medical_leave },
+    { value: 'accident', label: COMMENT_CATEGORY_LABELS_AR.accident, icon: COMMENT_CATEGORY_ICONS.accident },
     { value: 'family_emergency', label: COMMENT_CATEGORY_LABELS_AR.family_emergency, icon: COMMENT_CATEGORY_ICONS.family_emergency },
     { value: 'equipment_issue', label: COMMENT_CATEGORY_LABELS_AR.equipment_issue, icon: COMMENT_CATEGORY_ICONS.equipment_issue },
     { value: 'frequent_absences', label: COMMENT_CATEGORY_LABELS_AR.frequent_absences, icon: COMMENT_CATEGORY_ICONS.frequent_absences },
-    { value: 'vacation', label: COMMENT_CATEGORY_LABELS_AR.vacation, icon: COMMENT_CATEGORY_ICONS.vacation },
     { value: 'poor_performance', label: COMMENT_CATEGORY_LABELS_AR.poor_performance, icon: COMMENT_CATEGORY_ICONS.poor_performance },
     { value: 'terminated', label: COMMENT_CATEGORY_LABELS_AR.terminated, icon: COMMENT_CATEGORY_ICONS.terminated },
+    { value: 'other', label: COMMENT_CATEGORY_LABELS_AR.other, icon: COMMENT_CATEGORY_ICONS.other },
   ];
 
   useEffect(() => {
     loadRiders();
-    loadRecentComments();
+    // Don't load all comments on mount - too slow!
+    // loadRecentComments();
   }, []);
 
   const loadRiders = async () => {
     try {
       setLoading(true);
+      console.log('[rider-comments] Loading riders...');
       const response = await authFetch('/api/riders');
-      if (!response.ok) throw new Error('Failed to load riders');
+      if (!response.ok) {
+        console.error('[rider-comments] Failed to load riders:', response.status);
+        throw new Error('Failed to load riders');
+      }
       const data = await response.json();
       console.log('[rider-comments] Riders loaded:', data);
       
@@ -82,13 +88,20 @@ export default function RiderCommentsPage() {
   };
 
   const loadRecentComments = async () => {
+    // Only load comments for today to improve performance
     try {
-      const response = await authFetch('/api/rider-comments');
-      if (!response.ok) throw new Error('Failed to load comments');
+      const today = new Date().toISOString().split('T')[0];
+      const response = await authFetch(`/api/rider-comments?startDate=${today}&endDate=${today}`);
+      if (!response.ok) {
+        console.error('[rider-comments] Failed to load comments:', response.status);
+        return; // Don't throw - comments are optional
+      }
       const data = await response.json();
       setRecentComments(data.comments || []);
+      console.log('[rider-comments] Today comments loaded:', data.comments?.length || 0);
     } catch (error) {
       console.error('Error loading comments:', error);
+      // Don't show error - comments are not critical for page load
     }
   };
 
@@ -98,7 +111,7 @@ export default function RiderCommentsPage() {
       [riderCode]: {
         ...prev[riderCode],
         riderCode,
-        category: prev[riderCode]?.category || 'other',
+        category: prev[riderCode]?.category || 'working_normally',
         notes: prev[riderCode]?.notes || '',
         expectedReturnDate: prev[riderCode]?.expectedReturnDate || '',
         estimatedReturnDays: prev[riderCode]?.estimatedReturnDays || '',
@@ -133,15 +146,20 @@ export default function RiderCommentsPage() {
         notes: quickComment.notes.trim() || '',
       };
 
+      console.log('[rider-comments] Submitting:', payload);
+
       const response = await authFetch('/api/rider-comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
+      console.log('[rider-comments] Response status:', response.status);
+
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to add comment');
+        const errorData = await response.json().catch(() => ({ error: 'خطأ غير معروف' }));
+        console.error('[rider-comments] Error:', errorData);
+        throw new Error(errorData.error || `HTTP ${response.status}`);
       }
 
       notify.success(`✅ تم حفظ تعليق ${rider.name}`);
@@ -155,9 +173,9 @@ export default function RiderCommentsPage() {
 
       // Reload comments
       loadRecentComments();
-    } catch (error) {
-      console.error('Error adding comment:', error);
-      notify.error(`فشل حفظ التعليق: ${error}`);
+    } catch (error: any) {
+      console.error('[rider-comments] Submit error:', error);
+      notify.error(`فشل حفظ التعليق: ${error.message || 'خطأ غير معروف'}`);
     } finally {
       setSubmittingRider(null);
     }
@@ -171,7 +189,8 @@ export default function RiderCommentsPage() {
 
   const showReturnFields = (riderCode: string) => {
     const category = quickComments[riderCode]?.category;
-    return category === 'accident' || category === 'medical_leave';
+    // Show return date for all categories except "working normally"
+    return category && category !== 'working_normally';
   };
 
   const getRiderRecentComment = (riderCode: string) => {
@@ -277,7 +296,7 @@ export default function RiderCommentsPage() {
                           <td className="p-3 text-[#94A3B8]">{rider.region}</td>
                           <td className="p-3">
                             <select
-                              value={quickComment?.category || 'other'}
+                              value={quickComment?.category || 'working_normally'}
                               onChange={(e) =>
                                 handleQuickComment(rider.code, 'category', e.target.value as CommentCategory)
                               }
@@ -290,7 +309,7 @@ export default function RiderCommentsPage() {
                                 </option>
                               ))}
                             </select>
-                            {categoryCount > 0 && quickComment?.category !== 'other' && (
+                            {categoryCount > 0 && quickComment?.category !== 'working_normally' && (
                               <p className="text-xs text-red-300 mt-1">
                                 ⚠️ تكرر {categoryCount} مرة
                               </p>
@@ -303,7 +322,7 @@ export default function RiderCommentsPage() {
                                   onChange={(e) =>
                                     handleQuickComment(rider.code, 'expectedReturnDate', e.target.value)
                                   }
-                                  placeholder="تاريخ العودة"
+                                  placeholder="تاريخ العودة المتوقع"
                                   disabled={isSubmitting}
                                   className="w-full px-2 py-1 rounded bg-[#0f172a] border border-white/10 text-[#EAF0FF] text-xs focus:outline-none focus:border-cyan-500"
                                 />
@@ -314,7 +333,7 @@ export default function RiderCommentsPage() {
                                   onChange={(e) =>
                                     handleQuickComment(rider.code, 'estimatedReturnDays', e.target.value)
                                   }
-                                  placeholder="عدد الأيام"
+                                  placeholder="عدد الأيام المتوقعة"
                                   disabled={isSubmitting}
                                   className="w-full px-2 py-1 rounded bg-[#0f172a] border border-white/10 text-[#EAF0FF] text-xs focus:outline-none focus:border-cyan-500"
                                 />
