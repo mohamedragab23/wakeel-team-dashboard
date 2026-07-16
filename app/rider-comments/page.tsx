@@ -67,7 +67,12 @@ export default function RiderCommentsPage() {
       const response = await authFetch('/api/riders');
       if (!response.ok) throw new Error('Failed to load riders');
       const data = await response.json();
-      setRiders(data.riders || []);
+      console.log('[rider-comments] Riders loaded:', data);
+      
+      // API returns { success: true, data: [...] }
+      const ridersList = data.data || data.riders || [];
+      setRiders(ridersList);
+      console.log('[rider-comments] Riders count:', ridersList.length);
     } catch (error) {
       console.error('Error loading riders:', error);
       notify.error('فشل تحميل قائمة المناديب');
@@ -173,6 +178,14 @@ export default function RiderCommentsPage() {
     return recentComments.find((c) => c.riderCode === riderCode);
   };
 
+  const getRiderCommentCount = (riderCode: string) => {
+    return recentComments.filter((c) => c.riderCode === riderCode).length;
+  };
+
+  const getRiderCategoryCount = (riderCode: string, category: CommentCategory) => {
+    return recentComments.filter((c) => c.riderCode === riderCode && c.category === category).length;
+  };
+
   return (
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-[#0f172a] p-6">
@@ -237,8 +250,12 @@ export default function RiderCommentsPage() {
                   <tbody>
                     {filteredRiders.map((rider) => {
                       const recentComment = getRiderRecentComment(rider.code);
+                      const commentCount = getRiderCommentCount(rider.code);
                       const quickComment = quickComments[rider.code];
                       const isSubmitting = submittingRider === rider.code;
+                      const categoryCount = quickComment?.category 
+                        ? getRiderCategoryCount(rider.code, quickComment.category)
+                        : 0;
 
                       return (
                         <tr key={rider.code} className="border-b border-white/5 hover:bg-white/5">
@@ -249,6 +266,11 @@ export default function RiderCommentsPage() {
                               <p className="text-xs text-cyan-300 mt-1">
                                 آخر تعليق: {COMMENT_CATEGORY_ICONS[recentComment.category]}{' '}
                                 {COMMENT_CATEGORY_LABELS_AR[recentComment.category]} ({recentComment.date})
+                              </p>
+                            )}
+                            {commentCount > 0 && (
+                              <p className="text-xs text-amber-300 mt-1">
+                                📊 إجمالي التعليقات: {commentCount}
                               </p>
                             )}
                           </td>
@@ -268,6 +290,11 @@ export default function RiderCommentsPage() {
                                 </option>
                               ))}
                             </select>
+                            {categoryCount > 0 && quickComment?.category !== 'other' && (
+                              <p className="text-xs text-red-300 mt-1">
+                                ⚠️ تكرر {categoryCount} مرة
+                              </p>
+                            )}
                             {showReturnFields(rider.code) && (
                               <div className="mt-2 space-y-1">
                                 <input

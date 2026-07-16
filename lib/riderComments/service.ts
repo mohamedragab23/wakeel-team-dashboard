@@ -4,6 +4,37 @@ import type { RiderDailyComment, CommentCategory } from './types';
 const SHEET_NAME = 'rider_daily_comments';
 
 /**
+ * Ensure sheet exists with proper headers
+ */
+async function ensureSheetExists(): Promise<void> {
+  try {
+    const sheet = await getSheetData(SHEET_NAME, false);
+    
+    // If sheet exists but has no headers, add them
+    if (sheet.length === 0) {
+      const headers = [
+        'id',
+        'riderCode',
+        'riderName',
+        'supervisorCode',
+        'supervisorName',
+        'date',
+        'category',
+        'expectedReturnDate',
+        'estimatedReturnDays',
+        'notes',
+        'createdAt',
+        'updatedAt',
+      ];
+      await appendToSheet(SHEET_NAME, [headers]);
+      console.log('[ensureSheetExists] Headers added to sheet');
+    }
+  } catch (error) {
+    console.warn('[ensureSheetExists] Sheet may not exist yet - will be created on first write');
+  }
+}
+
+/**
  * Get all daily comments for a rider within a date range
  */
 export async function getRiderComments(
@@ -103,6 +134,8 @@ export async function getSupervisorComments(
   endDate?: string
 ): Promise<RiderDailyComment[]> {
   try {
+    await ensureSheetExists();
+    
     const sheet = await getSheetData(SHEET_NAME, false);
     if (sheet.length < 2) return [];
 
@@ -151,6 +184,8 @@ export async function addRiderComment(
   comment: Omit<RiderDailyComment, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await ensureSheetExists();
+    
     const now = new Date().toISOString();
     const id = `CMT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -212,6 +247,8 @@ export async function getAllComments(
   endDate?: string
 ): Promise<RiderDailyComment[]> {
   try {
+    await ensureSheetExists();
+    
     const sheet = await getSheetData(SHEET_NAME, false);
     if (sheet.length < 2) return [];
 
