@@ -200,8 +200,6 @@ export default function AdminRiderCommentsDashboard() {
 
   const warnings = getRepetitionWarnings();
 
-  const frequencyData = calculateFrequency();
-
   // Get unique supervisors for filter
   const supervisors = Array.from(
     new Set(comments.map((c) => c.supervisorName).filter(Boolean))
@@ -221,6 +219,7 @@ export default function AdminRiderCommentsDashboard() {
   }
 
   const categoryOptions: { value: CommentCategory; label: string; icon: string }[] = [
+    { value: 'working_normally', label: COMMENT_CATEGORY_LABELS_AR.working_normally, icon: COMMENT_CATEGORY_ICONS.working_normally },
     { value: 'accident', label: COMMENT_CATEGORY_LABELS_AR.accident, icon: COMMENT_CATEGORY_ICONS.accident },
     { value: 'medical_leave', label: COMMENT_CATEGORY_LABELS_AR.medical_leave, icon: COMMENT_CATEGORY_ICONS.medical_leave },
     { value: 'family_emergency', label: COMMENT_CATEGORY_LABELS_AR.family_emergency, icon: COMMENT_CATEGORY_ICONS.family_emergency },
