@@ -163,9 +163,9 @@ export default function RiderCommentsPage() {
         // Special handling for 401 Unauthorized
         if (response.status === 401) {
           notify.error('⚠️ انتهت صلاحية الجلسة - يرجى تسجيل الدخول من جديد');
-          // Redirect to login after 2 seconds
+          // Redirect to home (login page) after 2 seconds
           setTimeout(() => {
-            window.location.href = '/login';
+            window.location.href = '/';
           }, 2000);
           return;
         }

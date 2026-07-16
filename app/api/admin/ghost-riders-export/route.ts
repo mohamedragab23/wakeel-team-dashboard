@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { buildStrategicOpsReport, type StrategicOpsFilters } from '@/lib/strategicOps/buildReport';
 import * as XLSX from 'xlsx';
+import { AUTH_COOKIE_NAME } from '@/lib/requestAuth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,7 +10,7 @@ export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get('token')?.value;
+    const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
