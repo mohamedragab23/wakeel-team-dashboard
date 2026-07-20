@@ -88,6 +88,34 @@ export const CACHE_KEYS = {
     talabatKey: string;
   }) =>
     `strategic-ops:${params.startDate}:${params.endDate}:${params.zone}:${params.supervisorCode}:${params.scopeKey}:${params.talabatKey}`,
+  strategicOpsTrustScore: (params: {
+    startDate: string;
+    endDate: string;
+    zone: string;
+    supervisorCode: string;
+  }) =>
+    `strategic-ops-trust:${params.startDate}:${params.endDate}:${params.zone}:${params.supervisorCode}`,
+  strategicOpsLiveAudit: (params: {
+    startDate: string;
+    endDate: string;
+    zone: string;
+    supervisorCode: string;
+  }) =>
+    `strategic-ops-live-audit:${params.startDate}:${params.endDate}:${params.zone}:${params.supervisorCode}`,
+  strategicOpsSystemHealth: (params: {
+    startDate: string;
+    endDate: string;
+    zone: string;
+    supervisorCode: string;
+  }) =>
+    `strategic-ops-health:${params.startDate}:${params.endDate}:${params.zone}:${params.supervisorCode}`,
+  strategicOpsTrustHistory: (params: {
+    startDate: string;
+    endDate: string;
+    zone: string;
+    supervisorCode: string;
+  }) =>
+    `strategic-ops-trust-history:${params.startDate}:${params.endDate}:${params.zone}:${params.supervisorCode}`,
   salaryCalculation: (supervisorCode: string, startDate: string, endDate: string) =>
     `salary:${supervisorCode}:${startDate}:${endDate}`,
 };

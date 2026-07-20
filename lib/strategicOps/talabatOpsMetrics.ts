@@ -187,19 +187,49 @@ export function computeDailyTalabatSeries(input: {
   });
 }
 
+/**
+ * Aggregate Talabat metrics from daily series
+ * 
+ * CRITICAL FIX (SRS-001 Section 7):
+ * Daily averages are calculated using ONLY days with actual data (operational days),
+ * NOT all calendar days in the selected period.
+ * 
+ * Example:
+ * - Selected period: 7 days
+ * - Uploaded data: 5 days
+ * - Calculation: Total Hours ÷ 5 (NOT ÷ 7)
+ * 
+ * @implements SRS-001 Section 7 (Daily Average Logic)
+ */
 export function aggregateTalabatFromDailySeries(
   dailySeries: TalabatDailySnapshot[],
   headcount: number,
   uniqueActiveRidersInPeriod: number
 ): TalabatFleetMetrics {
-  const activeRiders = avg(dailySeries.map((d) => d.activeRiders));
-  const operationalDays = dailySeries.filter((d) => d.scheduledRiders > 0);
-  const noShowRiders =
-    operationalDays.length > 0
-      ? avg(operationalDays.map((d) => d.noShowRiders))
-      : 0;
-  const actualHours = avg(dailySeries.map((d) => d.hours));
-  const targetHours = avg(dailySeries.map((d) => d.targetHours));
+  // Operational days = days with at least one scheduled rider OR hours > 0
+  // This ensures we only calculate averages based on days with actual data
+  const operationalDays = dailySeries.filter((d) => d.scheduledRiders > 0 || d.hours > 0);
+  
+  // CRITICAL: Use operational days for averages, not all calendar days
+  const activeRiders = operationalDays.length > 0 
+    ? avg(operationalDays.map((d) => d.activeRiders))
+    : 0;
+  
+  const noShowRiders = operationalDays.length > 0
+    ? avg(operationalDays.map((d) => d.noShowRiders))
+    : 0;
+  
+  // FIXED: Average hours using only uploaded days (operational days)
+  // Previously: avg(dailySeries.map((d) => d.hours)) ❌
+  // Now: avg(operationalDays.map((d) => d.hours)) ✅
+  const actualHours = operationalDays.length > 0
+    ? avg(operationalDays.map((d) => d.hours))
+    : 0;
+  
+  const targetHours = operationalDays.length > 0
+    ? avg(operationalDays.map((d) => d.targetHours))
+    : 0;
+  
   const avgHoursPerActiveRider = activeRiders > 0 ? round2(actualHours / activeRiders) : 0;
   const utilizationPercent = pct(activeRiders, headcount);
   const achievementPercent = pct(actualHours, targetHours);

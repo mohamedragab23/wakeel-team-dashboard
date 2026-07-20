@@ -22,10 +22,31 @@ export function isRiderCode(code: unknown): boolean {
 }
 
 /**
- * Normalizes a code for matching purposes.
- * - If the code is a supervisor code (WA-xxx), returns it as-is (uppercase, trimmed).
- * - If the code is a rider code (numeric), normalizes it by removing leading zeros.
- * - Otherwise, attempts numeric normalization.
+ * Centralizes Rider Code Normalization
+ * 
+ * CRITICAL: This function is the SINGLE source of truth for code normalization.
+ * ALL code comparisons MUST use this function to ensure consistency.
+ * 
+ * Implements SRS-001 Section 12 (Rider Code Normalization)
+ * 
+ * Rules:
+ * 1. Supervisor codes (WA-xxx): Uppercase + trim, preserve format
+ * 2. Rider codes (numeric): Remove leading zeros, preserve digits
+ * 3. Arabic digits: Convert to Western (0-9)
+ * 4. Remove: BOM, quotes, commas, extra spaces
+ * 
+ * Examples:
+ *   Input          →  Output
+ *   "877614"       →  "877614"
+ *   "0877614"      →  "877614"
+ *   "877614.0"     →  "877614"
+ *   " 877614 "     →  "877614"
+ *   "WA-001"       →  "WA-001"
+ *   "wa-001"       →  "WA-001"
+ *   "٨٧٧٦١٤"      →  "877614"
+ * 
+ * @param code - Any value (string, number, etc.)
+ * @returns Normalized code string, or empty string if invalid
  */
 export function normalizeRiderCodeForPerformance(code: unknown): string {
   const raw = String(code ?? '')

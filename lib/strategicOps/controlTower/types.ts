@@ -570,6 +570,9 @@ export type RichPerfRec = {
   breakMinutes: number;
   delayMinutes: number;
   absenceFlag: string;
+  /** Day-level supervisor (SRS-008) */
+  supervisorCode?: string;
+  zone?: string;
 };
 
 export type ControlTowerBuildContext = {

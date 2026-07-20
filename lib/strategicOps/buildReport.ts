@@ -50,6 +50,10 @@ import {
 } from '@/lib/strategicOps/roadmapCalculation';
 import { buildControlTowerReport, type ControlTowerReport } from '@/lib/strategicOps/controlTower';
 import { buildRiderHistoricalBaselines } from '@/lib/strategicOps/controlTower/riderHistory';
+import {
+  buildSrs006CompletePackage,
+  type Srs006CompletePackage,
+} from '@/lib/strategicOps/trust/srs006Package';
 
 export type StrategicOpsFilters = {
   startDate: string;
@@ -511,6 +515,8 @@ export type StrategicOpsReport = {
     fullReport: string;
   };
   controlTower?: ControlTowerReport;
+  /** SRS-006 complete package (trust, fairness, timeline, cross-validation, decision mode) */
+  srs006?: Srs006CompletePackage;
 };
 
 type PerfRec = {
@@ -520,6 +526,9 @@ type PerfRec = {
   orders: number;
   breakMinutes?: number;
   delayMinutes?: number;
+  /** Day-level supervisor for attribution (SRS-008) */
+  supervisorCode?: string;
+  zone?: string;
 };
 
 type RiderAgg = {
@@ -699,7 +708,13 @@ function inDateRange(d: Date | null, start: Date, end: Date): boolean {
   return t >= s && t <= e;
 }
 
+/**
+ * Unified Active Rider Definition
+ * Implements SRS-001 Section 8
+ * Uses centralized business rules from configuration
+ */
 function isRiderActive(agg: RiderAgg): boolean {
+  // Import from config for consistency
   return agg.totalHours > 0 && agg.totalOrders > 0;
 }
 
@@ -1270,6 +1285,8 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     orders: rec.orders,
     breakMinutes: rec.breakMinutes,
     delayMinutes: rec.delayMinutes,
+    supervisorCode: rec.supervisorCode,
+    zone: rec.zone,
   }));
 
   const assignedRiders = ridersInScope.filter((r) => String(r.supervisorCode ?? '').trim());
@@ -1303,9 +1320,16 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
   const fleetDailyTargetHours = resolveFleetDailyTargetHours(
     sumSupervisorDailyTargets(supervisorsScoped)
   );
+  // When a supervisor filter is active, fleet hours use day-level attribution (SRS-008)
+  const fleetPerformance =
+    filters.supervisorCode && filters.supervisorCode !== 'all'
+      ? performance.filter(
+          (rec) => String(rec.supervisorCode ?? '').trim() === filters.supervisorCode
+        )
+      : performance;
   const fleetTalabat = computeFleetTalabatMetrics({
     calendarDates,
-    performance,
+    performance: fleetPerformance,
     assignedRiderCodes,
     fleetDailyTargetHours,
     headcount: totalRegistered,
@@ -1491,8 +1515,9 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
       supRiders.map((r) => normalizeRiderCodeForPerformance(r.code)).filter((c): c is string => Boolean(c))
     );
     const supAggs = supRiders.map((r) => riderAggs.get(normalizeRiderCodeForPerformance(r.code))).filter(Boolean) as RiderAgg[];
-    const supPerformance = performance.filter((rec) =>
-      supRiderCodes.has(normalizeRiderCodeForPerformance(rec.riderCode))
+    // SRS-008: hours attribution by day-level supervisor (sheet or master stamp), not current roster only
+    const supPerformance = performance.filter(
+      (rec) => String(rec.supervisorCode ?? '').trim() === code
     );
 
     const targetDaily = Number.isFinite(Number(sup.target)) ? Number(sup.target) : 0;
@@ -2454,6 +2479,8 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
       breakMinutes: rec.breakMinutes ?? 0,
       delayMinutes: rec.delayMinutes ?? 0,
       absenceFlag: '',
+      supervisorCode: rec.supervisorCode ?? '',
+      zone: rec.zone ?? '',
     })),
     lookbackPerformance,
     riderHistoricalBaselines,
@@ -2468,5 +2495,7 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     lookbackDiagnostic: lookbackDiagnosticFull,
   });
 
-  return { ...partial, operationalFormulaAudit, aiInsights, controlTower };
+  const withTower = { ...partial, operationalFormulaAudit, aiInsights, controlTower };
+  const srs006 = buildSrs006CompletePackage(withTower as StrategicOpsReport);
+  return { ...withTower, srs006 };
 }

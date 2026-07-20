@@ -15,6 +15,11 @@ export type ValidatedPerfRec = {
   breakMinutes: number;
   delayMinutes: number;
   sheetRow: number;
+  /** Day-level supervisor (sheet column if present, else master stamp) — SRS-008 */
+  supervisorCode: string;
+  zone: string;
+  /** true when supervisor came from daily sheet column */
+  supervisorFromSheet: boolean;
 };
 
 export type SmartDedupLogEntry = {
@@ -173,6 +178,7 @@ type RawPerfRow = {
   delayMinutes: number;
   sheetRow: number;
   smartResolution: SmartCodeResolution;
+  sheetSupervisorCode: string;
 };
 
 function buildMasterMap(riders: Rider[]): Map<string, Rider> {
@@ -250,7 +256,13 @@ function computeDataQualityScore(input: {
   return round2(Math.max(0, Math.min(100, score)));
 }
 
-function toValidatedRec(row: RawPerfRow): ValidatedPerfRec {
+function toValidatedRec(
+  row: RawPerfRow,
+  masterByNorm: Map<string, Rider>
+): ValidatedPerfRec {
+  const master = masterByNorm.get(row.riderCode);
+  const fromSheet = String(row.sheetSupervisorCode ?? '').trim();
+  const fromMaster = String(master?.supervisorCode ?? '').trim();
   return {
     date: row.date,
     riderCode: row.rawRiderCode,
@@ -259,7 +271,30 @@ function toValidatedRec(row: RawPerfRow): ValidatedPerfRec {
     breakMinutes: row.breakMinutes,
     delayMinutes: row.delayMinutes,
     sheetRow: row.sheetRow,
+    supervisorCode: fromSheet || fromMaster,
+    zone: String(master?.region ?? '').trim(),
+    supervisorFromSheet: Boolean(fromSheet),
   };
+}
+
+/** Detect optional supervisor column in daily sheet header (SRS-008 day attribution). */
+function detectSupervisorColumnIndex(headerRow: unknown[] | undefined): number {
+  if (!headerRow?.length) return -1;
+  for (let i = 0; i < headerRow.length; i++) {
+    const h = String(headerRow[i] ?? '')
+      .trim()
+      .toLowerCase();
+    if (
+      h.includes('مشرف') ||
+      h.includes('supervisor') ||
+      h === 'sup' ||
+      h.includes('supervisor code') ||
+      h.includes('كود المشرف')
+    ) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 /**
@@ -296,6 +331,8 @@ export function runDataIntegrityLayer(input: DataIntegrityInput): DataIntegrityR
   const rawInRange: RawPerfRow[] = [];
   const headerOffset =
     dailySheetRaw.length > 0 && String(dailySheetRaw[0][0] ?? '').includes('تاريخ') ? 1 : 0;
+  const supervisorCol =
+    headerOffset > 0 ? detectSupervisorColumnIndex(dailySheetRaw[0] as unknown[]) : -1;
 
   for (let i = headerOffset; i < dailySheetRaw.length; i++) {
     const row = dailySheetRaw[i];
@@ -329,6 +366,8 @@ export function runDataIntegrityLayer(input: DataIntegrityInput): DataIntegrityR
       delayMinutes: parseNum(row[4]),
       sheetRow: i + 1,
       smartResolution,
+      sheetSupervisorCode:
+        supervisorCol >= 0 ? String(row[supervisorCol] ?? '').trim() : '',
     });
   }
 
@@ -388,8 +427,8 @@ export function runDataIntegrityLayer(input: DataIntegrityInput): DataIntegrityR
     officialDeduped.push(kept);
   }
 
-  const officialPerformance = officialDeduped.map(toValidatedRec);
-  const shadowPerformance = shadowDeduped.map(toValidatedRec);
+  const officialPerformance = officialDeduped.map((r) => toValidatedRec(r, masterByNorm));
+  const shadowPerformance = shadowDeduped.map((r) => toValidatedRec(r, masterByNorm));
 
   const allKeptDates = new Set([
     ...officialDeduped.map((r) => r.date),

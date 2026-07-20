@@ -2,6 +2,7 @@
 
 import { authFetch } from '@/lib/authFetch';
 import { useMemo, useState, type ReactNode } from 'react';
+import Link from 'next/link';
 import Layout from '@/components/Layout';
 import { useQuery } from '@tanstack/react-query';
 import { usePageNotify } from '@/lib/usePageNotify';
@@ -29,6 +30,22 @@ import {
   exportStrategicOpsPdf,
   copyStrategicOpsText } from '@/lib/strategicOps/clientExport';
 import SupervisorScorecardsSection from '@/components/strategicOps/SupervisorScorecardsSection';
+import { ExecutiveTrustCenter } from '@/components/strategicOps/ExecutiveTrustCenter';
+import { LiveOperationsAudit } from '@/components/strategicOps/LiveOperationsAudit';
+import { KPILineageModal } from '@/components/strategicOps/KPILineageModal';
+import { buildKpiLineageFromAuditResult } from '@/lib/strategicOps/audit/kpiLineage';
+import { lineageFromAuditTrace } from '@/lib/strategicOps/audit/traceToLineage';
+import type { TrustScore } from '@/lib/strategicOps/trust';
+import type { LiveAuditReport, AuditResult, KPILineage } from '@/lib/strategicOps/audit';
+import {
+  ExecutiveDecisionBriefPanel,
+  ForecastValidationPanel,
+  CrossValidationPanel,
+  SupervisorFairnessPanel,
+  ExecutiveTimelinePanel,
+  CityIntelligencePanel,
+  RootCauseExplainPanel,
+} from '@/components/strategicOps/Srs006Panels';
 import {
   Bar,
   BarChart,
@@ -186,11 +203,29 @@ function IntelligenceFeed({ items, expanded }: { items: IntelligenceFeedItem[]; 
 }
 
 // ── Layer 8: Enhanced Action Card ────────────────────────────────────────────
-function ActionCard({ action, rank }: { action: ManagementAction; rank: number }) {
+function ActionCard({
+  action,
+  rank,
+  decisionConfidence,
+}: {
+  action: ManagementAction;
+  rank: number;
+  decisionConfidence?: {
+    confidencePercent: number;
+    confidenceLevel: string;
+    evidenceAr: string[];
+    historicalBasisAr: string;
+    businessRuleUsedAr: string;
+    expectedGainAr: string;
+    expectedRiskAr: string;
+    whyExistsAr: string;
+  };
+}) {
   const confidenceColors: Record<string, string> = {
     high: 'text-emerald-300',
     medium: 'text-amber-300',
     low: 'text-slate-400',
+    very_high: 'text-emerald-200',
   };
   const urgencyColors: Record<string, string> = {
     immediate: 'bg-red-500/20 text-red-200 border-red-500/40',
@@ -237,16 +272,36 @@ function ActionCard({ action, rank }: { action: ManagementAction; rank: number }
           {riderCount !== undefined && riderCount > 0 && (
             <span className="text-[#64748B]">👥 {riderCount} طيار</span>
           )}
-          {confidence && (
+          {decisionConfidence ? (
+            <span className={`${confidenceColors[decisionConfidence.confidenceLevel] ?? 'text-cyan-300'}`}>
+              ثقة القرار: {decisionConfidence.confidencePercent}% ({decisionConfidence.confidenceLevel})
+            </span>
+          ) : confidence ? (
             <span className={`${confidenceColors[confidence] ?? ''}`}>
               ثقة: {confidence === 'high' ? 'مرتفعة' : confidence === 'medium' ? 'متوسطة' : 'منخفضة'}
             </span>
-          )}
+          ) : null}
         </div>
         <p className="text-sm text-cyan-200/90 mt-1">
           <span className="text-[#64748B]">الإجراء: </span>
           {action.actionAr}
         </p>
+        {decisionConfidence && (
+          <div className="mt-2 rounded-lg border border-white/10 bg-black/20 p-2 text-[11px] text-[#94A3B8] space-y-1">
+            <p>{decisionConfidence.whyExistsAr}</p>
+            <p>الأساس التاريخي: {decisionConfidence.historicalBasisAr}</p>
+            <p>القاعدة: {decisionConfidence.businessRuleUsedAr}</p>
+            <p className="text-emerald-300/90">مكسب: {decisionConfidence.expectedGainAr}</p>
+            <p className="text-amber-300/90">مخاطر: {decisionConfidence.expectedRiskAr}</p>
+            {decisionConfidence.evidenceAr.length > 0 && (
+              <ul className="list-disc list-inside">
+                {decisionConfidence.evidenceAr.slice(0, 4).map((e) => (
+                  <li key={e}>{e}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -803,25 +858,37 @@ function TalabatKpiCard({
   sub,
   trace,
   rootCause,
+  onLineageClick,
 }: {
   label: string;
   value: string | number;
   sub?: string;
   trace?: StrategicOpsReport['talabatOperations']['auditTraces'][number];
   rootCause?: KpiRootCause;
+  onLineageClick?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [whyOpen, setWhyOpen] = useState(false);
   return (
-    <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-4">
+    <div
+      className={`rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-4 ${onLineageClick ? 'cursor-pointer hover:border-cyan-400/50' : ''}`}
+      onClick={onLineageClick}
+      role={onLineageClick ? 'button' : undefined}
+    >
       <p className="text-xs text-[#94A3B8] mb-1">{label}</p>
       <p className="text-2xl font-bold text-[#EAF0FF]">{value}</p>
+      {onLineageClick && (
+        <p className="text-[10px] text-cyan-300/80 mt-1">انقر لنسب المؤشر (Lineage)</p>
+      )}
       {sub && <p className="text-xs text-[#64748B] mt-1">{sub}</p>}
       {rootCause && (
         <>
           <button
             type="button"
-            onClick={() => setWhyOpen((o) => !o)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setWhyOpen((o) => !o);
+            }}
             className="text-xs text-emerald-300/90 mt-2 me-3 hover:underline"
           >
             {whyOpen ? `إخفاء ${L.kpiWhy}` : L.kpiWhy}
@@ -868,7 +935,10 @@ function TalabatKpiCard({
         <>
           <button
             type="button"
-            onClick={() => setOpen((o) => !o)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen((o) => !o);
+            }}
             className="text-xs text-cyan-300/90 mt-2 hover:underline"
           >
             {open ? 'إخفاء التدقيق' : 'عرض التدقيق'}
@@ -915,6 +985,10 @@ export default function StrategicOpsCenterPage() {
   const [talabatNoShow, setTalabatNoShow] = useState('');
   const [talabatHours, setTalabatHours] = useState('');
   const [talabatAchievement, setTalabatAchievement] = useState('');
+  const [lineage, setLineage] = useState<KPILineage | null>(null);
+  const [lineageOpen, setLineageOpen] = useState(false);
+  const [auditForceKey, setAuditForceKey] = useState(0);
+  const [showLiveAudit, setShowLiveAudit] = useState(true);
 
   const { data: supervisorsList } = useQuery({
     queryKey: ['admin', 'supervisors-list'],
@@ -945,6 +1019,45 @@ export default function StrategicOpsCenterPage() {
     },
     enabled: !!requestFilters,
     staleTime: 2 * 60 * 1000 });
+
+  const trustQs = useMemo(() => {
+    if (!requestFilters) return null;
+    return new URLSearchParams({
+      startDate: requestFilters.startDate,
+      endDate: requestFilters.endDate,
+      zone: requestFilters.zone,
+      supervisorCode: requestFilters.supervisorCode,
+    }).toString();
+  }, [requestFilters]);
+
+  const { data: trustScore, isLoading: trustLoading } = useQuery({
+    queryKey: ['strategic-ops-trust-score', trustQs],
+    queryFn: async () => {
+      const res = await authFetch(`/api/strategic-ops/trust-score?${trustQs}`);
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'فشل تحميل درجة الثقة');
+      return json.data as TrustScore;
+    },
+    enabled: !!trustQs && !!report,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const {
+    data: liveAudit,
+    isLoading: auditLoading,
+    isFetching: auditFetching,
+  } = useQuery({
+    queryKey: ['strategic-ops-live-audit', trustQs, auditForceKey],
+    queryFn: async () => {
+      const force = auditForceKey > 0 ? '&force=1' : '';
+      const res = await authFetch(`/api/strategic-ops/live-audit?${trustQs}${force}`);
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'فشل تشغيل التدقيق');
+      return json.data as LiveAuditReport;
+    },
+    enabled: !!trustQs && !!report && showLiveAudit,
+    staleTime: 5 * 60 * 1000,
+  });
 
   const supervisorsFiltered = useMemo(() => {
     if (!supervisorsList) return [];
@@ -991,12 +1104,81 @@ export default function StrategicOpsCenterPage() {
     }
   };
 
+  const openAuditLineage = (result: AuditResult) => {
+    if (!report) return;
+    setLineage(
+      buildKpiLineageFromAuditResult(result, {
+        sourceRows: report.dataIntegrity.totalRows,
+        rowsUsed: report.dataIntegrity.officialRows,
+        duplicateRows: report.dataIntegrity.duplicateRows,
+        ghostRows: report.dataIntegrity.shadowRows,
+        scopeExcluded: report.dataIntegrity.scopeExcludedRiderCount,
+        coverage: report.sourceDataCoverage?.coverage ?? report.dataIntegrity.completenessPercentage,
+        lastRefresh: report.meta.generatedAt,
+      })
+    );
+    setLineageOpen(true);
+  };
+
+  const openTraceLineage = (
+    trace: StrategicOpsReport['talabatOperations']['auditTraces'][number]
+  ) => {
+    if (!report) return;
+    setLineage(
+      lineageFromAuditTrace(trace, {
+        coverage: report.sourceDataCoverage?.coverage ?? report.dataIntegrity.completenessPercentage,
+        lastRefresh: report.meta.generatedAt,
+        sourceRows: report.dataIntegrity.totalRows,
+      })
+    );
+    setLineageOpen(true);
+  };
+
+  const decisionConfidenceById = useMemo(() => {
+    const map = new Map<
+      string,
+      NonNullable<Parameters<typeof ActionCard>[0]['decisionConfidence']>
+    >();
+    for (const a of report?.srs006?.decisionConfidenceActions ?? []) {
+      map.set(a.id, a.decisionConfidence);
+    }
+    return map;
+  }, [report?.srs006?.decisionConfidenceActions]);
+
   return (
     <Layout>
       <div className="space-y-6 min-w-0 pb-12" dir="rtl">
-        <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-bold text-[#EAF0FF]">{L.pageTitle}</h1>
-          <p className="text-sm text-[#94A3B8]">{L.pageSubtitle}</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex flex-col gap-2">
+            <h1 className="text-2xl font-bold text-[#EAF0FF]">{L.pageTitle}</h1>
+            <p className="text-sm text-[#94A3B8]">{L.pageSubtitle}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/admin/strategic-ops/war-room"
+              className="rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-200 hover:bg-violet-500/20"
+            >
+              Executive War Room ←
+            </Link>
+            <Link
+              href="/admin/strategic-ops/integrity"
+              className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/20"
+            >
+              System Integrity Center ←
+            </Link>
+            <Link
+              href="/admin/strategic-ops/validation-center"
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-500/20"
+            >
+              Ops Validation (SRS-008) ←
+            </Link>
+            <Link
+              href="/admin/strategic-ops/enterprise-certification"
+              className="rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-xs font-semibold text-yellow-200 hover:bg-yellow-500/20"
+            >
+              Enterprise Certification (SRS-009) ←
+            </Link>
+          </div>
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
@@ -1039,6 +1221,38 @@ export default function StrategicOpsCenterPage() {
 
         {report && (
           <>
+            <ExecutiveTrustCenter
+              trustScore={trustScore}
+              loading={trustLoading || !trustScore}
+              onViewDetails={() => {
+                window.location.assign('/admin/strategic-ops/integrity');
+              }}
+            />
+
+            {report.srs006 && (
+              <>
+                <ExecutiveDecisionBriefPanel pack={report.srs006} />
+                <Section title="التحقق من التوقعات — Forecast Validation">
+                  <ForecastValidationPanel pack={report.srs006} />
+                </Section>
+                <Section title="التحقق المتقاطع — Cross Validation">
+                  <CrossValidationPanel pack={report.srs006} />
+                </Section>
+                <Section title="الجدول الزمني التنفيذي">
+                  <ExecutiveTimelinePanel pack={report.srs006} />
+                </Section>
+                <Section title="ذكاء المدينة — City Intelligence">
+                  <CityIntelligencePanel pack={report.srs006} />
+                </Section>
+                <Section title="عدالة المشرفين — Supervisor Fairness">
+                  <SupervisorFairnessPanel pack={report.srs006} />
+                </Section>
+                <Section title="تفسير السبب الجذري الموسّع">
+                  <RootCauseExplainPanel pack={report.srs006} />
+                </Section>
+              </>
+            )}
+
             {report.kpiTrust.level > 1 && (
               <div
                 className={`rounded-2xl border p-4 text-sm font-medium ${
@@ -1056,6 +1270,25 @@ export default function StrategicOpsCenterPage() {
                   {report.kpiTrust.lowConfidenceStrategic && !report.kpiTrust.disableStiOrpsGrowthRoadmap && ' — مؤشرات استراتيجية بثقة منخفضة'}
                 </span>
               </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setShowLiveAudit((v) => !v)}
+                className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-[#EAF0FF] hover:bg-white/10"
+              >
+                {showLiveAudit ? 'إخفاء Live Operations Audit' : 'عرض Live Operations Audit'}
+              </button>
+            </div>
+
+            {showLiveAudit && (
+              <LiveOperationsAudit
+                auditReport={liveAudit}
+                loading={auditLoading || auditFetching}
+                onRefresh={() => setAuditForceKey((k) => k + 1)}
+                onKpiClick={openAuditLineage}
+              />
             )}
 
             {/* درجة صحة التشغيل — معطّلة عند تغطية < 80% */}
@@ -1094,7 +1327,12 @@ export default function StrategicOpsCenterPage() {
                 </p>
                 <div className="space-y-3">
                   {report.controlTower.executiveFocus.map((action, idx) => (
-                    <ActionCard key={action.id} action={action} rank={idx + 1} />
+                    <ActionCard
+                      key={action.id}
+                      action={action}
+                      rank={idx + 1}
+                      decisionConfidence={decisionConfidenceById.get(action.id)}
+                    />
                   ))}
                 </div>
               </Section>
@@ -1200,11 +1438,15 @@ export default function StrategicOpsCenterPage() {
               </Section>
             )}
 
-            {/* Phase 2: Recovery Simulator */}
+            {/* Phase 2: Recovery Simulator + link to full Digital Twin Lab */}
             {report.controlTower?.recoverySimulatorInputs && report.controlTower.recoverySimulatorInputs.totalGap > 0 && (
               <Section title="🔧 محاكي الاسترداد — ماذا لو؟">
                 <p className="text-xs text-[#64748B] mb-3">
                   حرك الأشرطة لمحاكاة أثر تدخلاتك التشغيلية على الفجوة — الحسابات فورية.
+                  {' '}
+                  <Link href="/admin/strategic-ops/war-room" className="text-cyan-300 hover:underline">
+                    افتح What-If Lab الكامل (تعيين / هدف / مالي) ←
+                  </Link>
                 </p>
                 <RecoverySimulatorPanel inputs={report.controlTower.recoverySimulatorInputs} />
               </Section>
@@ -1262,7 +1504,12 @@ export default function StrategicOpsCenterPage() {
                   ) : (
                     <div className="space-y-3">
                       {report.controlTower.executiveFocus.map((action, idx) => (
-                        <ActionCard key={action.id} action={action} rank={idx + 1} />
+                        <ActionCard
+                          key={action.id}
+                          action={action}
+                          rank={idx + 1}
+                          decisionConfidence={decisionConfidenceById.get(action.id)}
+                        />
                       ))}
                     </div>
                   )}
@@ -1344,14 +1591,14 @@ export default function StrategicOpsCenterPage() {
                 </span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <TalabatKpiCard label={L.headcount} value={report.talabatOperations.headcount} trace={report.talabatOperations.auditTraces[0]} rootCause={kpiRootCauseMap.get('headcount')} />
-                <TalabatKpiCard label={L.activeRiders} value={report.talabatOperations.activeRiders} sub={`تشخيص فريد: ${report.talabatOperations.uniqueActiveRidersInPeriod}`} trace={report.talabatOperations.auditTraces[1]} rootCause={kpiRootCauseMap.get('activeRiders')} />
-                <TalabatKpiCard label={L.noShowRiders} value={report.talabatOperations.noShowRiders} trace={report.talabatOperations.auditTraces[2]} rootCause={kpiRootCauseMap.get('noShowRiders')} />
-                <TalabatKpiCard label={L.actualHours} value={report.talabatOperations.actualHours} sub="متوسط يومي" trace={report.talabatOperations.auditTraces[3]} rootCause={kpiRootCauseMap.get('actualHours')} />
-                <TalabatKpiCard label={L.targetHours} value={report.talabatOperations.targetHours} sub="متوسط يومي" trace={report.talabatOperations.auditTraces[4]} rootCause={kpiRootCauseMap.get('targetHours')} />
-                <TalabatKpiCard label={L.achievementPercent} value={`${report.talabatOperations.achievementPercent}%`} trace={report.talabatOperations.auditTraces[5]} rootCause={kpiRootCauseMap.get('achievementPercent')} />
-                <TalabatKpiCard label={L.avgHoursPerActiveRider} value={report.talabatOperations.avgHoursPerActiveRider} trace={report.talabatOperations.auditTraces[6]} />
-                <TalabatKpiCard label={L.utilizationRate} value={`${report.talabatOperations.utilizationPercent}%`} trace={report.talabatOperations.auditTraces[7]} rootCause={kpiRootCauseMap.get('utilizationPercent')} />
+                <TalabatKpiCard label={L.headcount} value={report.talabatOperations.headcount} trace={report.talabatOperations.auditTraces[0]} rootCause={kpiRootCauseMap.get('headcount')} onLineageClick={report.talabatOperations.auditTraces[0] ? () => openTraceLineage(report.talabatOperations.auditTraces[0]) : undefined} />
+                <TalabatKpiCard label={L.activeRiders} value={report.talabatOperations.activeRiders} sub={`تشخيص فريد: ${report.talabatOperations.uniqueActiveRidersInPeriod}`} trace={report.talabatOperations.auditTraces[1]} rootCause={kpiRootCauseMap.get('activeRiders')} onLineageClick={report.talabatOperations.auditTraces[1] ? () => openTraceLineage(report.talabatOperations.auditTraces[1]) : undefined} />
+                <TalabatKpiCard label={L.noShowRiders} value={report.talabatOperations.noShowRiders} trace={report.talabatOperations.auditTraces[2]} rootCause={kpiRootCauseMap.get('noShowRiders')} onLineageClick={report.talabatOperations.auditTraces[2] ? () => openTraceLineage(report.talabatOperations.auditTraces[2]) : undefined} />
+                <TalabatKpiCard label={L.actualHours} value={report.talabatOperations.actualHours} sub="متوسط يومي" trace={report.talabatOperations.auditTraces[3]} rootCause={kpiRootCauseMap.get('actualHours')} onLineageClick={report.talabatOperations.auditTraces[3] ? () => openTraceLineage(report.talabatOperations.auditTraces[3]) : undefined} />
+                <TalabatKpiCard label={L.targetHours} value={report.talabatOperations.targetHours} sub="متوسط يومي" trace={report.talabatOperations.auditTraces[4]} rootCause={kpiRootCauseMap.get('targetHours')} onLineageClick={report.talabatOperations.auditTraces[4] ? () => openTraceLineage(report.talabatOperations.auditTraces[4]) : undefined} />
+                <TalabatKpiCard label={L.achievementPercent} value={`${report.talabatOperations.achievementPercent}%`} trace={report.talabatOperations.auditTraces[5]} rootCause={kpiRootCauseMap.get('achievementPercent')} onLineageClick={report.talabatOperations.auditTraces[5] ? () => openTraceLineage(report.talabatOperations.auditTraces[5]) : undefined} />
+                <TalabatKpiCard label={L.avgHoursPerActiveRider} value={report.talabatOperations.avgHoursPerActiveRider} trace={report.talabatOperations.auditTraces[6]} onLineageClick={report.talabatOperations.auditTraces[6] ? () => openTraceLineage(report.talabatOperations.auditTraces[6]) : undefined} />
+                <TalabatKpiCard label={L.utilizationRate} value={`${report.talabatOperations.utilizationPercent}%`} trace={report.talabatOperations.auditTraces[7]} rootCause={kpiRootCauseMap.get('utilizationPercent')} onLineageClick={report.talabatOperations.auditTraces[7] ? () => openTraceLineage(report.talabatOperations.auditTraces[7]) : undefined} />
               </div>
               <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
                 <p className="text-sm font-semibold text-amber-200/90 mb-3">{L.noShowComparison}</p>
@@ -2642,6 +2889,12 @@ export default function StrategicOpsCenterPage() {
             </Section>
           </>
         )}
+
+        <KPILineageModal
+          lineage={lineage}
+          isOpen={lineageOpen}
+          onClose={() => setLineageOpen(false)}
+        />
       </div>
     </Layout>
   );
