@@ -1,39 +1,30 @@
 /**
  * API Route: Recruitment Metrics
- * 
+ *
  * GET /api/strategic-ops/recruitment
- * 
+ *
  * Returns hiring, termination, and reactivation metrics.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { calculateRecruitmentMetrics } from '@/lib/strategicOps/integration';
-import { verifyAuth } from '@/lib/auth';
+import { requireStrategicOpsAdmin } from '@/lib/strategicOps/apiAuth';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify authentication
-    const user = await verifyAuth(request);
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-    
-    // Get query parameters
+    const auth = requireStrategicOpsAdmin(request, 'recruitment-metrics');
+    if (!auth.ok) return auth.response;
+
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get('startDate') || getDefaultStartDate();
     const endDate = searchParams.get('endDate') || getDefaultEndDate();
-    const totalRiders = parseInt(searchParams.get('totalRiders') || '0');
-    
-    // Calculate metrics
-    const metrics = await calculateRecruitmentMetrics(
-      startDate,
-      endDate,
-      totalRiders
-    );
-    
+    const totalRiders = parseInt(searchParams.get('totalRiders') || '0', 10);
+
+    const metrics = await calculateRecruitmentMetrics(startDate, endDate, totalRiders);
+
     return NextResponse.json({
       success: true,
       data: metrics,
@@ -46,7 +37,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Error in recruitment metrics API:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }
@@ -54,7 +45,7 @@ export async function GET(request: NextRequest) {
 
 function getDefaultStartDate() {
   const date = new Date();
-  date.setMonth(date.getMonth() - 3); // 3 months ago
+  date.setMonth(date.getMonth() - 3);
   return date.toISOString().split('T')[0];
 }
 
