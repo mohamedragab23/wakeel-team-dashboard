@@ -85,56 +85,57 @@ async function attemptTokenRefresh(currentHeaders: Record<string, string>): Prom
       return null;
     }
 
-    // Extract new dhh_token and refresh_token from Set-Cookie header
-    const setCookieHeader = res.headers.get('set-cookie');
-    if (!setCookieHeader) {
-      logStructured('error', 'rooster_live_refresh_no_set_cookie', { 
-        message: 'Okta endpoint succeeded but no Set-Cookie header returned'
+    // Node/undici: get('set-cookie') often returns only the first cookie.
+    const setCookies =
+      typeof res.headers.getSetCookie === 'function'
+        ? res.headers.getSetCookie()
+        : [res.headers.get('set-cookie')].filter(Boolean) as string[];
+
+    if (!setCookies.length) {
+      logStructured('error', 'rooster_live_refresh_no_set_cookie', {
+        message: 'Okta endpoint succeeded but no Set-Cookie header returned',
       });
       return null;
     }
 
-    // Parse dhh_token from Set-Cookie (format: dhh_token=<JWT>;Path=/)
-    const dhhMatch = setCookieHeader.match(/dhh_token=([^;]+)/);
-    const refreshMatch = setCookieHeader.match(/refresh_token=([^;]+)/);
-    
+    const joined = setCookies.join('\n');
+    const dhhMatch = joined.match(/dhh_token=([^;,\s]+)/);
+    const refreshMatch = joined.match(/refresh_token=([^;,\s]+)/);
+
     const newDhhToken = dhhMatch ? dhhMatch[1] : null;
     const newRefreshToken = refreshMatch ? refreshMatch[1] : null;
 
     if (!newDhhToken) {
-      logStructured('error', 'rooster_live_refresh_no_dhh_token', { 
-        message: 'Okta endpoint succeeded but dhh_token not found in Set-Cookie'
+      logStructured('error', 'rooster_live_refresh_no_dhh_token', {
+        message: 'Okta endpoint succeeded but dhh_token not found in Set-Cookie',
+        setCookieCount: setCookies.length,
       });
       return null;
     }
 
-    logStructured('info', 'rooster_live_token_refreshed', { 
+    logStructured('info', 'rooster_live_token_refreshed', {
       message: 'Successfully refreshed dhh_token via Okta endpoint',
       newDhhTokenLength: newDhhToken.length,
-      hasRefreshToken: !!newRefreshToken
+      hasRefreshToken: !!newRefreshToken,
     });
 
-    // Build updated Cookie header with new dhh_token
-    let updatedCookie = cookie;
-    
-    // Remove old dhh_token if exists
-    updatedCookie = updatedCookie.replace(/dhh_token=[^;]+(;\s*)?/, '');
-    // Remove old refresh_token if exists
-    updatedCookie = updatedCookie.replace(/refresh_token=[^;]+(;\s*)?/, '');
-    
-    // Append new tokens
+    // Start from stable CF cookies only, then attach freshly minted tokens.
+    let updatedCookie = cookie
+      .replace(/dhh_token=[^;]+(;\s*)?/g, '')
+      .replace(/refresh_token=[^;]+(;\s*)?/g, '')
+      .replace(/;+/g, ';')
+      .replace(/^;\s*/, '')
+      .replace(/;\s*$/, '');
+
     updatedCookie = `${updatedCookie}; dhh_token=${newDhhToken}`;
     if (newRefreshToken) {
       updatedCookie = `${updatedCookie}; refresh_token=${newRefreshToken}`;
     }
-    
-    // Clean up any double semicolons or leading/trailing semicolons
     updatedCookie = updatedCookie.replace(/;+/g, ';').replace(/^;\s*/, '').replace(/;\s*$/, '');
 
-    // Return updated headers with refreshed tokens
     return {
       ...currentHeaders,
-      'Cookie': updatedCookie,
+      Cookie: updatedCookie,
     };
 
   } catch (error: any) {
@@ -146,10 +147,13 @@ async function attemptTokenRefresh(currentHeaders: Record<string, string>): Prom
   }
 }
 
-async function fetchWithRetry(url: string, headers: Record<string, string>): Promise<Response> {
+async function fetchWithRetry(
+  url: string,
+  headers: Record<string, string>
+): Promise<{ res: Response; headers: Record<string, string> }> {
   let lastError: unknown;
   let currentHeaders = { ...headers };
-  
+
   for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
     try {
       const res = await fetch(url, {
@@ -157,61 +161,77 @@ async function fetchWithRetry(url: string, headers: Record<string, string>): Pro
         headers: { Accept: 'application/json', ...currentHeaders },
         cache: 'no-store',
       });
-      
-      if (res.ok) return res;
-      
-      // 🔥 AUTO-REFRESH on 401 (first attempt only)
+
+      // Cloudflare Access often returns 200 with an HTML login page when cookies are stale.
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('text/html')) {
+          if (attempt === 1) {
+            const refreshed = await attemptTokenRefresh(currentHeaders);
+            if (refreshed) {
+              currentHeaders = refreshed;
+              continue;
+            }
+          }
+          const body = await res.text().catch(() => '');
+          throw new Error(
+            'Rooster live returned HTML login page instead of JSON (HTTP 200). ' +
+              'CF_Authorization / CF_AppSession cookies are missing or expired. ' +
+              'Update Google Sheet cron_config → ROOSTER_EXPORT_HEADERS_JSON with a fresh Cookie from the browser. ' +
+              body.slice(0, 120)
+          );
+        }
+        return { res, headers: currentHeaders };
+      }
+
       if (res.status === 401 && attempt === 1) {
-        logStructured('warn', 'rooster_live_auth_expired', { 
-          url, 
+        logStructured('warn', 'rooster_live_auth_expired', {
+          url,
           attempt,
-          message: 'Received 401, attempting automatic token refresh via Okta endpoint'
+          message: 'Received 401, attempting automatic token refresh via Okta endpoint',
         });
-        
-        // Try to refresh dhh_token using CF_Authorization
+
         const refreshed = await attemptTokenRefresh(currentHeaders);
         if (refreshed) {
-          logStructured('info', 'rooster_live_retry_with_new_token', { 
-            message: 'Retrying request with refreshed dhh_token'
+          logStructured('info', 'rooster_live_retry_with_new_token', {
+            message: 'Retrying request with refreshed dhh_token',
           });
           currentHeaders = refreshed;
-          continue; // Retry with new token
-        } else {
-          logStructured('error', 'rooster_live_refresh_failed_permanent', { 
-            message: 'Auto-refresh failed. CF_Authorization may have expired (24h TTL). Update Google Sheet with new cookies from browser.'
-          });
+          continue;
         }
+        logStructured('error', 'rooster_live_refresh_failed_permanent', {
+          message:
+            'Auto-refresh failed. CF_Authorization may have expired (24h TTL). Update Google Sheet with new cookies from browser.',
+        });
       }
-      
-      // Fail fast on auth errors (no refresh available or refresh already tried)
+
       if (res.status === 401 || res.status === 403) {
         const body = await res.text().catch(() => '');
         throw new Error(
           `Rooster live auth rejected (${res.status}). ` +
-          `Auto-refresh ${attempt === 1 ? 'failed' : 'not attempted (already tried)'}. ` +
-          `CF_Authorization cookie may have expired (24h TTL). ` +
-          `Update Google Sheet cron_config with new cookies from browser: ${body.slice(0, 200)}`
+            `Auto-refresh ${attempt === 1 ? 'failed' : 'not attempted (already tried)'}. ` +
+            `CF_Authorization cookie may have expired (24h TTL). ` +
+            `Update Google Sheet cron_config with new cookies from browser: ${body.slice(0, 200)}`
         );
       }
-      
-      // Retry on 429/5xx
+
       if (res.status !== 429 && res.status < 500) {
         const body = await res.text().catch(() => '');
         throw new Error(`Rooster live request failed (${res.status}): ${body.slice(0, 300)}`);
       }
-      
+
       lastError = new Error(`Rooster live transient error (${res.status})`);
     } catch (err) {
       lastError = err;
     }
-    
+
     if (attempt < RETRY_ATTEMPTS) {
       const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
       logStructured('warn', 'rooster_live_fetch_retry', { attempt, delay, url });
       await sleep(delay);
     }
   }
-  
+
   throw lastError instanceof Error ? lastError : new Error('Rooster live fetch failed after retries');
 }
 
@@ -243,15 +263,44 @@ export async function fetchAllRoosterLiveRiders(options?: {
   pageSize?: number;
 }): Promise<{ rawRiders: unknown[]; pagesFetched: number }> {
   const size = options?.pageSize ?? DEFAULT_PAGE_SIZE;
-  const headers = await getRoosterLiveHeaders();
+  let headers = await getRoosterLiveHeaders();
+
+  // Mint a fresh dhh_token every sync from stable CF cookies.
+  // Prevents failure when the browser Live page rotates dhh_token every ~1 min.
+  const refreshed = await attemptTokenRefresh(headers);
+  if (refreshed) {
+    headers = refreshed;
+  } else {
+    logStructured('warn', 'rooster_live_proactive_refresh_failed', {
+      message:
+        'Could not mint dhh_token before sync; will still try with CF cookies and refresh on 401.',
+    });
+  }
 
   const rawRiders: unknown[] = [];
   let page = 0;
 
   while (page < MAX_PAGES_SAFETY_CAP) {
     const url = buildPageUrl(page, size);
-    const res = await fetchWithRetry(url, headers);
-    const payload = await res.json();
+    const { res, headers: nextHeaders } = await fetchWithRetry(url, headers);
+    headers = nextHeaders;
+    const rawText = await res.text();
+    const trimmed = rawText.trim();
+    if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
+      throw new Error(
+        'Rooster live returned HTML instead of JSON — auth cookies expired or invalid. ' +
+          'Update cron_config → ROOSTER_EXPORT_HEADERS_JSON with Cookie containing CF_Authorization + CF_AppSession only (no dhh_token).'
+      );
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      throw new Error(
+        `Rooster live response is not valid JSON (starts with: ${trimmed.slice(0, 80)}). ` +
+          'Usually means Cloudflare Access blocked the request — refresh CF cookies in Google Sheet.'
+      );
+    }
     const rows = extractRows(payload);
     rawRiders.push(...rows);
 

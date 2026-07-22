@@ -27,7 +27,15 @@ export async function GET(req: NextRequest) {
     await sendAdminTelegramNotificationSafe({
       type: 'system_alert',
       alertTitle: '🚨 *تنبيه: فشل مزامنة العمليات المباشرة*',
-      alertMessage: `فشلت عملية مزامنة البيانات المباشرة من طلبات (Rooster Live Sync).\n\n*السبب:* ${result.error}\n\n*الإجراء المطلوب:* تحديث cookies في Google Sheet\n(cron_config → ROOSTER_EXPORT_HEADERS_JSON)`,
+      alertMessage:
+        `فشلت عملية مزامنة البيانات المباشرة من طلبات (Rooster Live Sync).\n\n` +
+        `*السبب:* ${result.error}\n\n` +
+        `*الإجراء المطلوب:*\n` +
+        `1) افتح eg.me.logisticsbackoffice.com وسجّل دخول\n` +
+        `2) من DevTools → Network انسخ Cookie (لازم يحتوي CF_Authorization و CF_AppSession)\n` +
+        `3) حدّث Google Sheet تبويب cron_config المفتاح ROOSTER_EXPORT_HEADERS_JSON بالقيمة:\n` +
+        `{"Cookie":"...الصق الكوكي هنا..."}\n` +
+        `4) انتظر دقيقة ثم افتح /live-riders`,
       priority: 'high',
       url: `${process.env.NEXT_PUBLIC_APP_URL || ''}/live-riders`,
     });
