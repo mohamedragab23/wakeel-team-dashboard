@@ -74,6 +74,19 @@ export type KPI = {
   formula?: string;
 };
 
+/** Construct a KPI with the shared metadata shape. */
+export function createKPI(
+  id: string,
+  name: string,
+  nameAr: string,
+  category: KPICategory,
+  value: KPIValue,
+  format: KPIFormat,
+  formula?: string
+): KPI {
+  return { id, name, nameAr, category, value, format, formula };
+}
+
 /**
  * KPI Categories (18 categories from SRS-003)
  */

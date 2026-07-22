@@ -137,7 +137,7 @@ export function generateGrowthPlan(
   
   // 4. Retention strategy (if high inactive riders)
   const activePercent = (currentData.headcount.workingRiders.value.current / 
-                        currentData.headcount.totalRiders.value.current) * 100;
+                        currentData.headcount.registeredRiders.value.current) * 100;
   if (activePercent < 70) {
     strategies.push(generateRetentionStrategy(currentData));
   }
@@ -169,7 +169,7 @@ export function generateGrowthPlan(
 
 function generateCapacityStrategy(data: KPIEngineOutput, forecast: ForecastResult): GrowthStrategy {
   const currentHours = data.hours.totalWorkingHours.value.current;
-  const targetHours = data.hours.targetHours.value.current;
+  const targetHours = data.hours.potentialHours.value.current;
   const gap = targetHours - currentHours;
   const gapPercent = (gap / targetHours) * 100;
   
@@ -423,7 +423,7 @@ function generateQualityStrategy(data: KPIEngineOutput): GrowthStrategy {
 }
 
 function generateRetentionStrategy(data: KPIEngineOutput): GrowthStrategy {
-  const totalRiders = data.headcount.totalRiders.value.current;
+  const totalRiders = data.headcount.registeredRiders.value.current;
   const workingRiders = data.headcount.workingRiders.value.current;
   const inactiveRiders = totalRiders - workingRiders;
   const activePercent = (workingRiders / totalRiders) * 100;
@@ -508,18 +508,18 @@ function generateRetentionStrategy(data: KPIEngineOutput): GrowthStrategy {
 function calculateOverallTargets(data: KPIEngineOutput, forecast: ForecastResult) {
   return {
     week: {
-      hours: forecast.week.value,
-      orders: forecast.week.value * 2.3,
+      hours: forecast.nextWeek.hours,
+      orders: forecast.nextWeek.orders,
       riders: data.headcount.workingRiders.value.current * 1.05,
     },
     month: {
-      hours: forecast.month.value,
-      orders: forecast.month.value * 2.3,
+      hours: forecast.nextMonth.hours,
+      orders: forecast.nextMonth.orders,
       riders: data.headcount.workingRiders.value.current * 1.15,
     },
     quarter: {
-      hours: forecast.quarter.value,
-      orders: forecast.quarter.value * 2.3,
+      hours: forecast.nextQuarter.hours,
+      orders: forecast.nextQuarter.orders,
       riders: data.headcount.workingRiders.value.current * 1.30,
     },
   };

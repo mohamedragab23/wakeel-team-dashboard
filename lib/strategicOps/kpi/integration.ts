@@ -8,10 +8,29 @@
  * @version 1.0
  */
 
-import type { FilteredDailySeries, FilteredSupByRow, Rider } from '@/lib/strategicOps/buildReport';
+import type { Rider } from '@/lib/adminService';
 import type { KPIEngineInput, DailyPerformanceRecord } from './engine';
 import { calculateAllKPIs } from './engine';
 import { OPERATIONAL_TARGETS } from '../config/businessRules';
+
+type FilteredDailySeries = {
+  date: string;
+  scheduledRiders: number;
+  hours: number;
+};
+
+type FilteredSupByRow = {
+  included: boolean;
+  date: string;
+  riderCode: string;
+  hours: number;
+  orders: number;
+  breakMinutes: number;
+  lateMinutes: number;
+  absence: boolean;
+  supervisorCode: string;
+  zone: string;
+};
 
 // ============================================================================
 // DATA MAPPING FUNCTIONS
@@ -115,8 +134,8 @@ export function createKPIEngineInput(
     dateRange,
     filters,
     config: {
-      expectedDailyHours: config?.expectedDailyHours ?? OPERATIONAL_TARGETS.EXPECTED_DAILY_HOURS,
-      targetDailyHours: config?.targetDailyHours ?? OPERATIONAL_TARGETS.TARGET_DAILY_HOURS,
+      expectedDailyHours: config?.expectedDailyHours ?? OPERATIONAL_TARGETS.EXPECTED_HOURS_PER_RIDER,
+      targetDailyHours: config?.targetDailyHours ?? OPERATIONAL_TARGETS.DAILY_HOURS_TARGET,
     },
     dataQuality,
   };

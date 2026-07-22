@@ -219,8 +219,8 @@ function generateKeyFindings(
   
   // Root cause finding
   if (rootCauses && rootCauses.topCause) {
-    bullets.push(`Top issue: ${rootCauses.topCause.title} (${rootCauses.topCause.contributionHours.toFixed(0)}h impact)`);
-    bulletsAr.push(`المشكلة الرئيسية: ${rootCauses.topCause.titleAr} (تأثير ${rootCauses.topCause.contributionHours.toFixed(0)} ساعة)`);
+    bullets.push(`Top issue: ${rootCauses.topCause.category} (${rootCauses.topCause.hoursLost.toFixed(0)}h impact)`);
+    bulletsAr.push(`المشكلة الرئيسية: ${rootCauses.topCause.categoryAr} (تأثير ${rootCauses.topCause.hoursLost.toFixed(0)} ساعة)`);
   }
   
   // Opportunity finding
@@ -262,15 +262,15 @@ function generateRootCausesSection(rootCauses?: RootCauseAnalysis): NarrativeSec
   
   const bullets = rootCauses.rootCauses
     .slice(0, 5)
-    .map(rc => `${rc.title}: ${rc.contributionHours.toFixed(0)}h (${rc.contributionPercent.toFixed(0)}%)`);
+    .map(rc => `${rc.category}: ${rc.hoursLost.toFixed(0)}h (${rc.percentOfGap.toFixed(0)}%)`);
   
   const bulletsAr = rootCauses.rootCauses
     .slice(0, 5)
-    .map(rc => `${rc.titleAr}: ${rc.contributionHours.toFixed(0)} ساعة (${rc.contributionPercent.toFixed(0)}%)`);
+    .map(rc => `${rc.categoryAr}: ${rc.hoursLost.toFixed(0)} ساعة (${rc.percentOfGap.toFixed(0)}%)`);
   
-  const content = `Analysis identified ${rootCauses.rootCauses.length} contributing factors. Top cause: ${rootCauses.topCause?.title || 'N/A'} (${rootCauses.topCause?.contributionHours.toFixed(0) || 0}h impact). ${rootCauses.actionableRootCauses} factors are actionable, representing ${rootCauses.actionableHours.toFixed(0)}h recoverable.`;
+  const content = `Analysis identified ${rootCauses.rootCauses.length} contributing factors. Top cause: ${rootCauses.topCause?.category || 'N/A'} (${rootCauses.topCause?.hoursLost.toFixed(0) || 0}h impact). ${rootCauses.rootCauses.filter(rc => rc.actionable).length} factors are actionable, representing ${rootCauses.actionableHours.toFixed(0)}h recoverable.`;
   
-  const contentAr = `التحليل حدد ${rootCauses.rootCauses.length} عامل مساهم. السبب الرئيسي: ${rootCauses.topCause?.titleAr || 'غير متاح'} (تأثير ${rootCauses.topCause?.contributionHours.toFixed(0) || 0} ساعة). ${rootCauses.actionableRootCauses} عامل قابل للحل، يمثل ${rootCauses.actionableHours.toFixed(0)} ساعة قابلة للاسترجاع.`;
+  const contentAr = `التحليل حدد ${rootCauses.rootCauses.length} عامل مساهم. السبب الرئيسي: ${rootCauses.topCause?.categoryAr || 'غير متاح'} (تأثير ${rootCauses.topCause?.hoursLost.toFixed(0) || 0} ساعة). ${rootCauses.rootCauses.filter(rc => rc.actionable).length} عامل قابل للحل، يمثل ${rootCauses.actionableHours.toFixed(0)} ساعة قابلة للاسترجاع.`;
   
   return {
     title: 'Root Cause Analysis',
@@ -439,9 +439,9 @@ function generateRecommendationsSection(
   }
   
   // From root causes
-  if (rootCauses && rootCauses.actionItems.length > 0) {
-    bullets.push(rootCauses.actionItems[0]);
-    bulletsAr.push(rootCauses.actionItemsAr[0]);
+  if (rootCauses?.topCause) {
+    bullets.push(rootCauses.topCause.recommendation);
+    bulletsAr.push(rootCauses.topCause.recommendationAr);
   }
   
   // From opportunities
@@ -480,9 +480,9 @@ function generateMainSummary(
   const status = achievement >= 90 ? '✅ ON TRACK' : achievement >= 70 ? '⚠️ BELOW TARGET' : '🔴 CRITICAL';
   const statusAr = achievement >= 90 ? '✅ على المسار' : achievement >= 70 ? '⚠️ تحت الهدف' : '🔴 حرج';
   
-  const english = `${status} at ${achievement.toFixed(1)}% of target. ${kpis.headcount.workingRiders.value.current} riders working, ${kpis.hours.totalWorkingHours.value.current.toFixed(0)}h completed, ${kpis.orders.totalOrders.value.current.toLocaleString()} orders. ${rootCauses?.actionableRootCauses || 0} actionable issues, ${opportunities?.quickWins.length || 0} quick wins, ${risks?.criticalRisks || 0} critical risks. ${actionPlan?.urgentActions || 0} urgent actions today.`;
+  const english = `${status} at ${achievement.toFixed(1)}% of target. ${kpis.headcount.workingRiders.value.current} riders working, ${kpis.hours.totalWorkingHours.value.current.toFixed(0)}h completed, ${kpis.orders.totalOrders.value.current.toLocaleString()} orders. ${rootCauses?.rootCauses.filter(rc => rc.actionable).length || 0} actionable issues, ${opportunities?.quickWins.length || 0} quick wins, ${risks?.criticalRisks || 0} critical risks. ${actionPlan?.urgentActions || 0} urgent actions today.`;
   
-  const arabic = `${statusAr} عند ${achievement.toFixed(1)}% من الهدف. ${kpis.headcount.workingRiders.value.current} مندوب عامل، ${kpis.hours.totalWorkingHours.value.current.toFixed(0)} ساعة مكتملة، ${kpis.orders.totalOrders.value.current.toLocaleString()} أوردر. ${rootCauses?.actionableRootCauses || 0} مشكلة قابلة للحل، ${opportunities?.quickWins.length || 0} فرصة سريعة، ${risks?.criticalRisks || 0} خطر حرج. ${actionPlan?.urgentActions || 0} إجراء عاجل اليوم.`;
+  const arabic = `${statusAr} عند ${achievement.toFixed(1)}% من الهدف. ${kpis.headcount.workingRiders.value.current} مندوب عامل، ${kpis.hours.totalWorkingHours.value.current.toFixed(0)} ساعة مكتملة، ${kpis.orders.totalOrders.value.current.toLocaleString()} أوردر. ${rootCauses?.rootCauses.filter(rc => rc.actionable).length || 0} مشكلة قابلة للحل، ${opportunities?.quickWins.length || 0} فرصة سريعة، ${risks?.criticalRisks || 0} خطر حرج. ${actionPlan?.urgentActions || 0} إجراء عاجل اليوم.`;
   
   return { english, arabic };
 }

@@ -13,7 +13,7 @@ function run(
 }
 
 function skip(
-  partial: Omit<ValidationTestResult, 'status' | 'durationMs'> & {
+  partial: Omit<ValidationTestResult, 'status' | 'durationMs' | 'expected' | 'actual'> & {
     expected?: string;
     actual?: string;
   }

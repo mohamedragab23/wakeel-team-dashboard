@@ -63,6 +63,9 @@ export type ForecastAnalysis = {
   };
 };
 
+/** Backward-compatible result name used by growth planning. */
+export type ForecastResult = ForecastAnalysis;
+
 // Historical data point
 export type HistoricalDataPoint = {
   date: string;
@@ -296,7 +299,7 @@ function forecastMovingAverage(values: number[], steps: number): number {
  * Exponential smoothing forecast
  */
 function forecastExponentialSmoothing(values: number[], steps: number): number {
-  const alpha = FORECAST_SETTINGS.exponentialSmoothingAlpha;
+  const alpha = FORECAST_SETTINGS.EXPONENTIAL_SMOOTHING_ALPHA;
   
   let smoothed = values[0];
   values.slice(1).forEach(value => {

@@ -178,8 +178,8 @@ export function detectRisks(kpis: KPIEngineOutput): RiskAnalysis {
  */
 function detectPerformanceDeclineRisk(kpis: KPIEngineOutput): Risk | null {
   // Check if hours are declining
-  const hoursChange = kpis.hours.totalWorkingHours.value.changePercent || 0;
-  const ordersChange = kpis.orders.totalOrders.value.changePercent || 0;
+  const hoursChange = kpis.hours.totalWorkingHours.value.growthPercent || 0;
+  const ordersChange = kpis.orders.totalOrders.value.growthPercent || 0;
   
   if (hoursChange < -10 || ordersChange < -15) {
     const severity: RiskSeverity = hoursChange < -20 ? 'critical' : hoursChange < -15 ? 'high' : 'medium';
@@ -385,7 +385,7 @@ function detectCapacityShortageRisk(kpis: KPIEngineOutput): Risk | null {
  * Detect data quality deterioration
  */
 function detectQualityDeteriorationRisk(kpis: KPIEngineOutput): Risk | null {
-  const qualityScore = kpis.dataQuality?.qualityScore?.value.current || 100;
+  const qualityScore = kpis.dataQuality?.overallQualityScore?.value.current || 100;
   
   if (qualityScore < 80) {
     const severity: RiskSeverity = qualityScore < 60 ? 'critical' : qualityScore < 70 ? 'high' : 'medium';
@@ -522,7 +522,7 @@ function detectAttendanceCrisisRisk(kpis: KPIEngineOutput): Risk | null {
  */
 function detectEfficiencyDropRisk(kpis: KPIEngineOutput): Risk | null {
   const ordersPerHour = kpis.orders.ordersPerHour.value.current;
-  const ordersChange = kpis.orders.ordersPerHour.value.changePercent || 0;
+  const ordersChange = kpis.orders.ordersPerHour.value.growthPercent || 0;
   
   if (ordersPerHour < 2.0 && ordersChange < -10) {
     const severity: RiskSeverity = ordersPerHour < 1.5 ? 'critical' : 'high';

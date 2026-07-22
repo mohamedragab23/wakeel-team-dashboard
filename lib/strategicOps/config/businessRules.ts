@@ -305,6 +305,9 @@ export const FORECAST_SETTINGS = {
    */
   MIN_FORECAST_CONFIDENCE: 0.7,
 
+  /** Exponential smoothing weight for the latest observation. */
+  EXPONENTIAL_SMOOTHING_ALPHA: 0.3,
+
   /**
    * Forecast horizon (days)
    * @default 30
@@ -317,6 +320,11 @@ export const FORECAST_SETTINGS = {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const RIDER_CLASSIFICATION = {
+  /** Score/percentile thresholds used by rider intelligence ranking. */
+  star: { minScore: 85, percentile: 20 },
+  solid: { minScore: 70, percentile: 50 },
+  atRisk: { minScore: 50, percentile: 80 },
+
   /**
    * Elite: Top performers
    * Hours >= this threshold
@@ -411,7 +419,7 @@ export function isRiderActiveByRules(
   status?: string
 ): boolean {
   // Check excluded statuses
-  if (status && ACTIVE_RIDER_RULES.EXCLUDED_STATUSES.includes(status)) {
+  if (status && ACTIVE_RIDER_RULES.EXCLUDED_STATUSES.includes(status as typeof ACTIVE_RIDER_RULES.EXCLUDED_STATUSES[number])) {
     return false;
   }
 

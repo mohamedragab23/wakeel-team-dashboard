@@ -57,6 +57,9 @@ export type GapAnalysis = {
   nonActionableHours: number;
 };
 
+/** Backward-compatible name used by downstream AI modules. */
+export type RootCauseAnalysis = GapAnalysis;
+
 // ============================================================================
 // CATEGORY LABELS
 // ============================================================================

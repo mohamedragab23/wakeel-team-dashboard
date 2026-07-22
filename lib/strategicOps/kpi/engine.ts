@@ -36,6 +36,7 @@ import {
   type KPICalculationInput,
   type DailyPerformanceRecord,
 } from './calculators';
+export type { DailyPerformanceRecord } from './calculators';
 
 import {
   calculateBreakKPIs,
@@ -666,5 +667,4 @@ export function calculateAllKPIs(input: KPIEngineInput): KPIEngineOutput {
 // UTILITY EXPORTS
 // ============================================================================
 
-export type { KPIEngineInput, DailyPerformanceRecord };
 export { calculateAllKPIs as default };

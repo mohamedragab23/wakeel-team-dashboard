@@ -653,7 +653,7 @@ function checkLatePercent(data: KPIEngineOutput): Recommendation[] {
 
 function checkLostHours(data: KPIEngineOutput): Recommendation[] {
   const recommendations: Recommendation[] = [];
-  const lostHours = data.lostHours.lostHoursPercent.value.current;
+  const lostHours = data.lostHours.lostPercent.value.current;
   
   if (lostHours > BUSINESS_RULES.CRITICAL_LOST_HOURS.threshold) {
     recommendations.push({
@@ -706,7 +706,7 @@ function checkLostHours(data: KPIEngineOutput): Recommendation[] {
 
 function checkInactiveRiders(data: KPIEngineOutput): Recommendation[] {
   const recommendations: Recommendation[] = [];
-  const totalRiders = data.headcount.totalRiders.value.current;
+  const totalRiders = data.headcount.registeredRiders.value.current;
   const workingRiders = data.headcount.workingRiders.value.current;
   const inactivePercent = ((totalRiders - workingRiders) / totalRiders) * 100;
   

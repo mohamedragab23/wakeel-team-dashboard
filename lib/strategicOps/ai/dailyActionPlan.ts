@@ -140,7 +140,7 @@ export function generateDailyActionPlan(
   
   // 1. Generate actions from root causes (problems to fix)
   rootCauses.rootCauses
-    .filter(rc => rc.isActionable)
+    .filter(rc => rc.actionable)
     .forEach(rc => {
       const action = generateRootCauseAction(rc, actionIdCounter++);
       if (action) actions.push(action);
@@ -202,8 +202,8 @@ export function generateDailyActionPlan(
   return {
     generatedAt: new Date(),
     dateRange: {
-      from: kpis.hours.totalWorkingHours.dateRange?.from || '',
-      to: kpis.hours.totalWorkingHours.dateRange?.to || '',
+      from: kpis.dateRange.startDate,
+      to: kpis.dateRange.endDate,
     },
     totalActions: actions.length,
     urgentActions: immediatePriorities.length,

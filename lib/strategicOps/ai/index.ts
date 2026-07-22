@@ -122,7 +122,6 @@ export type {
 export {
   compareEntities,
   generateBenchmarkAnalysis,
-  compareSupervisors,
 } from './comparativeIntelligence';
 
 // Growth Strategy
@@ -244,7 +243,7 @@ function generateExecutiveSummary(
 **Operations Status:** ${status} (${hoursAchievement.toFixed(1)}% of target)
 
 **Key Findings:**
-- ${rootCauses.actionableRootCauses} actionable issues identified (${rootCauses.actionableHours.toFixed(0)} hours recoverable)
+- ${rootCauses.rootCauses.filter(rc => rc.actionable).length} actionable issues identified (${rootCauses.actionableHours.toFixed(0)} hours recoverable)
 - ${opportunities.totalOpportunities} opportunities (${opportunities.totalPotentialHoursGain.toFixed(0)} hours potential)
 - ${risks.totalRisks} risks detected (${risks.criticalRisks} critical)
 
@@ -258,7 +257,7 @@ function generateExecutiveSummary(
 **حالة العمليات:** ${statusAr} (${hoursAchievement.toFixed(1)}% من الهدف)
 
 **النتائج الرئيسية:**
-- ${rootCauses.actionableRootCauses} مشكلة قابلة للحل (${rootCauses.actionableHours.toFixed(0)} ساعة قابلة للاسترجاع)
+- ${rootCauses.rootCauses.filter(rc => rc.actionable).length} مشكلة قابلة للحل (${rootCauses.actionableHours.toFixed(0)} ساعة قابلة للاسترجاع)
 - ${opportunities.totalOpportunities} فرصة (${opportunities.totalPotentialHoursGain.toFixed(0)} ساعة محتملة)
 - ${risks.totalRisks} خطر مكتشف (${risks.criticalRisks} حرج)
 

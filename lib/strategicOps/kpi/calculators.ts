@@ -186,7 +186,7 @@ export function calculateWorkingRiders(
   }
   
   const current = Array.from(riderAggs.values()).filter(
-    agg => isRiderActiveByRules(agg.totalHours, agg.totalOrders, null)
+    agg => isRiderActiveByRules(agg.totalHours, agg.totalOrders)
   ).length;
   
   // Previous period
@@ -200,7 +200,7 @@ export function calculateWorkingRiders(
       prevAggs.set(rec.riderCode, agg);
     }
     previous = Array.from(prevAggs.values()).filter(
-      agg => isRiderActiveByRules(agg.totalHours, agg.totalOrders, null)
+      agg => isRiderActiveByRules(agg.totalHours, agg.totalOrders)
     ).length;
   }
   
@@ -917,12 +917,3 @@ export function calculateOrdersKPIs(
   };
 }
 
-// ============================================================================
-// EXPORTS
-// ============================================================================
-
-export {
-  calculateHeadcountKPIs,
-  calculateHoursKPIs,
-  calculateOrdersKPIs,
-};

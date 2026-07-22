@@ -241,14 +241,14 @@ function calculateWeightedScore(components: SupervisorScoreComponents): number {
   const weights = SUPERVISOR_SCORE_WEIGHTS;
   
   const score = 
-    (components.hoursAchievement * weights.hoursAchievement) +
-    (components.ordersPerHour * weights.ordersPerHour) +
-    (components.attendanceRate * weights.attendanceRate) +
-    (components.breakCompliance * weights.breakCompliance) +
-    (components.lateCompliance * weights.lateCompliance) +
-    (components.activeRidersPercent * weights.activeRidersPercent) +
-    (components.dataQuality * weights.dataQuality) +
-    (components.commentsQuality * weights.commentsQuality);
+    (components.hoursAchievement * weights.TARGET_ACHIEVEMENT) +
+    (components.ordersPerHour * weights.ORDERS_PER_HOUR) +
+    (components.attendanceRate * weights.ATTENDANCE) +
+    (components.breakCompliance * weights.LOST_HOURS) +
+    (components.lateCompliance * weights.LOST_HOURS) +
+    (components.activeRidersPercent * weights.UTILIZATION) +
+    (components.dataQuality * weights.DATA_QUALITY) +
+    (components.commentsQuality * weights.DATA_QUALITY);
   
   return Math.max(0, Math.min(100, score));
 }
