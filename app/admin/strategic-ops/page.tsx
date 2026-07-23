@@ -33,6 +33,7 @@ import SupervisorScorecardsSection from '@/components/strategicOps/SupervisorSco
 import { ExecutiveTrustCenter } from '@/components/strategicOps/ExecutiveTrustCenter';
 import { LiveOperationsAudit } from '@/components/strategicOps/LiveOperationsAudit';
 import { KPILineageModal } from '@/components/strategicOps/KPILineageModal';
+import { StrategicOpsCommentsPanel } from '@/components/strategicOps/StrategicOpsCommentsPanel';
 import { buildKpiLineageFromAuditResult } from '@/lib/strategicOps/audit/kpiLineage';
 import { lineageFromAuditTrace } from '@/lib/strategicOps/audit/traceToLineage';
 import type { TrustScore } from '@/lib/strategicOps/trust';
@@ -1178,6 +1179,12 @@ export default function StrategicOpsCenterPage() {
             >
               Enterprise Certification (SRS-009) ←
             </Link>
+            <Link
+              href="/admin/rider-comments-dashboard"
+              className="rounded-lg border border-pink-500/40 bg-pink-500/10 px-3 py-2 text-xs font-semibold text-pink-200 hover:bg-pink-500/20"
+            >
+              لوحة التعليقات اليومية ←
+            </Link>
           </div>
         </div>
 
@@ -1221,6 +1228,12 @@ export default function StrategicOpsCenterPage() {
 
         {report && (
           <>
+            <StrategicOpsCommentsPanel
+              startDate={requestFilters?.startDate || startDate}
+              endDate={requestFilters?.endDate || endDate}
+              enabled={Boolean(requestFilters)}
+            />
+
             <ExecutiveTrustCenter
               trustScore={trustScore}
               loading={trustLoading || !trustScore}
