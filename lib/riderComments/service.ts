@@ -249,7 +249,7 @@ export async function getAllComments(
   try {
     await ensureSheetExists();
     
-    const sheet = await getSheetData(SHEET_NAME, false);
+    const sheet = await getSheetData(SHEET_NAME, true);
     if (sheet.length < 2) return [];
 
     const comments: RiderDailyComment[] = [];
@@ -295,7 +295,7 @@ async function getCommentsForDateRange(
   endDate: string
 ): Promise<RiderDailyComment[]> {
   try {
-    const sheet = await getSheetData(SHEET_NAME, false);
+    const sheet = await getSheetData(SHEET_NAME, true);
     if (sheet.length < 2) return [];
 
     const comments: RiderDailyComment[] = [];
@@ -338,7 +338,7 @@ export async function getRidersExpectedToReturn(
   withinDays: number
 ): Promise<RiderDailyComment[]> {
   try {
-    const sheet = await getSheetData(SHEET_NAME, false);
+    const sheet = await getSheetData(SHEET_NAME, true);
     if (sheet.length < 2) return [];
 
     const today = new Date();
