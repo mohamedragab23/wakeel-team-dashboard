@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Layout from '@/components/Layout';
 import { authFetch } from '@/lib/authFetch';
 import { usePageNotify } from '@/lib/usePageNotify';
@@ -38,7 +38,8 @@ export default function RiderCommentsPage() {
   const notify = usePageNotify();
   const [riders, setRiders] = useState<Rider[]>([]);
   const [recentComments, setRecentComments] = useState<Comment[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [quickComments, setQuickComments] = useState<Record<string, QuickCommentState>>({});
@@ -58,29 +59,32 @@ export default function RiderCommentsPage() {
   ];
 
   useEffect(() => {
-    loadRiders();
-    // Don't load all comments on mount - too slow!
-    // loadRecentComments();
+    void loadRiders();
+    void loadRecentComments();
   }, []);
 
   const loadRiders = async () => {
     try {
       setLoading(true);
-      console.log('[rider-comments] Loading riders...');
-      const response = await authFetch('/api/riders');
+      setLoadError(null);
+      // fields=basic skips N× full scans of البيانات اليومية (page only needs roster identity)
+      const response = await authFetch('/api/riders?fields=basic');
       if (!response.ok) {
-        console.error('[rider-comments] Failed to load riders:', response.status);
-        throw new Error('Failed to load riders');
+        throw new Error(`HTTP ${response.status}`);
       }
       const data = await response.json();
-      console.log('[rider-comments] Riders loaded:', data);
-      
-      // API returns { success: true, data: [...] }
+      if (!data.success) {
+        throw new Error(data.error || 'فشل تحميل المناديب');
+      }
+
       const ridersList = data.data || data.riders || [];
       setRiders(ridersList);
-      console.log('[rider-comments] Riders count:', ridersList.length);
+      if (ridersList.length === 0) {
+        setLoadError('لا يوجد مناديب معيّنين على حسابك حالياً');
+      }
     } catch (error) {
       console.error('Error loading riders:', error);
+      setLoadError('فشل تحميل قائمة المناديب');
       notify.error('فشل تحميل قائمة المناديب');
     } finally {
       setLoading(false);
@@ -88,20 +92,14 @@ export default function RiderCommentsPage() {
   };
 
   const loadRecentComments = async () => {
-    // Only load comments for today to improve performance
     try {
       const today = new Date().toISOString().split('T')[0];
       const response = await authFetch(`/api/rider-comments?startDate=${today}&endDate=${today}`);
-      if (!response.ok) {
-        console.error('[rider-comments] Failed to load comments:', response.status);
-        return; // Don't throw - comments are optional
-      }
+      if (!response.ok) return;
       const data = await response.json();
       setRecentComments(data.comments || []);
-      console.log('[rider-comments] Today comments loaded:', data.comments?.length || 0);
     } catch (error) {
       console.error('Error loading comments:', error);
-      // Don't show error - comments are not critical for page load
     }
   };
 
@@ -193,29 +191,33 @@ export default function RiderCommentsPage() {
     }
   };
 
-  const filteredRiders = riders.filter(
-    (r) =>
-      r.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.code.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredRiders = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return riders;
+    return riders.filter(
+      (r) => r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q)
+    );
+  }, [riders, searchQuery]);
+
+  const commentsByRider = useMemo(() => {
+    const map = new Map<string, Comment[]>();
+    for (const c of recentComments) {
+      const list = map.get(c.riderCode) || [];
+      list.push(c);
+      map.set(c.riderCode, list);
+    }
+    return map;
+  }, [recentComments]);
 
   const showReturnFields = (riderCode: string) => {
     const category = quickComments[riderCode]?.category;
-    // Show return date for all categories except "working normally"
     return category && category !== 'working_normally';
   };
 
-  const getRiderRecentComment = (riderCode: string) => {
-    return recentComments.find((c) => c.riderCode === riderCode);
-  };
-
-  const getRiderCommentCount = (riderCode: string) => {
-    return recentComments.filter((c) => c.riderCode === riderCode).length;
-  };
-
-  const getRiderCategoryCount = (riderCode: string, category: CommentCategory) => {
-    return recentComments.filter((c) => c.riderCode === riderCode && c.category === category).length;
-  };
+  const getRiderRecentComment = (riderCode: string) => commentsByRider.get(riderCode)?.[0];
+  const getRiderCommentCount = (riderCode: string) => commentsByRider.get(riderCode)?.length || 0;
+  const getRiderCategoryCount = (riderCode: string, category: CommentCategory) =>
+    (commentsByRider.get(riderCode) || []).filter((c) => c.category === category).length;
 
   return (
     <Layout>
@@ -258,16 +260,42 @@ export default function RiderCommentsPage() {
 
           {/* Riders Table */}
           <div className="rounded-2xl border border-white/10 bg-[rgba(255,255,255,0.04)] p-6">
-            <h2 className="text-xl font-semibold text-[#EAF0FF] mb-4">
-              قائمة المناديب ({filteredRiders.length})
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <h2 className="text-xl font-semibold text-[#EAF0FF]">
+                قائمة المناديب ({filteredRiders.length}
+                {riders.length !== filteredRiders.length ? ` من ${riders.length}` : ''})
+              </h2>
+              <button
+                type="button"
+                onClick={() => void loadRiders()}
+                disabled={loading}
+                className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-[#EAF0FF] hover:bg-white/10 disabled:opacity-50"
+              >
+                تحديث القائمة
+              </button>
+            </div>
 
-            {loading ? (
-              <p className="text-center text-[#94A3B8] py-8">⏳ جاري التحميل...</p>
+            {loading && riders.length === 0 ? (
+              <p className="text-center text-[#94A3B8] py-8">⏳ جاري تحميل المناديب...</p>
+            ) : loadError && riders.length === 0 ? (
+              <div className="text-center py-8 space-y-3">
+                <p className="text-[#94A3B8]">{loadError}</p>
+                <button
+                  type="button"
+                  onClick={() => void loadRiders()}
+                  className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200"
+                >
+                  إعادة المحاولة
+                </button>
+              </div>
             ) : filteredRiders.length === 0 ? (
-              <p className="text-center text-[#94A3B8] py-8">لا توجد مناديب</p>
+              <p className="text-center text-[#94A3B8] py-8">
+                {searchQuery.trim()
+                  ? 'لا توجد نتائج مطابقة للبحث'
+                  : 'لا توجد مناديب معيّنين حالياً'}
+              </p>
             ) : (
-              <div className="overflow-x-auto">
+              <div className={`overflow-x-auto ${loading ? 'opacity-60' : ''}`}>
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-white/10">

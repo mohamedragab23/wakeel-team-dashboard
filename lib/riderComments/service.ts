@@ -8,7 +8,7 @@ const SHEET_NAME = 'rider_daily_comments';
  */
 async function ensureSheetExists(): Promise<void> {
   try {
-    const sheet = await getSheetData(SHEET_NAME, false);
+    const sheet = await getSheetData(SHEET_NAME, true);
     
     // If sheet exists but has no headers, add them
     if (sheet.length === 0) {
@@ -43,7 +43,7 @@ export async function getRiderComments(
   endDate?: string
 ): Promise<RiderDailyComment[]> {
   try {
-    const sheet = await getSheetData(SHEET_NAME, false);
+    const sheet = await getSheetData(SHEET_NAME, true);
     if (sheet.length < 2) return [];
 
     const comments: RiderDailyComment[] = [];
@@ -89,7 +89,7 @@ export async function getRiderComments(
  */
 export async function getCommentsForDate(date: string): Promise<RiderDailyComment[]> {
   try {
-    const sheet = await getSheetData(SHEET_NAME, false);
+    const sheet = await getSheetData(SHEET_NAME, true);
     if (sheet.length < 2) return [];
 
     const comments: RiderDailyComment[] = [];
@@ -136,7 +136,7 @@ export async function getSupervisorComments(
   try {
     await ensureSheetExists();
     
-    const sheet = await getSheetData(SHEET_NAME, false);
+    const sheet = await getSheetData(SHEET_NAME, true);
     if (sheet.length < 2) return [];
 
     const comments: RiderDailyComment[] = [];

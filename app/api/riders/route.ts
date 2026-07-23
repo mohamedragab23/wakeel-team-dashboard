@@ -133,6 +133,21 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // Lightweight roster for pages that only need code/name/region (e.g. daily comments).
+    // Avoids N× full scans of البيانات اليومية via getLatestRiderData.
+    if (searchParams.get('fields') === 'basic') {
+      return NextResponse.json({
+        success: true,
+        data: riders.map((r) => ({
+          code: r.code,
+          name: r.name,
+          region: r.region,
+          supervisorCode: r.supervisorCode || null,
+          supervisorName: r.supervisorName || null,
+        })),
+      });
+    }
+
     // Get latest performance data for each rider (no date filter)
     const ridersWithData = await Promise.all(
       riders.map(async (rider) => {
