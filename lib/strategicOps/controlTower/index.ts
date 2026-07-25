@@ -6,6 +6,8 @@ import {
 } from '@/lib/strategicOps/controlTower/coverageGate';
 import { buildDailyContactList } from '@/lib/strategicOps/controlTower/dailyContactList';
 import { buildExecutiveFocus } from '@/lib/strategicOps/controlTower/executiveFocus';
+import { buildFleetDistribution } from '@/lib/strategicOps/controlTower/fleetDistribution';
+import type { FleetDistribution } from '@/lib/strategicOps/controlTower/fleetDistribution';
 import { buildExecutiveHealthSummary, buildSupervisorIntelligence } from '@/lib/strategicOps/controlTower/executiveHealth';
 import { buildForecastMetrics } from '@/lib/strategicOps/controlTower/forecastEngine';
 import { buildGapAttribution } from '@/lib/strategicOps/controlTower/gapAttribution';
@@ -108,6 +110,13 @@ const EMPTY_RECOVERY_SIMULATOR: RecoverySimulatorInputs = {
 
 const EMPTY_CONTRACT_INTELLIGENCE: ContractIntelligence[] = [];
 
+const EMPTY_FLEET_DISTRIBUTION: FleetDistribution = {
+  buckets: [],
+  totalRiders: 0,
+  currentAvgHoursDaily: 0,
+  upliftScenario: { ridersAffected: 0, hoursAddedDaily: 0, projectedAvgHoursDaily: 0, deltaAvgHoursDaily: 0 },
+};
+
 export function buildControlTowerReport(ctx: ControlTowerBuildContext): ControlTowerReport {
   const insightsEnabled = ctx.operationalAnalyticsEnabled;
   const metadataLimited = insightsEnabled && !ctx.metadataAnalyticsEnabled;
@@ -130,6 +139,11 @@ export function buildControlTowerReport(ctx: ControlTowerBuildContext): ControlT
 
   // Layer 5: full rider intelligence with per-rider historical expected hours
   const riderIntelligence = insightsEnabled ? buildRiderIntelligence(enrichedCtx) : [];
+
+  // SRS-011 Part 4: fleet distribution by actual daily hours (names/supervisor/last-active)
+  const fleetDistribution = insightsEnabled
+    ? buildFleetDistribution(riderIntelligence)
+    : EMPTY_FLEET_DISTRIBUTION;
 
   // Baseline coverage stats
   const baselineCoverage = enrichedCtx.riderHistoricalBaselines
@@ -252,6 +266,7 @@ export function buildControlTowerReport(ctx: ControlTowerBuildContext): ControlT
     achievementDecomposition,
     topNegativeImpactRiders,
     riderIntelligence,
+    fleetDistribution,
     periodComparisons: insightsEnabled ? periodComparisons : [],
     supervisorScorecards,
     supervisorIntelligence,

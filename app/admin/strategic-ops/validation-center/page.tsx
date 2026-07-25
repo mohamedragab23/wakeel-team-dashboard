@@ -1,13 +1,26 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import Layout from '@/components/Layout';
 import { authFetch } from '@/lib/authFetch';
 import { OpsValidationCenter } from '@/components/strategicOps/OpsValidationCenter';
+import { ExecutiveValidationCenter } from '@/components/strategicOps/ExecutiveValidationCenter';
+import { KpiCrossLinkBanner } from '@/components/strategicOps/KpiCrossLinkBanner';
+import { KPIIntelligencePanel } from '@/components/strategicOps/KPIIntelligencePanel';
+import { readKpiParamFromLocation } from '@/lib/strategicOps/kpiIntelligence';
 import type { ValidationRunReport } from '@/lib/strategicOps/opsValidation';
 
 export default function ValidationCenterPage() {
+  const [showTechnical, setShowTechnical] = useState(false);
+  const [kpiPanelId, setKpiPanelId] = useState<string | null>(null);
+  const [focusKpiId, setFocusKpiId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFocusKpiId(readKpiParamFromLocation());
+  }, []);
+
   const query = useQuery({
     queryKey: ['ops-validation-run'],
     queryFn: async () => {
@@ -69,16 +82,42 @@ export default function ValidationCenterPage() {
           </div>
         </div>
 
+        <KpiCrossLinkBanner currentSurface="validation" />
+
         {query.error && (
           <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-300 text-sm">
             {(query.error as Error).message}
           </div>
         )}
 
-        <OpsValidationCenter
-          report={query.data}
-          loading={query.isLoading || query.isFetching}
-          onRefresh={() => void query.refetch()}
+        <ExecutiveValidationCenter
+          results={query.data?.results}
+          onOpenKpi={setKpiPanelId}
+          focusKpiId={focusKpiId}
+        />
+
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowTechnical((v) => !v)}
+            className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-[#94A3B8] hover:bg-white/10"
+          >
+            {showTechnical ? '▲ إخفاء الشهادة الفنية الكاملة' : '▼ عرض الشهادة الفنية الكاملة (217+ حالة)'}
+          </button>
+        </div>
+
+        {showTechnical && (
+          <OpsValidationCenter
+            report={query.data}
+            loading={query.isLoading || query.isFetching}
+            onRefresh={() => void query.refetch()}
+          />
+        )}
+
+        <KPIIntelligencePanel
+          kpiId={kpiPanelId}
+          isOpen={Boolean(kpiPanelId)}
+          onClose={() => setKpiPanelId(null)}
         />
       </div>
     </Layout>

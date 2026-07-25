@@ -1,6 +1,10 @@
 import { getAllRiders, getAllSupervisors, type Rider, type Supervisor } from '@/lib/adminService';
 import { getSheetData } from '@/lib/googleSheets';
 import { parseDailySheetDate, normalizeRiderCodeForPerformance } from '@/lib/dataFilter';
+import { getAllComments } from '@/lib/riderComments/service';
+import { COMMENT_CATEGORY_LABELS_AR } from '@/lib/riderComments/types';
+import { buildCurrentMetricMap, buildDecisionCandidates } from '@/lib/strategicOps/decisionLearning/adapters';
+import { evaluateDueDecisions, logNewDecisions } from '@/lib/strategicOps/decisionLearning/store';
 import { loadAllCandidates } from '@/lib/recruitment/recruitmentService';
 import type { Candidate } from '@/lib/recruitment/types';
 import { supervisorRowMatchesZoneFilter } from '@/lib/zones';
@@ -2494,6 +2498,53 @@ export async function buildStrategicOpsReport(filters: StrategicOpsFilters): Pro
     avgRevenuePerOrder: 0,
     lookbackDiagnostic: lookbackDiagnosticFull,
   });
+
+  // SRS-011 Part 4 — merge each rider's latest daily comment (Google Sheets)
+  // into the fleet distribution buckets, so "Riders Under 4 Hours" shows WHY
+  // (last supervisor note) alongside the hours number. Best-effort: a comment
+  // sheet failure must never break the report.
+  if (controlTower.fleetDistribution.buckets.length > 0) {
+    try {
+      const windowStart = new Date(
+        new Date(filters.endDate + 'T00:00:00').getTime() - 30 * 24 * 60 * 60 * 1000
+      );
+      const windowStartIso = windowStart.toISOString().slice(0, 10);
+      const allComments = await getAllComments(windowStartIso, filters.endDate);
+      // getAllComments() is sorted desc by date — first occurrence per rider = latest.
+      const latestByNormCode = new Map<string, (typeof allComments)[number]>();
+      for (const c of allComments) {
+        const norm = normalizeRiderCodeForPerformance(c.riderCode) ?? c.riderCode;
+        if (!latestByNormCode.has(norm)) latestByNormCode.set(norm, c);
+      }
+      for (const bucket of controlTower.fleetDistribution.buckets) {
+        for (const r of bucket.riders) {
+          const norm = normalizeRiderCodeForPerformance(r.code) ?? r.code;
+          const c = latestByNormCode.get(norm);
+          if (c) {
+            r.lastCommentAr = `${COMMENT_CATEGORY_LABELS_AR[c.category]}${c.notes ? ' — ' + c.notes : ''}`;
+            r.lastCommentDate = c.date;
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[buildStrategicOpsReport] Fleet distribution comment merge skipped:', error);
+    }
+  }
+
+  // SRS-011 Part 11 — Decision Effectiveness & Learning: log today's
+  // critical/high recommendations (idempotent, one entry per entity+day) and
+  // re-evaluate any decision past its follow-up window using today's real
+  // numbers for the same entities. Both are best-effort — a Sheets hiccup
+  // must never break the report itself.
+  if (controlTower.insightsEnabled) {
+    try {
+      const candidates = buildDecisionCandidates(controlTower, filters.startDate, filters.endDate);
+      await logNewDecisions(candidates);
+      await evaluateDueDecisions(buildCurrentMetricMap(controlTower));
+    } catch (error) {
+      console.warn('[buildStrategicOpsReport] Decision learning step skipped:', error);
+    }
+  }
 
   const withTower = { ...partial, operationalFormulaAudit, aiInsights, controlTower };
   const srs006 = buildSrs006CompletePackage(withTower as StrategicOpsReport);

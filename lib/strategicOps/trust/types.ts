@@ -24,6 +24,16 @@ export type TrustComponentDetail = {
   rootCause: string;
   suggestedAction: string;
   trend: 'improving' | 'stable' | 'declining';
+  /** SRS-010 Part 6 — the concrete numbers this score was computed from. */
+  evidenceAr: string[];
+  /** What was cross-checked against what to produce this score. */
+  crossChecksAr: string[];
+  /** What has NOT been validated yet and is holding the score back. */
+  missingValidationsAr: string[];
+  /** Achievable score if `suggestedAction` is completed (same methodology, projected inputs). */
+  potentialScore: number;
+  /** Human-readable "X% → Y%" improvement path. */
+  improvementPathAr: string;
 };
 
 export type TrustGrade = 'executive' | 'operational' | 'caution' | 'not_ready';

@@ -330,6 +330,12 @@ export function buildRiderIntelligence(ctx: ControlTowerBuildContext): RiderInte
       hoursTrendPct > 10 ? 'improving' : hoursTrendPct < -10 ? 'declining' : 'stable';
 
     const level = impactLevel(lostHoursDaily, noShowCount, fleetAvg);
+    const lastActiveDate =
+      riderPerf
+        .filter((r) => r.hours > 0)
+        .map((r) => r.date)
+        .sort()
+        .pop() ?? null;
 
     results.push({
       code: rider.code,
@@ -355,6 +361,7 @@ export function buildRiderIntelligence(ctx: ControlTowerBuildContext): RiderInte
       baselineSource: source,
       impactLevel: level,
       impactLabelAr: IMPACT_LABELS[level],
+      lastActiveDate,
     });
   }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import Layout from '@/components/Layout';
@@ -8,8 +8,12 @@ import { authFetch } from '@/lib/authFetch';
 import { ZONE_OPTIONS } from '@/lib/zones';
 import { SystemHealthCard } from '@/components/strategicOps/SystemHealthCard';
 import { LiveOperationsAudit } from '@/components/strategicOps/LiveOperationsAudit';
+import { ExecutiveIntegrityCenter } from '@/components/strategicOps/ExecutiveIntegrityCenter';
 import { KPILineageModal } from '@/components/strategicOps/KPILineageModal';
+import { KPIIntelligencePanel } from '@/components/strategicOps/KPIIntelligencePanel';
 import { ExecutiveTrustCenter } from '@/components/strategicOps/ExecutiveTrustCenter';
+import { KpiCrossLinkBanner } from '@/components/strategicOps/KpiCrossLinkBanner';
+import { readKpiParamFromLocation } from '@/lib/strategicOps/kpiIntelligence';
 import type { SystemHealthMetrics } from '@/lib/strategicOps/systemHealth';
 import type { LiveAuditReport, AuditResult, KPILineage } from '@/lib/strategicOps/audit';
 import { buildKpiLineageFromAuditResult } from '@/lib/strategicOps/audit/kpiLineage';
@@ -33,6 +37,13 @@ export default function SystemIntegrityCenterPage() {
   const [lineage, setLineage] = useState<KPILineage | null>(null);
   const [lineageOpen, setLineageOpen] = useState(false);
   const [auditForceKey, setAuditForceKey] = useState(0);
+  const [showTechnicalAudit, setShowTechnicalAudit] = useState(false);
+  const [kpiPanelId, setKpiPanelId] = useState<string | null>(null);
+  const [focusKpiId, setFocusKpiId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFocusKpiId(readKpiParamFromLocation());
+  }, []);
 
   const qs = useMemo(() => {
     const q = new URLSearchParams({
@@ -120,6 +131,8 @@ export default function SystemIntegrityCenterPage() {
           </Link>
         </div>
 
+        <KpiCrossLinkBanner currentSurface="integrity" />
+
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
             <label className="text-xs text-[#94A3B8] block mb-1">من</label>
@@ -175,6 +188,14 @@ export default function SystemIntegrityCenterPage() {
         </div>
 
         {trustQuery.data && <ExecutiveTrustCenter trustScore={trustQuery.data} />}
+
+        <ExecutiveIntegrityCenter
+          auditReport={auditQuery.data}
+          loading={auditQuery.isLoading || auditQuery.isFetching}
+          onOpenKpi={setKpiPanelId}
+          onOpenLineage={onKpiClick}
+          focusKpiId={focusKpiId}
+        />
 
         {healthQuery.error && (
           <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-300 text-sm">
@@ -326,17 +347,41 @@ export default function SystemIntegrityCenterPage() {
           </>
         )}
 
-        <LiveOperationsAudit
-          auditReport={auditQuery.data}
-          loading={auditQuery.isLoading || auditQuery.isFetching}
-          onRefresh={() => setAuditForceKey((k) => k + 1)}
-          onKpiClick={onKpiClick}
-        />
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setShowTechnicalAudit((v) => !v)}
+            className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-[#94A3B8] hover:bg-white/10"
+          >
+            {showTechnicalAudit ? '▲ إخفاء التفاصيل الفنية' : '▼ عرض التفاصيل الفنية (Formula / Expected / Calculated)'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setAuditForceKey((k) => k + 1)}
+            className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-500/20"
+          >
+            🔄 إعادة تشغيل التدقيق
+          </button>
+        </div>
+
+        {showTechnicalAudit && (
+          <LiveOperationsAudit
+            auditReport={auditQuery.data}
+            loading={auditQuery.isLoading || auditQuery.isFetching}
+            onRefresh={() => setAuditForceKey((k) => k + 1)}
+            onKpiClick={onKpiClick}
+          />
+        )}
 
         <KPILineageModal
           lineage={lineage}
           isOpen={lineageOpen}
           onClose={() => setLineageOpen(false)}
+        />
+        <KPIIntelligencePanel
+          kpiId={kpiPanelId}
+          isOpen={Boolean(kpiPanelId)}
+          onClose={() => setKpiPanelId(null)}
         />
       </div>
     </Layout>

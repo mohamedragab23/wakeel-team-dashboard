@@ -1,7 +1,7 @@
 'use client';
 
 import { authFetch } from '@/lib/authFetch';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import Layout from '@/components/Layout';
 import { useQuery } from '@tanstack/react-query';
@@ -33,10 +33,20 @@ import SupervisorScorecardsSection from '@/components/strategicOps/SupervisorSco
 import { ExecutiveTrustCenter } from '@/components/strategicOps/ExecutiveTrustCenter';
 import { LiveOperationsAudit } from '@/components/strategicOps/LiveOperationsAudit';
 import { KPILineageModal } from '@/components/strategicOps/KPILineageModal';
-import { StrategicOpsCommentsPanel } from '@/components/strategicOps/StrategicOpsCommentsPanel';
 import { buildKpiLineageFromAuditResult } from '@/lib/strategicOps/audit/kpiLineage';
 import { lineageFromAuditTrace } from '@/lib/strategicOps/audit/traceToLineage';
 import type { TrustScore } from '@/lib/strategicOps/trust';
+import { ExecutiveBriefPanel } from '@/components/strategicOps/ExecutiveBriefPanel';
+import { RootCauseTree } from '@/components/strategicOps/RootCauseTree';
+import { KPIIntelligencePanel } from '@/components/strategicOps/KPIIntelligencePanel';
+import { CooModePanel } from '@/components/strategicOps/CooModePanel';
+import { KpiCrossLinkBanner } from '@/components/strategicOps/KpiCrossLinkBanner';
+import { ExecutiveDecisionFeed } from '@/components/strategicOps/ExecutiveDecisionFeed';
+import { buildDecisionOpportunities } from '@/lib/strategicOps/controlTower/decisionFeed';
+import { FleetDistributionPanel } from '@/components/strategicOps/FleetDistributionPanel';
+import type { FleetHourBucketId } from '@/lib/strategicOps/controlTower/fleetDistribution';
+import { buildExecutiveBrief } from '@/lib/strategicOps/executiveBrief';
+import { getKpiDef, readKpiParamFromLocation } from '@/lib/strategicOps/kpiIntelligence';
 import type { LiveAuditReport, AuditResult, KPILineage } from '@/lib/strategicOps/audit';
 import {
   ExecutiveDecisionBriefPanel,
@@ -84,7 +94,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 // ── Layer 1: Executive Health Panel ──────────────────────────────────────────
-function ExecutiveHealthPanel({ health }: { health: OperationalHealthSummary }) {
+function ExecutiveHealthPanel({
+  health,
+  onOpenKpi,
+}: {
+  health: OperationalHealthSummary;
+  onOpenKpi?: (kpiId: string) => void;
+}) {
   const statusBg =
     health.statusLabel === 'Healthy'
       ? 'border-emerald-500/40 bg-emerald-500/10'
@@ -109,19 +125,29 @@ function ExecutiveHealthPanel({ health }: { health: OperationalHealthSummary }) 
       <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
         <div>
           <p className="text-xs text-[#94A3B8] mb-1">مركز العمليات الاستراتيجي — الوضع الراهن</p>
-          <div className="flex items-baseline gap-2">
+          <button
+            type="button"
+            onClick={() => onOpenKpi?.('target_achievement')}
+            className="flex items-baseline gap-2 text-right hover:opacity-80"
+            title="اضغط لعرض السبب، التحقق، مستوى الثقة، والاعتماد المرتبط بهذا المؤشر"
+          >
             <span className={`text-5xl font-bold ${scoreColor}`}>{health.healthScore}</span>
             <span className="text-lg text-[#64748B]">/100</span>
             <span className="text-2xl font-semibold text-[#EAF0FF] mr-2">{health.statusLabelAr}</span>
-          </div>
+            {onOpenKpi && <span className="text-xs text-cyan-300">🔗 لماذا؟</span>}
+          </button>
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           <span className={`px-2 py-0.5 rounded-full text-xs border ${riskColors[health.riskLevel]}`}>
             خطورة: {riskLabels[health.riskLevel]}
           </span>
-          <span className="px-2 py-0.5 rounded-full text-xs border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">
+          <button
+            type="button"
+            onClick={() => onOpenKpi?.('target_achievement')}
+            className="px-2 py-0.5 rounded-full text-xs border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
+          >
             تحقيق: {health.achievementPercent}%
-          </span>
+          </button>
           {health.hoursGap > 0 && (
             <span className="px-2 py-0.5 rounded-full text-xs border border-red-500/30 bg-red-500/10 text-red-200">
               ↓ {health.hoursGap} ساعة فجوة
@@ -208,6 +234,7 @@ function ActionCard({
   action,
   rank,
   decisionConfidence,
+  onOpenKpi,
 }: {
   action: ManagementAction;
   rank: number;
@@ -221,6 +248,7 @@ function ActionCard({
     expectedRiskAr: string;
     whyExistsAr: string;
   };
+  onOpenKpi?: (kpiId: string) => void;
 }) {
   const confidenceColors: Record<string, string> = {
     high: 'text-emerald-300',
@@ -287,6 +315,70 @@ function ActionCard({
           <span className="text-[#64748B]">الإجراء: </span>
           {action.actionAr}
         </p>
+        {/* SRS-010 Part 3 — Owner / Deadline / Difficulty / Cost / Risk / Affected KPIs / ROI */}
+        {(action.ownerAr || action.deadlineAr || action.difficultyAr) && (
+          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-lg border border-white/10 bg-black/20 p-2.5 text-[11px]">
+            {action.ownerAr && (
+              <p className="text-[#CBD5E1]">
+                <span className="text-[#64748B]">المسؤول: </span>
+                <span className="font-medium text-[#EAF0FF]">{action.ownerAr}</span>
+              </p>
+            )}
+            {action.deadlineAr && (
+              <p className="text-[#CBD5E1]">
+                <span className="text-[#64748B]">الموعد النهائي: </span>
+                <span className="font-medium text-amber-200">{action.deadlineAr}</span>
+              </p>
+            )}
+            {action.difficultyAr && (
+              <p className="text-[#CBD5E1] sm:col-span-2">
+                <span className="text-[#64748B]">الصعوبة: </span>
+                {action.difficultyAr}
+              </p>
+            )}
+            {action.costEstimateEGP !== undefined && (
+              <p className="text-[#CBD5E1]">
+                <span className="text-[#64748B]">التكلفة: </span>
+                <span className={action.costEstimateEGP > 0 ? 'font-medium text-orange-200' : 'font-medium text-emerald-300'}>
+                  {action.costEstimateEGP > 0
+                    ? `${action.costEstimateEGP.toLocaleString('en-US')} ${action.costCurrency ?? 'EGP'}`
+                    : `0 ${action.costCurrency ?? 'EGP'}`}
+                </span>
+              </p>
+            )}
+            {action.estimatedRoiAr && (
+              <p className="text-[#CBD5E1] sm:col-span-2">
+                <span className="text-[#64748B]">العائد المتوقع (ROI): </span>
+                <span className="text-emerald-300/90">{action.estimatedRoiAr}</span>
+              </p>
+            )}
+            {action.riskIfIgnoredAr && (
+              <p className="text-amber-200/90 sm:col-span-2">
+                <span className="text-[#64748B]">⚠️ المخاطرة إذا تم التجاهل: </span>
+                {action.riskIfIgnoredAr}
+              </p>
+            )}
+            {action.affectedKpiIds && action.affectedKpiIds.length > 0 && (
+              <div className="sm:col-span-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-[#64748B]">مؤشرات متأثرة: </span>
+                {action.affectedKpiIds.map((kpiId) => {
+                  const def = getKpiDef(kpiId);
+                  if (!def) return null;
+                  return (
+                    <button
+                      key={kpiId}
+                      type="button"
+                      onClick={() => onOpenKpi?.(kpiId)}
+                      className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-cyan-200 hover:bg-cyan-500/20 transition-colors"
+                    >
+                      {def.labelAr}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         {decisionConfidence && (
           <div className="mt-2 rounded-lg border border-white/10 bg-black/20 p-2 text-[11px] text-[#94A3B8] space-y-1">
             <p>{decisionConfidence.whyExistsAr}</p>
@@ -990,6 +1082,24 @@ export default function StrategicOpsCenterPage() {
   const [lineageOpen, setLineageOpen] = useState(false);
   const [auditForceKey, setAuditForceKey] = useState(0);
   const [showLiveAudit, setShowLiveAudit] = useState(true);
+  const [kpiPanelId, setKpiPanelId] = useState<string | null>(null);
+  const [showCooMode, setShowCooMode] = useState(false);
+  const openKpiPanel = (kpiId: string) => setKpiPanelId(kpiId);
+
+  // SRS-011 Part 3 — Root Cause Navigation: KPI → hours → riders bucket, one screen.
+  const [focusFleetBucket, setFocusFleetBucket] = useState<FleetHourBucketId | null>(null);
+  const fleetDistributionRef = useRef<HTMLDivElement | null>(null);
+  const openFleetBucket = (bucketId: FleetHourBucketId) => {
+    setFocusFleetBucket(bucketId);
+    fleetDistributionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  // SRS-010 — arriving here via a `?kpi=` deep link from another tab auto-opens
+  // the KPI Intelligence Panel for that KPI (interconnected tabs).
+  useEffect(() => {
+    const fromUrl = readKpiParamFromLocation();
+    if (fromUrl) setKpiPanelId(fromUrl);
+  }, []);
 
   const { data: supervisorsList } = useQuery({
     queryKey: ['admin', 'supervisors-list'],
@@ -1135,6 +1245,27 @@ export default function StrategicOpsCenterPage() {
     setLineageOpen(true);
   };
 
+  const executiveBrief = useMemo(() => (report ? buildExecutiveBrief(report) : null), [report]);
+
+  const kpiLiveSnapshot = useMemo(() => {
+    if (!report?.controlTower || !kpiPanelId) return undefined;
+    const def = getKpiDef(kpiPanelId);
+    const ctKey = def?.controlTowerKey;
+    const trend = ctKey
+      ? report.controlTower.periodComparisons?.find((c) => c.kpiKey === ctKey)
+      : null;
+    return {
+      currentValue: trend?.current ?? undefined,
+      unit: ctKey === 'achievementPercent' || ctKey === 'utilizationPercent' ? '%' : '',
+      trendAr:
+        trend && trend.deltaPercent7 != null
+          ? `${trend.deltaPercent7 > 0 ? '+' : ''}${trend.deltaPercent7}% (7 أيام)`
+          : undefined,
+      confidencePercent: kpiPanelId === 'target_achievement' ? executiveBrief?.confidencePercent : undefined,
+      lastRecalculationAt: report.meta.generatedAt,
+    };
+  }, [report, kpiPanelId, executiveBrief]);
+
   const decisionConfidenceById = useMemo(() => {
     const map = new Map<
       string,
@@ -1145,6 +1276,13 @@ export default function StrategicOpsCenterPage() {
     }
     return map;
   }, [report?.srs006?.decisionConfidenceActions]);
+
+  // SRS-011 Part 2 — 🟢 opportunities are a distinct signal from supervisor trends,
+  // not derived from the problem-driven executiveFocus action list.
+  const decisionOpportunities = useMemo(
+    () => buildDecisionOpportunities(report?.controlTower?.supervisorIntelligence ?? []),
+    [report?.controlTower?.supervisorIntelligence]
+  );
 
   return (
     <Layout>
@@ -1180,10 +1318,10 @@ export default function StrategicOpsCenterPage() {
               Enterprise Certification (SRS-009) ←
             </Link>
             <Link
-              href="/admin/rider-comments-dashboard"
-              className="rounded-lg border border-pink-500/40 bg-pink-500/10 px-3 py-2 text-xs font-semibold text-pink-200 hover:bg-pink-500/20"
+              href="/admin/strategic-ops/decision-performance"
+              className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20"
             >
-              لوحة التعليقات اليومية ←
+              📊 فعالية القرارات (SRS-011) ←
             </Link>
           </div>
         </div>
@@ -1228,11 +1366,24 @@ export default function StrategicOpsCenterPage() {
 
         {report && (
           <>
-            <StrategicOpsCommentsPanel
-              startDate={requestFilters?.startDate || startDate}
-              endDate={requestFilters?.endDate || endDate}
-              enabled={Boolean(requestFilters)}
-            />
+            <KpiCrossLinkBanner currentSurface="dashboard" />
+
+            {executiveBrief && (
+              <ExecutiveBriefPanel
+                brief={executiveBrief}
+                onOpenKpi={openKpiPanel}
+                fleetDistribution={report.controlTower?.fleetDistribution}
+              />
+            )}
+
+            {report.controlTower && (
+              <ExecutiveDecisionFeed
+                actions={report.controlTower.executiveFocus}
+                opportunities={decisionOpportunities}
+                decisionConfidenceById={decisionConfidenceById}
+                onOpenKpi={openKpiPanel}
+              />
+            )}
 
             <ExecutiveTrustCenter
               trustScore={trustScore}
@@ -1324,8 +1475,50 @@ export default function StrategicOpsCenterPage() {
             </div>
 
             {report.controlTower?.executiveHealth && (
-              <ExecutiveHealthPanel health={report.controlTower.executiveHealth} />
+              <ExecutiveHealthPanel health={report.controlTower.executiveHealth} onOpenKpi={openKpiPanel} />
             )}
+
+            {report.srs006?.rootCauseExplanations && report.srs006.rootCauseExplanations.length > 0 && (
+              <Section title="🌳 شجرة السبب الجذري — Root Cause Tree">
+                <p className="text-xs text-[#64748B] mb-3">
+                  السلسلة الكاملة من المؤشر المتأثر إلى السبب الأصلي — مبنية من بيانات حقيقية لا نص جاهز.
+                </p>
+                <RootCauseTree
+                  explanations={report.srs006.rootCauseExplanations}
+                  onOpenKpi={openKpiPanel}
+                  onOpenFleetBucket={openFleetBucket}
+                />
+              </Section>
+            )}
+
+            {report.controlTower?.fleetDistribution && report.controlTower.fleetDistribution.totalRiders > 0 && (
+              <Section title="🚴 توزيع الأسطول حسب ساعات العمل — Fleet Distribution Intelligence">
+                <div ref={fleetDistributionRef}>
+                  <FleetDistributionPanel
+                    distribution={report.controlTower.fleetDistribution}
+                    focusBucketId={focusFleetBucket}
+                    onOpenKpi={openKpiPanel}
+                  />
+                </div>
+              </Section>
+            )}
+
+            <Section title="🧠 COO Mode — أسئلة تنفيذية تُجاب تلقائيًا">
+              <p className="text-xs text-[#64748B] mb-3">
+                يشمل محاكاة سيناريوهات what-if (توظيف/تفعيل/تغيير المستهدف) — يُحسب عند الفتح فقط لتفادي إبطاء الشاشة الرئيسية.
+              </p>
+              {!showCooMode ? (
+                <button
+                  type="button"
+                  onClick={() => setShowCooMode(true)}
+                  className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/20"
+                >
+                  ▶ توليد إجابات COO Mode الآن
+                </button>
+              ) : (
+                <CooModePanel enabled={showCooMode} qs={trustQs ?? ''} onOpenKpi={openKpiPanel} />
+              )}
+            </Section>
 
             {report.controlTower?.intelligenceFeed && (
               <Section title="📡 التغذية الاستخباراتية التشغيلية — أبرز المشكلات والفرص">
@@ -1345,6 +1538,7 @@ export default function StrategicOpsCenterPage() {
                       action={action}
                       rank={idx + 1}
                       decisionConfidence={decisionConfidenceById.get(action.id)}
+                      onOpenKpi={openKpiPanel}
                     />
                   ))}
                 </div>
@@ -1522,6 +1716,7 @@ export default function StrategicOpsCenterPage() {
                           action={action}
                           rank={idx + 1}
                           decisionConfidence={decisionConfidenceById.get(action.id)}
+                          onOpenKpi={openKpiPanel}
                         />
                       ))}
                     </div>
@@ -2907,6 +3102,12 @@ export default function StrategicOpsCenterPage() {
           lineage={lineage}
           isOpen={lineageOpen}
           onClose={() => setLineageOpen(false)}
+        />
+        <KPIIntelligencePanel
+          kpiId={kpiPanelId}
+          isOpen={Boolean(kpiPanelId)}
+          onClose={() => setKpiPanelId(null)}
+          live={kpiLiveSnapshot}
         />
       </div>
     </Layout>

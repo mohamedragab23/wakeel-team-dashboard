@@ -1,4 +1,5 @@
 import type { SupervisorOpsRow } from '@/lib/strategicOps/buildReport';
+import type { FleetDistribution } from '@/lib/strategicOps/controlTower/fleetDistribution';
 import type { TalabatFleetMetrics } from '@/lib/strategicOps/talabatOpsMetrics';
 import type { SupervisorMappingHealth } from '@/lib/strategicOps/controlTower/supervisorMapping';
 import type { ControlTowerReliability } from '@/lib/strategicOps/controlTower/reliability';
@@ -10,6 +11,10 @@ export type ActionUrgency = 'immediate' | 'this_week' | 'this_month';
 export type RiderImpactLevel = 'critical' | 'high' | 'medium' | 'low';
 
 export type RootCauseConfidence = 'high' | 'medium' | 'low';
+
+/** SRS-010 Part 3 — Action Engine enrichment (deterministic, derived from the
+ *  same numbers already computed for the action; no hardcoded verdicts). */
+export type ActionDifficulty = 'easy' | 'medium' | 'hard';
 
 export type ManagementAction = {
   id: string;
@@ -28,6 +33,17 @@ export type ManagementAction = {
   confidence?: ActionConfidence;
   urgency?: ActionUrgency;
   evidence: string;
+  /** Part 3 fields — populated by managementActions.ts, optional so existing
+   *  producers/tests that build a ManagementAction without them still compile. */
+  ownerAr?: string;
+  deadlineAr?: string;
+  difficulty?: ActionDifficulty;
+  difficultyAr?: string;
+  costEstimateEGP?: number;
+  costCurrency?: string;
+  riskIfIgnoredAr?: string;
+  affectedKpiIds?: string[];
+  estimatedRoiAr?: string;
 };
 
 /** Per-rider historical baseline from lookback window (30 days before period). */
@@ -133,6 +149,9 @@ export type RiderIntelligence = {
   baselineSource: 'historical_30d' | 'historical_partial' | 'fleet_average';
   impactLevel: RiderImpactLevel;
   impactLabelAr: string;
+  /** SRS-011 Part 4 — last date within the period this rider had hours > 0
+   *  in the daily sheet. `null` if never active in the period (pure no-show). */
+  lastActiveDate: string | null;
 };
 
 /** A single recovery lever in the recruitment waterfall. */
@@ -408,6 +427,8 @@ export type ControlTowerReport = {
   topNegativeImpactRiders: NegativeImpactRider[];
   /** Enriched rider list with per-rider history-based expected hours, classification, risk score. */
   riderIntelligence: RiderIntelligence[];
+  /** SRS-011 Part 4 — riders bucketed by actual daily hours, with uplift what-if. */
+  fleetDistribution: FleetDistribution;
   periodComparisons: KpiTrendComparison[];
   supervisorScorecards: SupervisorScorecardsReport;
   supervisorIntelligence: SupervisorIntelligence[];

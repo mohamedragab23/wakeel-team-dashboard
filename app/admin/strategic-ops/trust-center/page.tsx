@@ -1,12 +1,15 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import Layout from '@/components/Layout';
 import { authFetch } from '@/lib/authFetch';
 import { ZONE_OPTIONS } from '@/lib/zones';
 import { ExecutiveTrustCenter } from '@/components/strategicOps/ExecutiveTrustCenter';
+import { KpiCrossLinkBanner } from '@/components/strategicOps/KpiCrossLinkBanner';
+import { KPIIntelligencePanel } from '@/components/strategicOps/KPIIntelligencePanel';
+import { readKpiParamFromLocation } from '@/lib/strategicOps/kpiIntelligence';
 import type { TrustScore } from '@/lib/strategicOps/trust';
 import type { ValidationRunReport } from '@/lib/strategicOps/opsValidation';
 
@@ -29,6 +32,12 @@ export default function TrustCenterPage() {
     zone: 'all',
     supervisorCode: 'all',
   });
+  const [kpiPanelId, setKpiPanelId] = useState<string | null>(null);
+  const [focusKpiId, setFocusKpiId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFocusKpiId(readKpiParamFromLocation());
+  }, []);
 
   const qs = useMemo(
     () =>
@@ -87,6 +96,8 @@ export default function TrustCenterPage() {
           </Link>
         </div>
 
+        <KpiCrossLinkBanner currentSurface="trust" />
+
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
             <label className="text-xs text-[#94A3B8] block mb-1">من</label>
@@ -143,6 +154,8 @@ export default function TrustCenterPage() {
         <ExecutiveTrustCenter
           trustScore={trustQuery.data}
           loading={trustQuery.isLoading}
+          focusKpiId={focusKpiId}
+          onOpenKpi={setKpiPanelId}
           onViewDetails={() => {
             window.location.assign('/admin/strategic-ops/integrity');
           }}
@@ -168,6 +181,12 @@ export default function TrustCenterPage() {
             <p className="text-xs text-[#94A3B8] mt-2">{certQuery.data.certificate.noteAr}</p>
           </section>
         )}
+
+        <KPIIntelligencePanel
+          kpiId={kpiPanelId}
+          isOpen={Boolean(kpiPanelId)}
+          onClose={() => setKpiPanelId(null)}
+        />
       </div>
     </Layout>
   );

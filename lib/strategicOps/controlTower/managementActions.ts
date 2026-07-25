@@ -3,14 +3,140 @@ import type {
   ActionPriority,
   ActionConfidence,
   ActionUrgency,
+  ActionDifficulty,
   ControlTowerBuildContext,
   ManagementAction,
   NegativeImpactRider,
 } from '@/lib/strategicOps/controlTower/types';
 import { supervisorLostTargetDaily } from '@/lib/strategicOps/controlTower/supervisorMetrics';
+import { getUnitEconomicsConfig, totalHireInvestment } from '@/lib/strategicOps/digitalTwin/config/unitEconomics';
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/** SRS-010 Part 3 — Action Engine enrichment.
+ *  Every action kind maps to a fixed operational profile (difficulty / risk /
+ *  which KPIs it moves) derived from what the action actually *is* — recruiting
+ *  is always harder & costlier than a phone call, regardless of the supervisor.
+ *  The only per-action variables are the numbers (cost, ROI, deadline), which
+ *  are computed from the same recovery/rider figures already on the action. */
+type ActionKind =
+  | 'sup-noshow'
+  | 'sup-hours'
+  | 'sup-inactive'
+  | 'sup-recruit'
+  | 'sup-resign'
+  | 'rider-impact'
+  | 'fleet-inactive'
+  | 'fleet-noshow';
+
+const ACTION_PROFILE: Record<
+  ActionKind,
+  { difficulty: ActionDifficulty; difficultyAr: string; riskIfIgnoredAr: string; affectedKpiIds: string[] }
+> = {
+  'sup-noshow': {
+    difficulty: 'easy',
+    difficultyAr: 'سهل — مكالمة/رسالة اليوم، بدون تكلفة',
+    riskIfIgnoredAr: 'إذا لم يتم التواصل اليوم، الغياب يتكرر غدًا وتتراكم الساعات المفقودة يوميًا.',
+    affectedKpiIds: ['no_show', 'active_riders', 'target_achievement'],
+  },
+  'sup-hours': {
+    difficulty: 'medium',
+    difficultyAr: 'متوسط — يحتاج مراجعة يومية مع المشرف حتى تثبت النتيجة',
+    riskIfIgnoredAr: 'الفجوة اليومية تتراكم على مدار الشهر وتقلّل نسبة تحقيق الهدف بشكل ملموس.',
+    affectedKpiIds: ['target_achievement', 'active_riders'],
+  },
+  'sup-inactive': {
+    difficulty: 'easy',
+    difficultyAr: 'سهل — مكالمات تفعيل، بدون تكلفة',
+    riskIfIgnoredAr: 'الطيارون غير النشطين قد يتركوا العمل فعليًا إذا طالت فترة عدم التواصل.',
+    affectedKpiIds: ['active_riders', 'utilization'],
+  },
+  'sup-recruit': {
+    difficulty: 'hard',
+    difficultyAr: 'صعب — توظيف فعلي + تدريب، النتيجة تظهر بعد أسابيع لا أيام',
+    riskIfIgnoredAr: 'الفجوة الهيكلية (نقص عدد الطيارين) لن تُغلَق بالتدخلات التشغيلية وحدها — تستمر شهريًا.',
+    affectedKpiIds: ['headcount', 'active_riders', 'utilization'],
+  },
+  'sup-resign': {
+    difficulty: 'medium',
+    difficultyAr: 'متوسط — مقابلات احتفاظ مع الفريق المتبقي',
+    riskIfIgnoredAr: 'قد لا تمنع المقابلة استقالات أخرى إذا كان السبب هيكليًا (راتب/جدول عمل) لا فرديًا.',
+    affectedKpiIds: ['active_riders'],
+  },
+  'rider-impact': {
+    difficulty: 'easy',
+    difficultyAr: 'سهل — مكالمة متابعة فردية، بدون تكلفة',
+    riskIfIgnoredAr: 'الغياب/التراجع المتكرر لطيار واحد قد يكون مؤشرًا مبكرًا على مشكلة أوسع في فريقه.',
+    affectedKpiIds: ['active_riders', 'target_achievement'],
+  },
+  'fleet-inactive': {
+    difficulty: 'medium',
+    difficultyAr: 'متوسط — حملة تفعيل جماعية عبر كل المشرفين',
+    riskIfIgnoredAr: 'الطاقة الكامنة (طيارون مسجلون بلا ساعات) تتبخر إذا تجاوز الخمول عدة أسابيع.',
+    affectedKpiIds: ['active_riders', 'utilization'],
+  },
+  'fleet-noshow': {
+    difficulty: 'medium',
+    difficultyAr: 'متوسط — تنبيه حضور على مستوى كل المناطق',
+    riskIfIgnoredAr: 'الغياب المرتفع أسطوليًا يوسّع فجوة الهدف الكلي كل يوم يمر بدون تدخل.',
+    affectedKpiIds: ['no_show', 'target_achievement'],
+  },
+};
+
+const DEADLINE_AR: Record<ActionUrgency, string> = {
+  immediate: 'اليوم قبل الساعة 4:00 مساءً',
+  this_week: 'خلال 3 أيام (نهاية هذا الأسبوع)',
+  this_month: 'خلال أسبوعين',
+};
+
+/** Enrich a raw candidate with Part-3 fields: Owner / Deadline / Difficulty /
+ *  Cost / Risk / Affected KPIs / Estimated ROI — computed, not hardcoded. */
+function enrichAction(
+  kind: ActionKind,
+  candidate: Omit<ManagementAction, 'rawRecoveryHours' | 'deduplicatedRecoveryHours'>,
+  opts: { ordersPerHour: number; recruitRiders?: number } = { ordersPerHour: 0 }
+): Omit<ManagementAction, 'rawRecoveryHours' | 'deduplicatedRecoveryHours'> {
+  const profile = ACTION_PROFILE[kind];
+  const economics = getUnitEconomicsConfig();
+  const urgency = candidate.urgency ?? 'this_week';
+
+  const costEstimateEGP =
+    kind === 'sup-recruit' ? round2(totalHireInvestment(economics, opts.recruitRiders ?? candidate.riderCount ?? 0)) : 0;
+
+  // Daily value = recovered hours converted to orders (already computed per-action
+  // where available) × revenue/order from the same economics config used across
+  // the Digital Twin — one source of truth for money, not a separate guess here.
+  const dailyOrders =
+    candidate.expectedRecoveryOrders ?? (opts.ordersPerHour > 0 ? round2(candidate.expectedRecoveryHours * opts.ordersPerHour) : 0);
+  const dailyValueEGP = round2(dailyOrders * economics.revenuePerOrder);
+
+  let estimatedRoiAr: string;
+  if (costEstimateEGP <= 0) {
+    estimatedRoiAr =
+      dailyValueEGP > 0
+        ? `بدون تكلفة — قيمة يومية متوقعة ≈ ${dailyValueEGP.toLocaleString('en-US')} ${economics.currency} (أثر فوري بلا استثمار)`
+        : 'بدون تكلفة — أثر تشغيلي مباشر (استرداد ساعات) بلا استثمار مادي';
+  } else if (dailyValueEGP > 0) {
+    const paybackDays = Math.max(1, Math.ceil(costEstimateEGP / dailyValueEGP));
+    estimatedRoiAr = `تكلفة ${costEstimateEGP.toLocaleString('en-US')} ${economics.currency} — استرداد التكلفة خلال ~${paybackDays} يوم عمل عند ${dailyValueEGP.toLocaleString('en-US')} ${economics.currency}/يوم قيمة مقدّرة`;
+  } else {
+    estimatedRoiAr = `تكلفة ${costEstimateEGP.toLocaleString('en-US')} ${economics.currency} — نتيجة تشغيلية (استرداد ساعات) لا تُقاس بعائد مالي مباشر فورًا`;
+  }
+
+  return {
+    ...candidate,
+    ownerAr: candidate.entityType === 'fleet' ? 'مدير العمليات (Ops Manager)' : candidate.entityName,
+    deadlineAr: DEADLINE_AR[urgency],
+    difficulty: profile.difficulty,
+    difficultyAr: profile.difficultyAr,
+    costEstimateEGP,
+    costCurrency: economics.currency,
+    riskIfIgnoredAr: profile.riskIfIgnoredAr,
+    affectedKpiIds: profile.affectedKpiIds,
+    estimatedRoiAr,
+  };
 }
 
 function stdDev(values: number[]): number {
@@ -31,10 +157,13 @@ function ordersFromHours(hours: number, avgHoursPerOrder: number): number {
 
 function pushAction(
   actions: ManagementAction[],
-  action: Omit<ManagementAction, 'rawRecoveryHours' | 'deduplicatedRecoveryHours'>
+  action: Omit<ManagementAction, 'rawRecoveryHours' | 'deduplicatedRecoveryHours'>,
+  kind?: ActionKind,
+  opts?: { ordersPerHour: number; recruitRiders?: number }
 ) {
+  const enriched = kind ? enrichAction(kind, action, opts) : action;
   actions.push({
-    ...action,
+    ...enriched,
     rawRecoveryHours: action.expectedRecoveryHours,
     deduplicatedRecoveryHours: action.expectedRecoveryHours,
   });
@@ -88,7 +217,7 @@ export function buildManagementActions(
     if (isWorseOnNoShow) {
       const recovery = round2(s.noShowRiders * avgHoursPerActiveRider);
       const priority: ActionPriority = s.noShowRiders > 15 ? 'critical' : 'high';
-      candidates.push({
+      const enriched = enrichAction('sup-noshow', {
         id: `sup-noshow-${s.code}`,
         priority,
         entityType: 'supervisor',
@@ -103,9 +232,8 @@ export function buildManagementActions(
         confidence: 'high',
         urgency: 'immediate',
         evidence: `noShowRate=${Math.round(noShowRate * 100)}%, fleetNoShowRate=${Math.round(fleetNoShowRate * 100)}%, excess=${Math.round(noShowExcess * 100)}pp, σ=${round2(noShowStd)}`,
-        rawRecoveryHours: recovery,
-        deduplicatedRecoveryHours: recovery,
-      });
+      }, { ordersPerHour });
+      candidates.push({ ...enriched, rawRecoveryHours: recovery, deduplicatedRecoveryHours: recovery });
     }
 
     const lost = supervisorLostTargetDaily(s);
@@ -136,7 +264,8 @@ export function buildManagementActions(
         whyAr = `لا يبرز سبب واحد كمحرك رئيسي — يُنصح بمراجعة شاملة للفريق مع المشرف`;
       }
 
-      candidates.push({
+      const hoursUrgency: ActionUrgency = lost >= 80 ? 'immediate' : 'this_week';
+      const hoursEnriched = enrichAction('sup-hours', {
         id: `sup-hours-${s.code}`,
         priority,
         entityType: 'supervisor',
@@ -149,16 +278,16 @@ export function buildManagementActions(
         expectedRecoveryOrders: ordersFromHours(lost, ordersPerHour > 0 ? 1 / ordersPerHour : 0),
         riderCount: s.headcount,
         confidence,
-        urgency: lost >= 80 ? 'immediate' : 'this_week',
+        urgency: hoursUrgency,
         evidence: `lost=${lost}h, achievement=${s.achievementPercent}%, noShowExcess=${Math.round(noShowExcess * 100)}pp, inactiveExcess=${Math.round(inactiveExcess * 100)}pp, utilDef=${round2(utilizationDeficit)}pp`,
-        rawRecoveryHours: lost,
-        deduplicatedRecoveryHours: lost,
-      });
+      }, { ordersPerHour });
+      candidates.push({ ...hoursEnriched, rawRecoveryHours: lost, deduplicatedRecoveryHours: lost });
     }
 
     if (s.inactiveRiders >= 5) {
       const recovery = round2(s.inactiveRiders * avgHoursPerActiveRider);
-      candidates.push({
+      const inactiveUrgency: ActionUrgency = s.inactiveRiders >= 10 ? 'this_week' : 'this_month';
+      const inactiveEnriched = enrichAction('sup-inactive', {
         id: `sup-inactive-${s.code}`,
         priority: s.inactiveRiders >= 10 ? 'high' : 'medium',
         entityType: 'supervisor',
@@ -171,18 +300,17 @@ export function buildManagementActions(
         expectedRecoveryOrders: ordersFromHours(recovery, ordersPerHour > 0 ? 1 / ordersPerHour : 0),
         riderCount: s.inactiveRiders,
         confidence: 'medium',
-        urgency: s.inactiveRiders >= 10 ? 'this_week' : 'this_month',
+        urgency: inactiveUrgency,
         evidence: `inactiveRiders=${s.inactiveRiders}`,
-        rawRecoveryHours: recovery,
-        deduplicatedRecoveryHours: recovery,
-      });
+      }, { ordersPerHour });
+      candidates.push({ ...inactiveEnriched, rawRecoveryHours: recovery, deduplicatedRecoveryHours: recovery });
     }
 
     if (s.headcount > 0 && s.activeRiders / s.headcount < 0.6) {
       const needed = Math.ceil(s.headcount * 0.7 - s.activeRiders);
       if (needed > 0) {
         const recovery = round2(needed * avgHoursPerActiveRider);
-        candidates.push({
+        const recruitEnriched = enrichAction('sup-recruit', {
           id: `sup-recruit-${s.code}`,
           priority: 'high',
           entityType: 'supervisor',
@@ -197,15 +325,14 @@ export function buildManagementActions(
           confidence: 'medium',
           urgency: 'this_week',
           evidence: `utilization=${s.utilizationPercent}%`,
-          rawRecoveryHours: recovery,
-          deduplicatedRecoveryHours: recovery,
-        });
+        }, { ordersPerHour, recruitRiders: needed });
+        candidates.push({ ...recruitEnriched, rawRecoveryHours: recovery, deduplicatedRecoveryHours: recovery });
       }
     }
 
     if (s.resignations >= 3) {
       const recovery = round2(s.resignations * avgHoursPerActiveRider * 3);
-      candidates.push({
+      const resignEnriched = enrichAction('sup-resign', {
         id: `sup-resign-${s.code}`,
         priority: 'medium',
         entityType: 'supervisor',
@@ -220,9 +347,8 @@ export function buildManagementActions(
         confidence: 'low',
         urgency: 'this_month',
         evidence: `resignations=${s.resignations}`,
-        rawRecoveryHours: recovery,
-        deduplicatedRecoveryHours: recovery,
-      });
+      }, { ordersPerHour });
+      candidates.push({ ...resignEnriched, rawRecoveryHours: recovery, deduplicatedRecoveryHours: recovery });
     }
 
     if (candidates.length > 0) {
@@ -252,7 +378,7 @@ export function buildManagementActions(
       confidence: r.noShowCount > 0 ? 'high' : 'medium',
       urgency: r.impactLevel === 'critical' ? 'immediate' : 'this_week',
       evidence: `expected=${r.expectedHoursDaily}, actual=${r.actualHoursDaily}, lost=${r.lostHoursDaily}, noShow=${r.noShowCount}`,
-    });
+    }, 'rider-impact', { ordersPerHour });
   }
 
   if (inactiveRiders >= 10) {
@@ -271,7 +397,7 @@ export function buildManagementActions(
       confidence: 'medium',
       urgency: 'this_week',
       evidence: `inactiveRiders=${inactiveRiders}`,
-    });
+    }, 'fleet-inactive', { ordersPerHour });
   }
 
   if (fleetTalabat.noShowRiders > fleetNoShowAvg * 1.2 && fleetTalabat.noShowRiders > 5) {
@@ -291,7 +417,7 @@ export function buildManagementActions(
       confidence: 'high',
       urgency: 'immediate',
       evidence: `fleetNoShow=${fleetTalabat.noShowRiders}`,
-    });
+    }, 'fleet-noshow', { ordersPerHour });
   }
 
   return dedupeActions(actions);

@@ -68,6 +68,116 @@ function auditRecencyScore(lastAuditIso?: string | null): number {
   return 15;
 }
 
+type BaseComponentDetail = Omit<
+  TrustComponentDetail,
+  'evidenceAr' | 'crossChecksAr' | 'missingValidationsAr' | 'potentialScore' | 'improvementPathAr'
+>;
+
+/**
+ * SRS-010 Part 6 — "Trust Center should NOT show percentages only."
+ * Adds, per component: the concrete evidence used, what was cross-checked,
+ * what is still missing, and a quantified "current% → achievable%" path.
+ * `potentialScore` is deliberately scoped to *this* component only (not the
+ * overall composite) — fixing one component rarely moves the weighted
+ * overall score by the same amount, so we never claim otherwise.
+ */
+function enrichWithPathTo100(
+  c: BaseComponentDetail,
+  ctx: {
+    dataIntegrity: DataIntegrityReport;
+    missingDays: number;
+    calendarDays: number;
+    ghostPct: number;
+    dupPct: number;
+    liveAudit?: LiveAuditReport | null;
+    coveragePercent: number;
+    apiHealth: number;
+  }
+): TrustComponentDetail {
+  const isClean = c.score >= 99.5;
+  const potentialScore = isClean ? c.score : 100;
+  const improvementPathAr = isClean
+    ? `${c.score}% — مكتمل`
+    : `${c.score}% → ${potentialScore}% (إذا اكتمل الإجراء أعلاه)`;
+
+  let evidenceAr: string[] = [];
+  let crossChecksAr: string[] = [];
+  let missingValidationsAr: string[] = [];
+
+  switch (c.key) {
+    case 'dataCompleteness':
+      evidenceAr = [
+        `جودة البيانات المحسوبة = ${ctx.dataIntegrity.dataQualityScore}/100`,
+        `اكتمال الرفع = ${ctx.dataIntegrity.completenessPercentage}%`,
+        `${ctx.missingDays} يوم ناقص من أصل ${ctx.calendarDays} يوم تقويمي`,
+      ];
+      crossChecksAr = ['مطابقة عدد الأيام المرفوعة مقابل تقويم الفترة المطلوبة', 'مطابقة مع Data Quality Validator'];
+      missingValidationsAr =
+        ctx.missingDays > 0 ? [`رفع الأيام الناقصة: ${ctx.dataIntegrity.missingDates.slice(0, 5).join(', ')}`] : [];
+      break;
+    case 'missingUploads':
+      evidenceAr = [`${ctx.missingDays} يوم بدون بيانات من أصل ${ctx.calendarDays} يوم`];
+      crossChecksAr = ['مطابقة سجل الرفع اليومي مع تقويم الفترة'];
+      missingValidationsAr = ctx.missingDays > 0 ? [`رفع ${ctx.missingDays} يوم ناقص`] : [];
+      break;
+    case 'ghostRiders':
+      evidenceAr = [
+        `نسبة تسرب Ghost = ${ctx.ghostPct}%`,
+        `${ctx.dataIntegrity.ghostRidersCount} طيار غير مطابق لسجل Roster`,
+      ];
+      crossChecksAr = ['مطابقة أكواد البيانات اليومية مع ورقة المناديب المعتمدة'];
+      missingValidationsAr = ctx.ghostPct > 5 ? ['تصفير تسرب Ghost إلى أقل من 5%'] : [];
+      break;
+    case 'duplicateRecords':
+      evidenceAr = [`${ctx.dataIntegrity.duplicateRows} صف مكرر من أصل ${ctx.dataIntegrity.totalRows} صف`];
+      crossChecksAr = ['فحص تكرار (نفس الطيار + نفس اليوم) في البيانات اليومية'];
+      missingValidationsAr = ctx.dataIntegrity.duplicateRows > 0 ? ['منع الرفع المكرر من المصدر'] : [];
+      break;
+    case 'validationPass':
+      evidenceAr = ctx.liveAudit
+        ? [`${ctx.liveAudit.passCount}/${ctx.liveAudit.totalChecks} فحص Live Audit ناجح`, `${ctx.liveAudit.failCount} فشل، ${ctx.liveAudit.warnCount} تحذير`]
+        : ['لم يُشغَّل Live Audit بعد لهذه الفترة — الدرجة من محرك الدقة التنفيذية السابق'];
+      crossChecksAr = ['إعادة حساب كل مؤشر مباشرة من الشيتات الخام ومقارنته بالتقرير المعروض'];
+      missingValidationsAr = ctx.liveAudit
+        ? ctx.liveAudit.failCount + ctx.liveAudit.warnCount > 0
+          ? [`إصلاح ${ctx.liveAudit.failCount} فحص فاشل و ${ctx.liveAudit.warnCount} تحذير في System Integrity Center`]
+          : []
+        : ['تشغيل Live Operations Audit لهذه الفترة'];
+      break;
+    case 'calculationSuccess':
+      evidenceAr = ctx.liveAudit
+        ? [`${ctx.liveAudit.failCount} حساب فاشل`, `${ctx.liveAudit.warnCount} تحذير`]
+        : ['اعتماد على خارطة الساعات (Roadmap Validation) بدل Live Audit'];
+      crossChecksAr = ['اتساق خارطة الساعات (Zero-Sum) بين كل الطبقات'];
+      missingValidationsAr = ctx.liveAudit && ctx.liveAudit.failCount + ctx.liveAudit.warnCount > 0
+        ? ['إصلاح كل الحسابات الفاشلة قبل اعتبار الحساب موثوقًا 100%']
+        : [];
+      break;
+    case 'coverage':
+      evidenceAr = [`تغطية مصدر البيانات = ${ctx.coveragePercent}% (الحد التنفيذي 80%)`];
+      crossChecksAr = ['نسبة الأيام المرفوعة داخل الفترة المطلوبة مقابل إجمالي الفترة'];
+      missingValidationsAr = ctx.coveragePercent < 100 ? [`زيادة التغطية من ${ctx.coveragePercent}% إلى 100%`] : [];
+      break;
+    case 'apiHealth':
+      evidenceAr = [`درجة صحة الـ API الحالية = ${ctx.apiHealth}/100`];
+      crossChecksAr = ['زمن استجابة Google Sheets API', 'معدل نجاح آخر الطلبات'];
+      missingValidationsAr = ctx.apiHealth < 100 ? ['مراقبة زمن الاستجابة حتى الاستقرار الكامل'] : [];
+      break;
+    case 'lastAuditRecency':
+      evidenceAr = [`آخر تدقيق: ${ctx.liveAudit?.generatedAt ?? 'غير متوفر'}`];
+      crossChecksAr = ['فارق الوقت بين الآن وآخر Live Audit مُشغَّل'];
+      missingValidationsAr = c.score < 100 ? ['تشغيل Live Audit الآن لتحديث الحداثة إلى 100%'] : [];
+      break;
+    case 'formulaValidation':
+      evidenceAr = ['حالة بوابة KPI Trust Verification', 'نتيجة Roadmap Zero-Validation'];
+      crossChecksAr = ['اتساق معادلات الساعات المفقودة (Zero-Sum) عبر كل الفئات'];
+      missingValidationsAr = c.score < 100 ? ['إغلاق كل تحذيرات بوابة KPI (gateStatus=open)'] : [];
+      break;
+  }
+
+  return { ...c, evidenceAr, crossChecksAr, missingValidationsAr, potentialScore, improvementPathAr };
+}
+
 export type TrustScoreInput = {
   dataIntegrity: DataIntegrityReport;
   accuracyAudit: FinalKpiAccuracyAudit;
@@ -165,7 +275,7 @@ export function calculateTrustScoreFromParts(input: TrustScoreInput): TrustScore
   const trendLabelAr =
     trend === 'improving' ? 'تحسن' : trend === 'declining' ? 'تراجع' : 'مستقر';
 
-  const componentDetails: TrustComponentDetail[] = [
+  const rawComponentDetails: BaseComponentDetail[] = [
     {
       key: 'dataCompleteness',
       labelAr: 'اكتمال البيانات',
@@ -291,6 +401,19 @@ export function calculateTrustScoreFromParts(input: TrustScoreInput): TrustScore
       trend,
     },
   ];
+
+  const componentDetails: TrustComponentDetail[] = rawComponentDetails.map((c) =>
+    enrichWithPathTo100(c, {
+      dataIntegrity,
+      missingDays,
+      calendarDays,
+      ghostPct,
+      dupPct,
+      liveAudit,
+      coveragePercent,
+      apiHealth,
+    })
+  );
 
   const rootCauses = componentDetails
     .filter((c) => c.score < 85)
