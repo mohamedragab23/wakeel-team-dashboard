@@ -1,5 +1,7 @@
 import { formatIsoDateInTimeZone, addDays } from '@/lib/timezone';
 import { getRoosterExportHeadersFromSheet } from '@/lib/roosterSessionStore';
+import { smartRefreshRoosterAuth } from '@/lib/roosterLive/authRefresh';
+import { logStructured } from '@/lib/requestTrace';
 
 export type RoosterExportParams = {
   cityId: string; // e.g. 200
@@ -41,26 +43,40 @@ function buildExportUrl(template: string, params: RoosterExportParams): string {
  * - ROOSTER_EXPORT_URL_TEMPLATE: a full URL that returns CSV, using placeholders:
  *   - {city_id} {start_at} {end_at}
  * - Optional: ROOSTER_EXPORT_HEADERS_JSON: JSON object of extra headers (e.g. Cookie / Authorization).
+ *
+ * `headersOverride`, when passed, is used verbatim instead of resolving from
+ * env/Sheet -- used by `resolveFreshRoosterExportHeaders()` below to inject a
+ * just-minted `dhh_token` (see that function's doc comment for why this is
+ * necessary; discovered live, 2026-07-27, via a real `401 Unauthorized` from
+ * this exact endpoint). Omitting it preserves the exact pre-existing
+ * behavior for any caller that doesn't pass it.
  */
-export async function exportRoosterCsv(params: RoosterExportParams): Promise<{ filename: string; bytes: ArrayBuffer }> {
+export async function exportRoosterCsv(
+  params: RoosterExportParams,
+  headersOverride?: Record<string, string>
+): Promise<{ filename: string; bytes: ArrayBuffer }> {
   const template = requireEnv('ROOSTER_EXPORT_URL_TEMPLATE');
   const url = buildExportUrl(template, params);
 
   let extraHeaders: Record<string, string> = {};
-  const rawHeaders = process.env.ROOSTER_EXPORT_HEADERS_JSON?.trim();
-  if (rawHeaders) {
-    try {
-      const parsed = JSON.parse(rawHeaders);
-      if (parsed && typeof parsed === 'object') {
-        extraHeaders = Object.fromEntries(Object.entries(parsed).map(([k, v]) => [String(k), String(v)]));
-      }
-    } catch {
-      throw new Error('ROOSTER_EXPORT_HEADERS_JSON must be valid JSON object.');
-    }
+  if (headersOverride) {
+    extraHeaders = headersOverride;
   } else {
-    // No redeploy needed: pull headers from Google Sheet config if available.
-    const fromSheet = await getRoosterExportHeadersFromSheet();
-    if (fromSheet) extraHeaders = fromSheet;
+    const rawHeaders = process.env.ROOSTER_EXPORT_HEADERS_JSON?.trim();
+    if (rawHeaders) {
+      try {
+        const parsed = JSON.parse(rawHeaders);
+        if (parsed && typeof parsed === 'object') {
+          extraHeaders = Object.fromEntries(Object.entries(parsed).map(([k, v]) => [String(k), String(v)]));
+        }
+      } catch {
+        throw new Error('ROOSTER_EXPORT_HEADERS_JSON must be valid JSON object.');
+      }
+    } else {
+      // No redeploy needed: pull headers from Google Sheet config if available.
+      const fromSheet = await getRoosterExportHeadersFromSheet();
+      if (fromSheet) extraHeaders = fromSheet;
+    }
   }
 
   const res = await fetch(url, {
@@ -86,6 +102,68 @@ export async function exportRoosterCsv(params: RoosterExportParams): Promise<{ f
   const bytes = await res.arrayBuffer();
   const filename = `rooster_${params.cityLabel || params.cityId || 'city'}_${params.startDate}_to_${params.endDate}.csv`;
   return { filename, bytes };
+}
+
+/**
+ * Resolves the exact static headers `exportRoosterCsv()` used to resolve
+ * internally (env override first, else the `cron_config` Sheet) -- extracted
+ * so `resolveFreshRoosterExportHeaders()` below can feed them through the
+ * dhh_token mint step before the real request.
+ */
+async function resolveStaticExportHeaders(): Promise<Record<string, string> | null> {
+  const rawHeaders = process.env.ROOSTER_EXPORT_HEADERS_JSON?.trim();
+  if (rawHeaders) {
+    try {
+      const parsed = JSON.parse(rawHeaders);
+      if (parsed && typeof parsed === 'object') {
+        return Object.fromEntries(Object.entries(parsed).map(([k, v]) => [String(k), String(v)]));
+      }
+      return null;
+    } catch {
+      throw new Error('ROOSTER_EXPORT_HEADERS_JSON must be valid JSON object.');
+    }
+  }
+  return getRoosterExportHeadersFromSheet();
+}
+
+/**
+ * The `/api/rooster/v3/shifts/export` endpoint (like `/api/rooster/v3/employees`,
+ * confirmed live 2026-07-27 during SRS-013 Phase 2 validation) rejects the
+ * *stable* Cloudflare Access cookie alone with `401 Unauthorized` -- it also
+ * needs a freshly-minted `dhh_token` (2h TTL), exactly like the Live-3PL
+ * dashboard. `ROOSTER_EXPORT_HEADERS_JSON` (env or Sheet) intentionally
+ * stores the stable cookie *without* `dhh_token` (it would go stale in
+ * storage anyway -- see `roosterSessionStore.ts`), so a mint step must run
+ * on every call, not just for the Live-3PL sync.
+ *
+ * This reuses the exact same `smartRefreshRoosterAuth()` three-layer
+ * self-healing orchestration already proven in production for Live-3PL:
+ * cheap dhh_token mint -> silent session replay -> full Okta+Gmail-OTP
+ * recovery (SRS-012). On success, the (stable-only) recovered cookie is
+ * persisted back to the Sheet automatically by `smartRefreshRoosterAuth`
+ * itself -- no additional plumbing needed here.
+ *
+ * Callers: `RoosterClient.exportShiftsCsv()` (Phase 1) and the hourly
+ * `/api/cron/rooster-sync` job (pre-existing; this fixes the same live
+ * `401` there too, discovered via the exact same root cause).
+ */
+export async function resolveFreshRoosterExportHeaders(): Promise<{
+  headers: Record<string, string> | null;
+  failureReason?: string;
+}> {
+  const stable = await resolveStaticExportHeaders();
+  const stableCookie = stable?.Cookie || stable?.cookie;
+  if (!stableCookie) {
+    return { headers: null, failureReason: 'no_stable_export_headers_configured' };
+  }
+
+  const outcome = await smartRefreshRoosterAuth({ Cookie: stableCookie });
+  if (!outcome.headers) {
+    logStructured('error', 'rooster_export_auth_refresh_failed', { failureReason: outcome.failureReason });
+    return { headers: null, failureReason: outcome.failureReason || 'smart_refresh_failed' };
+  }
+
+  return { headers: outcome.headers };
 }
 
 export function buildDefaultExportRangeNowCairo(): { startDate: string; endDate: string } {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { analyzeLegacyShifts } from '@/lib/shiftsLegacyAnalyze';
-import { exportRoosterCsv, buildDefaultExportRangeNowCairo } from '@/lib/roosterExport';
+import { exportRoosterCsv, resolveFreshRoosterExportHeaders, buildDefaultExportRangeNowCairo } from '@/lib/roosterExport';
 import { notifySupervisorsShiftSummary } from '@/lib/supervisorNotifier';
 import { isCronAuthorized } from '@/lib/cronAuth';
 import { logStructured } from '@/lib/requestTrace';
@@ -21,7 +21,18 @@ export async function GET(req: NextRequest) {
     }
     const { startDate, endDate } = buildDefaultExportRangeNowCairo();
 
-    const exported = await exportRoosterCsv({ cityId, cityLabel, startDate, endDate });
+    // 2026-07-27 fix: the export endpoint needs a freshly-minted dhh_token
+    // (same root cause discovered on /api/rooster/v3/employees during
+    // SRS-013 Phase 2 validation and on the new Phase 1 import route) --
+    // the static Sheet/env Cookie alone now returns 401. See
+    // lib/roosterExport.ts#resolveFreshRoosterExportHeaders for details.
+    const { headers: freshHeaders, failureReason } = await resolveFreshRoosterExportHeaders();
+    if (!freshHeaders) {
+      logStructured('error', 'rooster_sync_auth_unavailable', { failureReason });
+      return NextResponse.json({ success: false, error: `Rooster auth unavailable (${failureReason || 'unknown'})` }, { status: 502 });
+    }
+
+    const exported = await exportRoosterCsv({ cityId, cityLabel, startDate, endDate }, freshHeaders);
 
     const analyzed = await analyzeLegacyShifts({
       viewer: { role: 'admin', name: 'cron' },

@@ -3,18 +3,26 @@
  *
  * Centralizes typed access to Rooster for the *new* features only (Rider
  * Search in Phase 2, Shift Import in Phase 1). The existing, in-production
- * cron paths (`lib/roosterLive/*`, the hourly `rooster-sync` cron calling
- * `exportRoosterCsv()` directly) are intentionally left untouched —
- * "nothing rewritten unless absolutely necessary." A follow-up migration of
- * those crons onto this shared client is explicitly out of scope for now
- * (low-priority tech debt, per the architecture doc §7.3).
+ * cron paths (`lib/roosterLive/*`) are intentionally left untouched —
+ * "nothing rewritten unless absolutely necessary."
+ *
+ * **2026-07-27 correction (live evidence, not an assumption):** the hourly
+ * `/api/cron/rooster-sync` cron calling `exportRoosterCsv()` directly turned
+ * out to already be broken in production (`401 Unauthorized`) — the export
+ * endpoint needs a freshly-minted `dhh_token`, same as `/api/rooster/v3/employees`
+ * (Phase 2's validated endpoint), which `exportRoosterCsv()`'s original static
+ * header resolution never provided. Fixed at the source in `lib/roosterExport.ts`
+ * (`resolveFreshRoosterExportHeaders()`, reusing the exact same production-proven
+ * `smartRefreshRoosterAuth()` used by Live-3PL) and applied to *both*
+ * `exportShiftsCsv()` below and the pre-existing cron — same root cause, same fix,
+ * not a scope change.
  *
  * Every method here goes through the Smart Cache (5 min TTL, single-flight)
  * and the Request Queue (max-2-concurrent semaphore) before ever calling
  * Rooster, per the frozen architecture:
  *   RoosterClient -> Smart Cache -> Request Queue -> Dashboard API -> React UI
  */
-import { exportRoosterCsv, type RoosterExportParams } from '@/lib/roosterExport';
+import { exportRoosterCsv, resolveFreshRoosterExportHeaders, type RoosterExportParams } from '@/lib/roosterExport';
 import { withRoosterCache } from '@/lib/rooster/roosterCache';
 import { withRoosterQueue } from '@/lib/rooster/roosterQueue';
 
@@ -36,7 +44,11 @@ export class RoosterClient {
 
     const cached = await withRoosterCache<CachedExportPayload>(key, () =>
       withRoosterQueue(async () => {
-        const real = await exportRoosterCsv(params);
+        const { headers, failureReason } = await resolveFreshRoosterExportHeaders();
+        if (!headers) {
+          throw new Error(`Rooster auth unavailable for export (${failureReason || 'unknown'})`);
+        }
+        const real = await exportRoosterCsv(params, headers);
         return {
           filename: real.filename,
           bytesBase64: Buffer.from(real.bytes).toString('base64'),
