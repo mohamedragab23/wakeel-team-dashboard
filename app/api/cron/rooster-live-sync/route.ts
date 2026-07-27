@@ -7,12 +7,26 @@ import { sendAdminTelegramNotificationSafe } from '@/lib/adminTelegramNotifier';
 export const dynamic = 'force-dynamic';
 
 /**
- * Triggered every ~60s by an EXTERNAL scheduler (cron-job.org / GitHub
- * Actions / QStash) — Vercel Cron cannot reliably guarantee 60s resolution,
- * so this route is intentionally not (only) wired into vercel.json.
+ * Triggered every ~60s.
+ *
+ * 2026-07-27 incident: this route used to be triggered ONLY by an external
+ * third-party scheduler (cron-job.org). That scheduler silently stopped
+ * calling this endpoint for >1h with zero error/alert on our side (nothing
+ * in our app ever ran, so nothing could log or alert) — the dashboard just
+ * showed stale/empty data with no warning. Root-caused via Vercel runtime
+ * log route-counts (236 hits/6h → 0 hits/1h) and confirmed the app itself
+ * was completely healthy the whole time (manual trigger during the
+ * incident succeeded immediately, including a full Layer-3 recovery).
+ *
+ * Fix: this route is now ALSO registered as a native Vercel Cron
+ * (`vercel.json`, every minute) so the primary trigger no longer depends on
+ * a third-party website we don't control or monitor. cron-job.org may still
+ * hit this endpoint too (that's harmless/idempotent), but Vercel Cron is now
+ * the reliable source of truth.
  *
  * Auth: identical mechanism to the existing crons (`lib/cronAuth.ts`,
- * `CRON_SECRET`) — no new auth logic introduced.
+ * `CRON_SECRET`) — Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`
+ * automatically, no new auth logic introduced.
  */
 export async function GET(req: NextRequest) {
   if (!isCronAuthorized(req)) {

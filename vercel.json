@@ -28,6 +28,10 @@
     {
       "path": "/api/cron/rooster-keepalive",
       "schedule": "0 */3 * * *"
+    },
+    {
+      "path": "/api/cron/rooster-live-sync",
+      "schedule": "* * * * *"
     }
   ]
 }
