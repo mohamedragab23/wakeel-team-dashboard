@@ -1,8 +1,9 @@
 # SRS-013 — Design Freeze
 
-**Status:** 🟡 AWAITING SIGN-OFF — implementation starts only after this document is approved, and Phase *N+1* starts only after Phase *N* passes its acceptance tests in production.
+**Status:** 🟢 FULLY FROZEN — all previously-open items resolved (Rider Search endpoint confirmed live, PDF frozen to `pdf-lib`, Payroll dual-write decided, telemetry requirement adopted). Final architecture review passed (companion doc §14). Implementation starts only after explicit Phase 0 approval, and Phase *N+1* starts only after Phase *N* passes its acceptance tests in production.
 **Companion doc:** `docs/SRS013_ROOSTER_API_PAYROLL_ARCHITECTURE.md` (rationale/why). This document is the *what, exactly* — frozen contracts, not architecture prose.
 **Baseline commit:** `eed9c44` (current `main`, includes the rooster-live-sync cron fix + Gmail OTP automation, both already in production).
+**Validation evidence:** `scripts/rooster-employees-endpoint-check.ts` — read-only, reuses only the existing production Rooster auth layer, no captured credentials stored anywhere.
 
 Every phase below follows the same six-part contract you asked for:
 Endpoints → Sheets changes → New APIs → Impact on existing code → Rollback plan → Acceptance tests.
@@ -134,35 +135,72 @@ Set `FEATURE_SHIFT_IMPORT_ENABLED=false` in Vercel → new panel disappears, new
 
 ---
 
-## Phase 2 — Rider Search *(provisionally frozen — one param pending)*
+## Phase 2 — Rider Search *(✅ Endpoint Confirmed — fully frozen)*
 
 ### 1. Endpoints used
-🔴 **Not yet known.** Everything below is frozen **except** the literal Rooster URL/method/response shape, which needs one of the two resolutions described in SRS-013 §2 (DevTools capture from you, or authorized exploratory probing). The moment that's confirmed, only `RoosterClient.searchRiders()`'s internal implementation is filled in — the API contract below does **not** change.
+**Confirmed live, 2026-07-27** via `scripts/rooster-employees-endpoint-check.ts` (read-only diagnostic, reuses only the existing production auth layer — no captured credentials stored or hardcoded anywhere):
+
+- **Endpoint:** `GET https://eg.me.logisticsbackoffice.com/api/rooster/v3/employees`
+- **Supported query params:** `search_id` (value), `with_field` (column to match — confirmed: `id_number`; `phone_number`/`email`/`name` inferred-likely, non-blocking, see below), `filter_status=active_contract`, `with_contracts=true`, `page`, `size`
+- **Authentication method:** identical to every existing Rooster call — resolved via `smartRefreshRoosterAuth()` (stable `CF_Authorization`/`CF_AppSession` Cookie + a freshly Okta-minted `dhh_token`). Confirmed by direct test: the stable cookie **alone** (no dhh_token) returns Cloudflare Access's HTML sign-in page, not JSON — `RoosterClient.searchRiders()` must always go through the full `smartRefreshRoosterAuth()` path, never the raw cookie.
+- **Response shape:** a Spring-Boot `Page<Employee>` envelope — `{ content: Employee[], total_pages, total_elements, number_of_elements, number, size, first, last, sort, empty }`. `content[i]` fields (confirmed live): `id, name, email, phone_number, bank_data, birth_date, contracts[], active_contract, reporting_to, work_permit_expiry_date, batch_number, field_value, created_at, starting_point_ids`. Nested `active_contract`/`contracts[i]`: `id, employee_id, contract, start_at, end_at, start, end, status, job_title, city_id, city_name, time_zone, vehicle_type, currently_active`.
+- **Caching strategy:** Phase 0's Smart Cache, key = `rider_search:{withField}:{searchValue}:{page}:{size}`, TTL 5 min. Same rider is often searched by multiple supervisors in a short window.
+- **Rate-limit strategy:** Rooster exposes **zero** `X-RateLimit-*`/`Retry-After` headers (confirmed) — no reactive signal exists. Mitigated proactively: every call goes through Phase 0's Request Queue/semaphore (max-2-concurrent), never called directly.
+- **Failure handling:** (confirmed live) (a) valid-type search, no match → clean `200`, `content:[]`, `total_elements:0` → surfaced as `{ success:true, results:[] }`, not an error. (b) type-mismatched `search_id` for the given `with_field` → `409` with a raw Hibernate `DataException` message → **caught and never surfaced verbatim**; mapped to `{ success:false, reason:'invalid_search_term' }`. (c) any other `4xx/5xx`/network error → `{ success:false, reason:'rooster_unavailable' }`, `502` from our own route, no raw upstream text leaked.
+- **Worker ID / Paper Number mapping (non-blocking detail):** `id` (top-level numeric) = best-evidence **Worker ID**; `with_field=id_number` = confirmed way to search by it. `phone_number`/`email` are confirmed literal fields matching those two search methods directly. **"Paper Number" was not observed as a distinct field** in the live 2-record sample — `RoosterClient.searchRiders()`'s internal `with_field` value for this one search method can be refined in Phase 2 build/UAT without changing anything below; if it turns out not to be server-searchable, the UI falls back to client-side filtering over already-cached results.
 
 ### 2. Google Sheets changes
-**None.** This is a live lookup only; nothing is written to Sheets (confirmed: no "Paper Number" concept exists in our roster data, so there's nothing to reconcile).
+**None.** This is a live lookup only; nothing is written to Sheets (confirmed: no "Paper Number" concept exists in our roster data, so there's nothing to reconcile on write — merge happens in-memory at read time, see §3/§Single-Rider-Profile below).
 
-### 3. New APIs (frozen contract regardless of the endpoint above)
+### 3. New APIs (frozen)
 | Route | Method | Auth | Request | Response |
 |---|---|---|---|---|
-| `GET /api/rooster/riders/search` | GET | supervisor-or-admin JWT | `?q=<worker id, paper number, name, or phone>` | `{ success: true; results: RoosterRiderSearchResult[] }` where each result is `{ workerId, paperNumber, name, phone, vehicle, status, zone, email }` (fields present only if Rooster returns them — no invented data) |
+| `GET /api/rooster/riders/search` | GET | supervisor-or-admin JWT | `?type=workerId\|paperNumber\|phone\|name\|email&q=<value>` | `{ success: true; results: MergedRiderProfile[] }` — see shape below. On failure: `{ success:false, reason: 'invalid_search_term' \| 'rooster_unavailable' }` (never a raw upstream error) |
 
+`MergedRiderProfile` (frozen shape — every Rooster field is surfaced, none invented, per your instruction):
+```ts
+type MergedRiderProfile = {
+  // Merged, single canonical value per field — dashboard (Sheets) wins on any field present in both sources.
+  workerId?: string;        // Rooster `id`
+  paperNumber?: string;     // Rooster id_number-searched field, if present
+  name?: string;
+  email?: string;
+  phoneNumbers?: string[];  // merged from Sheets phone + Rooster phone_number, deduped
+  city?: string;            // Rooster active_contract.city_name, or dashboard city if present
+  company?: string;         // if returned by Rooster / present in dashboard
+  jobTitle?: string;        // Rooster active_contract.job_title
+  joiningDate?: string;     // Rooster active_contract.start_at (earliest contract), or dashboard hire date
+  currentStatus?: string;   // Rooster active_contract.status / currently_active, merged with dashboard status
+  contracts?: RoosterContract[];       // full Rooster contracts[] passthrough, unmerged (historical, Rooster-only)
+  // Per-field provenance so the UI can label each value:
+  fieldSources: Record<string, 'dashboard' | 'rooster'>;
+};
+```
 Cached via Phase 0's 5-minute Smart Cache, gated by `FEATURE_RIDER_SEARCH_ENABLED`.
+
+### Single Rider Profile — merge rule (frozen)
+Priority: **Dashboard (Sheets) data + Rooster data**, merged into one object, never shown as two duplicate blocks.
+- For any field present in **both** sources with different values → **dashboard value wins**, displayed with a "Dashboard" tag.
+- For any field present **only in Rooster** → included as-is, displayed with a **"Live from Rooster"** tag.
+- For any field present **only in Sheets** → included as-is, displayed with a **"Dashboard"** tag.
+- Profile sections rendered: Personal info, Employment info, Contract info, Phone numbers, Paper Number, Worker ID, City, Current status, Company, Job title, Joining date, and any additional Rooster fields not otherwise mapped (rendered generically under "Additional Rooster Data", still tagged "Live from Rooster") — so no field returned by Rooster is ever silently dropped.
 
 ### 4. Impact on existing code
 | File | Change | Risk |
 |---|---|---|
-| `app/riders/page.tsx`, `app/admin/riders/page.tsx` | **None** — new search lives in its own UI surface, not merged into the existing Sheets-backed rider tables (different data source, avoid conflating "our roster" with "Rooster's live record") | Zero |
-| New files only | Net new | Zero |
+| `app/riders/page.tsx`, `app/admin/riders/page.tsx` | **None** — new search lives in its own UI surface (new Single Rider Profile view), not merged into the existing Sheets-backed rider tables | Zero |
+| New files only (`lib/rooster/RoosterClient.ts#searchRiders`, `app/api/rooster/riders/search/route.ts`, rider-profile UI) | Net new | Zero |
 
 ### 5. Rollback plan
-`FEATURE_RIDER_SEARCH_ENABLED=false` → search box hidden, route disabled. No persisted data exists to roll back.
+`FEATURE_RIDER_SEARCH_ENABLED=false` → search box hidden, route disabled. No persisted data exists to roll back (pure read/merge, nothing written to Sheets).
 
 ### 6. Acceptance tests
-1. Search by a known Worker ID → returns the same info visible on Rooster's own Riders page for that person (manually cross-checked at least 3 times during UAT).
+1. Search by a known Worker ID → returns the same info visible on Rooster's own Riders page for that person (manually cross-checked at least 3 times during UAT), merged correctly with any existing dashboard data for the same rider.
 2. Search with no results → `{ success:true, results:[] }`, UI shows a clear "not found" state, not an error.
-3. Two identical searches within 5 minutes → second one served from cache (Phase 0 log counter shows 1 real Rooster call, not 2).
-4. Search endpoint failing/Rooster session dead → `502` with a message, **no** Telegram alert fires for this (rider search is user-facing/on-demand, not a background job — alerting policy stays scoped to the existing sync/keepalive crons only, per "zero impact on existing Telegram workflow").
+3. Search with a malformed value for the chosen field (reproducing the confirmed `409` Hibernate error) → UI shows a friendly "invalid search term" message, **never** the raw Hibernate/SQL text.
+4. Two identical searches within 5 minutes → second one served from cache (Phase 0 log counter shows 1 real Rooster call, not 2; telemetry `cache_hit` metric increments — see cross-cutting Telemetry section).
+5. Search endpoint failing/Rooster session dead → `502` with a message, **no** Telegram alert fires for this (rider search is user-facing/on-demand, not a background job — alerting policy stays scoped to the existing sync/keepalive crons only, per "zero impact on existing Telegram workflow").
+6. A rider present in both Rooster and the dashboard Sheet, with a conflicting field (e.g. different phone number) → merged profile shows the **dashboard** value for that field, tagged "Dashboard," and any Rooster-only fields (e.g. `work_permit_expiry_date`) still appear, tagged "Live from Rooster."
 
 ---
 
@@ -189,26 +227,30 @@ None external — this phase is 100% internal (Google Sheets + our own API).
 | K | `createdAt` | ISO string | |
 | L | `status` | string | `active` \| `voided` \| `corrected` — **the only column ever mutated in-place**, and only from `active`→`corrected`/`voided`, never back |
 | M | `correctsTransactionId` | string | empty unless this row supersedes another |
+| N | `source` | string | **`ledger_native`** (created via the new Payroll API below) \| **`legacy_mirror`** (auto-created as a side-effect of the *existing, untouched* `خصومات_الإدارة` deduction flow — see frozen backward-compat decision below). **`calculateSupervisorSalary()`'s additive sum step reads `source='ledger_native'` rows only** — this is the frozen double-counting guard (§14 of the architecture doc). |
 
-**Existing tabs touched:** none. `الخصومات`, `السلف`, `خصومات_الإدارة`, `الأهداف`, `إعدادات_الرواتب` keep their exact current schema and behavior.
+**Existing tabs touched:** none in schema/behavior. `الخصومات`, `السلف`, `خصومات_الإدارة`, `الأهداف`, `إعدادات_الرواتب` keep their exact current schema and behavior for every existing read/write. The **only** addition is one new, non-blocking, fire-and-forget side-effect: whenever `خصومات_الإدارة`'s existing create-deduction code path succeeds, it now also appends one mirror row into `سجل_المعاملات_المالية` with `source='legacy_mirror'` — same pattern as `sendAdminTelegramNotificationSafe` (never blocks, never fails, never rolls back the primary write; a Sheets-append failure here is only logged, not surfaced to the admin).
 
 ### 3. New APIs
 | Route | Method | Auth | Request | Response |
 |---|---|---|---|---|
-| `POST /api/admin/payroll/transactions` | POST | admin JWT (`assertAdminApiAccess`, new feature key `payroll_ledger`) | `{ entityType, entityCode, type, amount, reason, period }` | `{ success:true, transaction: {...row} }` |
+| `POST /api/admin/payroll/transactions` | POST | admin JWT (`assertAdminApiAccess`, new feature key `payroll_ledger`) | `{ entityType, entityCode, type, amount, reason, period }` | `{ success:true, transaction: {...row, source:'ledger_native'} }` |
 | `GET /api/admin/payroll/transactions` | GET | admin JWT | `?entityCode=&period=` | `{ success:true, transactions: [...] }` |
 | `PATCH /api/admin/payroll/transactions/:id` | PATCH | admin JWT | `{ amount, reason }` (the "edit") | Appends a new row with `correctsTransactionId=:id`; flips original's `status` to `corrected`; returns both rows |
 | `DELETE /api/admin/payroll/transactions/:id` | DELETE | admin JWT | — | Sets `status=voided` on that row only (no new row, no deletion) — this is how "delete" is expressed without ever removing a financial record |
 
-All four gated by `FEATURE_PAYROLL_LEDGER_ENABLED`; each write calls `appendAuditLog()` from Phase 0.
+All four gated by `FEATURE_PAYROLL_LEDGER_ENABLED`; each write calls `appendAuditLog()` from Phase 0, and (per the cross-cutting Telemetry requirement below) records `exec_ms` + `audit_event` via `recordMetric()`.
+
+**Frozen backward-compatibility decision (no longer a choice — explicitly required):** old deductions via `خصومات_الإدارة` **keep working exactly as today, unmodified**. Simultaneously, every **new** deduction created through that existing flow **also** automatically creates a `source='legacy_mirror'` ledger row (fire-and-forget, non-blocking — see Sheets-changes section above). This satisfies both "old deductions must continue working exactly as today" and "every new deduction must also create a Ledger transaction automatically" at once, with the `source` column preventing any double-count in the salary math below.
 
 **Additive change to existing endpoints (frozen, not a rewrite):**
-- `GET /api/salary/calculate`, `GET /api/salary`, `GET /api/admin/salary/calculate` → response gains one new **optional** field: `ledgerTransactions: Transaction[]` (sum already folded into existing `netSalary`/`deductions.total` via one new addition step in `calculateSupervisorSalary()`; every existing field keeps its current value/meaning unchanged — verified in acceptance test #4 below).
+- `GET /api/salary/calculate`, `GET /api/salary`, `GET /api/admin/salary/calculate` → response gains one new **optional** field: `ledgerTransactions: Transaction[]` (sum already folded into existing `netSalary`/`deductions.total` via one new addition step in `calculateSupervisorSalary()` — **this step sums `source='ledger_native'` rows only**, explicitly excluding `legacy_mirror` rows since those are already counted by the untouched `خصومات_الإدارة` sheet math; every existing field keeps its current value/meaning unchanged — verified in acceptance test #4/#8 below).
 
 ### 4. Impact on existing code
 | File | Change | Risk | Mitigation |
 |---|---|---|---|
-| `lib/salaryService.ts` | **Additive.** One new step: fetch this period's ledger rows for the supervisor, sum by `type`, add to existing totals; existing sheet-based math untouched. | **Medium** — this is the one hot/sensitive file touched in the entire plan | Feature-flagged: if `FEATURE_PAYROLL_LEDGER_ENABLED=false`, the new step is skipped entirely and `calculateSupervisorSalary()` behaves byte-for-byte as it does today (verified in acceptance test #1) |
+| `lib/salaryService.ts` | **Additive.** One new step: fetch this period's `source='ledger_native'` rows for the supervisor, sum by `type`, add to existing totals; existing sheet-based math untouched, `legacy_mirror` rows explicitly skipped by this step. | **Medium** — this is the one hot/sensitive file touched in the entire plan | Feature-flagged: if `FEATURE_PAYROLL_LEDGER_ENABLED=false`, the new step is skipped entirely and `calculateSupervisorSalary()` behaves byte-for-byte as it does today (verified in acceptance test #1) |
+| `app/api/admin/salary/admin-deductions/route.ts` | **Additive.** After its existing create-deduction logic succeeds (unchanged), one new fire-and-forget call appends a `source='legacy_mirror'` row to the ledger. | Low — wrapped in try/catch, logged-only on failure, never awaited-blocking the response | Feature-flagged: if `FEATURE_PAYROLL_LEDGER_ENABLED=false`, the mirror call is skipped entirely; existing deduction creation is 100% unaffected either way |
 | `app/salary/page.tsx` | **Additive** — new "Ledger Transactions" section rendered below existing sections | Low | Flag-gated render |
 | `app/admin/salaries/page.tsx` | **Additive** — new Bonus/Deduction/Advance/Adjustment entry form, alongside (not replacing) the existing admin-deductions form | Low | Flag-gated render |
 | `types/index.ts` / API response types | **Additive field only**, never removed/renamed | Zero for existing consumers | TypeScript structural typing — old code that doesn't read the new field is unaffected |
@@ -226,6 +268,8 @@ All four gated by `FEATURE_PAYROLL_LEDGER_ENABLED`; each write calls `appendAudi
 5. Delete supervisor X via the existing `DELETE /api/admin/supervisors` flow (unchanged) → re-fetch all of X's ledger rows directly from the sheet → `entityNameSnapshot` still shows X's name correctly on every row, even though X no longer exists in `المشرفين`.
 6. Non-admin JWT on any of the four new routes → `401`/`403`, matching existing admin-route guard behavior exactly.
 7. Two admins submit a bonus for the same supervisor+period within the same second → **both** rows are appended (append-only has no lost-update problem, unlike the existing sheet's read-modify-write patterns) — verified by row count, not overwritten.
+8. **Double-counting guard (new, critical):** create a deduction of 300 for supervisor Y via the **existing, untouched** `خصومات_الإدارة` flow → confirm (a) `خصومات_الإدارة` sheet gets its row exactly as it does today, (b) exactly **one** new `source='legacy_mirror'` row appears in `سجل_المعاملات_المالية`, and (c) `GET /api/salary/calculate` for Y shows the deduction counted **exactly once** (not twice) — proves the `source`-filtered sum step in `salaryService.ts` correctly excludes the mirror row.
+9. Temporarily force the mirror-write to fail (e.g. bad Sheets creds in a test env) → the original `خصومات_الإدارة` deduction creation still returns `200` and succeeds normally; only a log entry records the failed mirror — proves the fire-and-forget guarantee.
 
 ---
 
@@ -307,12 +351,13 @@ None. Pure read-aggregation; no new tab required for the MVP (see SRS-013 §6 �
 |---|---|---|---|---|
 | `GET /api/admin/financial-report/monthly` | GET | admin JWT | `?month=&year=&format=json\|excel\|pdf` | `json`: `{ totalSalaries, totalBonuses, totalDeductions, totalAdvances, totalRent, otherExpenses, grandTotal, previousMonth: {...}, trendPct }`. `excel`/`pdf`: file download |
 
-Gated by `FEATURE_MONTHLY_REPORT_ENABLED`. **PDF format decision still open per SRS-013 §12.2** — this contract works identically either way (only the internal renderer differs); does not block freezing everything else in this phase.
+Gated by `FEATURE_MONTHLY_REPORT_ENABLED`. **PDF decision frozen: `pdf-lib`, real PDF engine, no browser print** (SRS-013 §6/§12) — `format=pdf` calls new `lib/pdf/monthlyFinancialReportPdf.ts` → `buildMonthlyReportPdf(reportData): Promise<Buffer>`, returns an actual downloadable `.pdf` file, not printable HTML.
 
 ### 4. Impact on existing code
 | File | Change | Risk |
 |---|---|---|
 | `lib/exportExcelAsync.ts` | **None** — called as-is for the Excel branch | Zero |
+| `package.json` | **Additive** — one new dependency, `pdf-lib` (pure JS, no Chromium/Puppeteer) | Low |
 | Everything else | Net new files only | Zero |
 
 ### 5. Rollback plan
@@ -322,16 +367,30 @@ Gated by `FEATURE_MONTHLY_REPORT_ENABLED`. **PDF format decision still open per 
 1. Report for a month with known Phase 3/4 data → `grandTotal` equals the manually-computed sum of all five components (cross-checked by hand once during UAT).
 2. Previous-month comparison and trend % are correct for two consecutive months with different totals.
 3. `format=excel` → downloadable `.xlsx` opens correctly with matching totals.
-4. `format=pdf` → downloadable/printable output matching the JSON totals (exact mechanism per the open PDF decision).
+4. `format=pdf` → downloadable **`.pdf` file (generated via `pdf-lib`, not `window.print()`)** opens correctly in a real PDF viewer, with totals matching the JSON response exactly.
 5. Non-admin JWT → `401`.
 6. Month with zero data in Phase 3/4 tabs (e.g. before they existed) → all-zero report, not a crash — proves the aggregation is defensive against empty new tabs.
 
 ---
 
+## Cross-Cutting: Telemetry & Health Metrics (applies to every phase above)
+
+Frozen per your explicit addition — *"Every new feature must expose telemetry and health metrics... so we can monitor production behavior without enabling debug logs."* Full spec in `SRS013_ROOSTER_API_PAYROLL_ARCHITECTURE.md` §13; summary here since it touches every phase's acceptance criteria:
+
+- New `lib/telemetry.ts` → `recordMetric({ feature, metric, value?, tags? })`, storing into Redis (Upstash, same account as existing caches) with a 48h rolling window (`EXPIRE`) — bounded, no new infra.
+- Every new subsystem instruments itself: `RoosterClient` calls (`exec_ms`, `api_failure`), Smart Cache (`cache_hit`/`cache_miss`), Request Queue (`queue_wait_ms`), `appendAuditLog()` (`audit_event`), and each new write path in Phases 1/3/4 (`exec_ms`, `api_failure`).
+- New route `GET /api/admin/health/metrics` (admin-only) renders per-feature aggregates (p50/p95 exec time, cache hit ratio %, failure counts) — a plain admin page, no new dashboard framework.
+- **Acceptance test (applies once, verified across all phases together, not repeated per-phase):** after Phases 0–5 are live, `GET /api/admin/health/metrics` shows non-zero, sane values for every feature that has been exercised at least once (cache hit ratio between 0–100%, exec times in a plausible ms range, failure counts matching any deliberately-forced failures from each phase's own acceptance tests) — proving observability works without flipping on debug logs anywhere.
+- **Zero impact on existing features:** purely new instrumentation on purely new code paths; metric-recording itself is fire-and-forget and can never fail or slow down the real request it's measuring.
+
+---
+
 ## Sign-off Checklist
 
-- [ ] Endpoint for Feature 2 resolved (SRS-013 §2 / this doc's Phase 2 §1)
-- [ ] PDF export decision made (Option A vs B, SRS-013 §6 / this doc's Phase 5 §3)
-- [ ] Decision on `خصومات_الإدارة` (leave as-is vs. re-point to new ledger) — leaving as-is is the default if not specified
-- [ ] Soft-delete scope decision (confirmed out-of-scope by default per SRS-013 §4)
+- [x] Endpoint for Feature 2 resolved — **✅ Endpoint Confirmed**, live-validated (SRS-013 §2 / this doc's Phase 2 §1)
+- [x] PDF export decision made — **✅ Frozen to `pdf-lib`** (real PDF engine, no browser print) (SRS-013 §6 / this doc's Phase 5 §3)
+- [x] Decision on `خصومات_الإدارة` — **✅ Frozen: leave as-is AND auto-mirror every new deduction into the ledger** (`source='legacy_mirror'`, excluded from salary sums) (SRS-013 §3 / this doc's Phase 3 §2–3)
+- [x] Telemetry & health-metrics requirement — **✅ Adopted, frozen** (SRS-013 §13 / cross-cutting section above)
+- [ ] Soft-delete scope decision (confirmed out-of-scope by default per SRS-013 §4) — no action needed unless you want to revisit
+- [ ] Final architecture review re-run for breaking changes / race conditions / permission leaks / cache invalidation / Sheets consistency / rollback safety — **✅ Completed, passed** (SRS-013 §14)
 - [ ] Approval to begin **Phase 0** — every later phase is individually testable and revertable, and will not start until the previous phase's acceptance tests have passed in production.
