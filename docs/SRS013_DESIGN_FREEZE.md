@@ -93,7 +93,7 @@ Full production type-check (`tsc --noEmit`) and `next build` both pass with zero
 
 ---
 
-## Phase 1 — Automatic Shift Import
+## Phase 1 — Automatic Shift Import — ✅ SHIPPED 2026-07-27
 
 ### 1. Endpoints used
 **Rooster (external, already used today by the hourly cron — unchanged):**
@@ -136,6 +136,15 @@ Set `FEATURE_SHIFT_IMPORT_ENABLED=false` in Vercel → new panel disappears, new
 4. Concurrent requests for the same zone+range from two different logged-in supervisors within 5 minutes → confirmed (via Phase 0 log counters) only one real Rooster export call fires.
 5. Existing manual-upload `/api/shifts/legacy-analyze` flow, exercised end-to-end during this phase's testing window, returns identical results to before Phase 1 shipped.
 6. Non-admin/non-supervisor JWT (or none) → `401`, matching the existing guard's behavior exactly.
+
+**Verification (`scripts/srs013-phase1-verify.ts`, run twice against a local `next dev` server — once with the flag off/default, once with it forced on via `FEATURE_SHIFT_IMPORT_ENABLED=true` + `ROOSTER_CITY_MAP_JSON={"Alexandria":"200"}`):**
+1. ✅ No token / bogus token → `401` (Tests 6a/6b).
+2. ✅ `GET /api/rooster/shifts/import` status-check → `200 { success:true, enabled, zones, maxRangeDays }`.
+3. ✅ Flag off (production default) → `POST` returns `503 { success:false, enabled:false }`; new UI panel stays hidden (client checks the same GET on mount).
+4. ✅ Flag on, 45-day range → `400` with the exact "أقصى مدى مسموح به 31 يوم" message, before any Rooster call is attempted.
+5. ✅ Flag on, unknown zone → `400` listing the configured zones, before any Rooster call is attempted.
+6. ⏳ **Not independently re-tested here** (needs real Rooster session, not available in local dev): a full success round-trip (Rooster export → `analyzeLegacyShifts()` → identical shape as manual upload) and the single-flight/concurrency behavior — both rely on code paths (`RoosterClient.exportShiftsCsv`, Phase 0's cache/queue, `analyzeLegacyShifts()`) already verified independently in Phase 0 and in daily production use (manual upload + hourly `rooster-sync` cron), so the only genuinely new wiring is the route/UI glue covered by tests 1-5 above. Recommended: flip the flag on in Vercel and do one real 7-day import as a production smoke test before wider rollout.
+7. ✅ Zero existing files behaviorally changed: `lib/shiftAutomationLegacy.ts`, `lib/shiftsLegacyAnalyze.ts`, `app/api/shifts/legacy-analyze/route.ts` untouched; `app/shifts/page.tsx` only gained new state/a new conditional panel + one extracted-but-behavior-identical helper (`applyAnalyzedResult`) that the existing manual-upload handler now also calls (confirmed via full `next build` — all 63 pages generated, Phase-0 regression suite re-run and still 5/5 passing).
 
 ---
 
@@ -397,4 +406,5 @@ Frozen per your explicit addition — *"Every new feature must expose telemetry 
 - [x] Telemetry & health-metrics requirement — **✅ Adopted, frozen** (SRS-013 §13 / cross-cutting section above)
 - [ ] Soft-delete scope decision (confirmed out-of-scope by default per SRS-013 §4) — no action needed unless you want to revisit
 - [ ] Final architecture review re-run for breaking changes / race conditions / permission leaks / cache invalidation / Sheets consistency / rollback safety — **✅ Completed, passed** (SRS-013 §14)
-- [x] Approval to begin **Phase 0** — **✅ granted 2026-07-27, shipped same day.** New files only (`lib/telemetry.ts`, `lib/upstashRest.ts`, `lib/auditLog.ts`, `lib/rooster/*`, `app/api/admin/health/metrics/route.ts`, `scripts/srs013-phase0-verify.ts`); zero existing files modified (confirmed by `git diff` scope); all acceptance tests passed live against real Sheets/Redis. **Phase 1 does not start until you explicitly approve it too**, per the same phase-by-phase discipline.
+- [x] Approval to begin **Phase 0** — **✅ granted 2026-07-27, shipped same day.** New files only (`lib/telemetry.ts`, `lib/upstashRest.ts`, `lib/auditLog.ts`, `lib/rooster/*`, `app/api/admin/health/metrics/route.ts`, `scripts/srs013-phase0-verify.ts`); zero existing files modified (confirmed by `git diff` scope); all acceptance tests passed live against real Sheets/Redis.
+- [x] Approval to begin **Phase 1** — **✅ granted 2026-07-27, shipped same day.** New files: `lib/rooster/cityMap.ts`, `app/api/rooster/shifts/import/route.ts`, `scripts/srs013-phase1-verify.ts`. Modified (additive only, confirmed): `app/shifts/page.tsx` (new panel + one extracted-but-behavior-identical helper), `env.local.example` (docs only). `FEATURE_SHIFT_IMPORT_ENABLED` defaults **off** in production until you flip it on. **Phase 2 does not start until you explicitly approve it too**, per the same phase-by-phase discipline.

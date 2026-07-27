@@ -89,6 +89,35 @@ export default function ShiftsPage() {
   const [zoneFilter, setZoneFilter] = useState<string>('all');
   const [zoneMap, setZoneMap] = useState<Array<{ code?: string; name: string; region: string }>>([]);
 
+  // --- SRS-013 Phase 1: Automatic Shift Import (additive; manual upload above is untouched) ---
+  const [autoImportEnabled, setAutoImportEnabled] = useState(false);
+  const [autoImportZones, setAutoImportZones] = useState<string[]>([]);
+  const [autoImportMaxRangeDays, setAutoImportMaxRangeDays] = useState(31);
+  const [autoImportZone, setAutoImportZone] = useState('');
+  const [autoImportStart, setAutoImportStart] = useState('');
+  const [autoImportEnd, setAutoImportEnd] = useState('');
+  const [autoImportLoading, setAutoImportLoading] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await authFetch('/api/rooster/shifts/import');
+        const j = await res.json();
+        if (j?.success) {
+          setAutoImportEnabled(Boolean(j.enabled));
+          const zones = Array.isArray(j.zones) ? j.zones : [];
+          setAutoImportZones(zones);
+          if (zones.length && !autoImportZone) setAutoImportZone(zones[0]);
+          if (typeof j.maxRangeDays === 'number') setAutoImportMaxRangeDays(j.maxRangeDays);
+        }
+      } catch {
+        // Feature-flag check failing/unavailable is not an error worth surfacing --
+        // the panel simply stays hidden, exactly like the flag being off.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     try {
       const u = getStoredUser();
@@ -160,6 +189,22 @@ export default function ShiftsPage() {
     return displayMetrics;
   }, [activeScope, displayMetricsByDate, displayMetrics]);
 
+  /** Shared by both the manual-upload flow and the Phase-1 auto-import flow --
+   *  both hit endpoints returning the identical `analyzeLegacyShifts()` shape. */
+  const applyAnalyzedResult = (data: any, successMessage: string) => {
+    setAvailableDates(Array.isArray(data.availableDates) ? data.availableDates : []);
+    setDatesUsed(Array.isArray(data.datesUsed) ? data.datesUsed : []);
+    setMetrics(data.metrics || {});
+    setMetricsByDate(typeof data.metricsByDate === 'object' && data.metricsByDate ? data.metricsByDate : {});
+    setReports(data.reports || {});
+    setSupervisorFilter('');
+    setZoneFilter('all');
+    setMessage({ type: 'ok', text: successMessage });
+    const firstDay = Array.isArray(data.datesUsed) && data.datesUsed.length ? data.datesUsed[0] : 'all';
+    setActiveScope(firstDay);
+    setTab('overview');
+  };
+
   const handleAnalyze = async () => {
     if (!selectedFiles.length) {
       setMessage({ type: 'err', text: 'اختر ملفات الشفتات أولاً' });
@@ -186,21 +231,37 @@ export default function ShiftsPage() {
         setMessage({ type: 'err', text: data.error || 'فشل التحليل' });
         return;
       }
-      setAvailableDates(Array.isArray(data.availableDates) ? data.availableDates : []);
-      setDatesUsed(Array.isArray(data.datesUsed) ? data.datesUsed : []);
-      setMetrics(data.metrics || {});
-      setMetricsByDate(typeof data.metricsByDate === 'object' && data.metricsByDate ? data.metricsByDate : {});
-      setReports(data.reports || {});
-      setSupervisorFilter('');
-      setZoneFilter('all');
-      setMessage({ type: 'ok', text: 'تم التحليل (مطابق للداشبورد القديم) — Wakeel + 3 مدن فقط + EVALUATED/PUBLISHED.' });
-      const firstDay = Array.isArray(data.datesUsed) && data.datesUsed.length ? data.datesUsed[0] : 'all';
-      setActiveScope(firstDay);
-      setTab('overview');
+      applyAnalyzedResult(data, 'تم التحليل (مطابق للداشبورد القديم) — Wakeel + 3 مدن فقط + EVALUATED/PUBLISHED.');
     } catch (e: any) {
       setMessage({ type: 'err', text: e?.message || 'خطأ غير متوقع' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAutoImport = async () => {
+    if (!autoImportZone || !autoImportStart || !autoImportEnd) {
+      setMessage({ type: 'err', text: 'اختر الزون وتاريخ البداية والنهاية' });
+      return;
+    }
+    setAutoImportLoading(true);
+    setMessage(null);
+    try {
+      const res = await authFetch('/api/rooster/shifts/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zone: autoImportZone, startDate: autoImportStart, endDate: autoImportEnd }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setMessage({ type: 'err', text: data.error || 'فشل الاستيراد التلقائي' });
+        return;
+      }
+      applyAnalyzedResult(data, `تم الاستيراد التلقائي من Rooster (${autoImportZone}) بدون رفع ملفات — مطابق لنفس منطق التحليل.`);
+    } catch (e: any) {
+      setMessage({ type: 'err', text: e?.message || 'خطأ غير متوقع' });
+    } finally {
+      setAutoImportLoading(false);
     }
   };
 
@@ -254,6 +315,64 @@ export default function ShiftsPage() {
             {message.text}
           </div>
         ) : null}
+
+        {tab === 'upload' && autoImportEnabled && (
+          <Card className="p-5 space-y-4 border border-[rgba(0,245,255,0.25)]">
+            <div>
+              <p className="text-sm text-[#EAF0FF] font-medium">استيراد تلقائي من Rooster (بدون رفع ملفات)</p>
+              <p className="text-xs text-[rgba(234,240,255,0.6)] mt-1">
+                يجيب البيانات مباشرة من Rooster ويحللها بنفس منطق الرفع اليدوي بالضبط — مفيد لو مش عايز تدخل على
+                Rooster أصلاً.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="block text-sm text-[#EAF0FF]">
+                الزون
+                <select
+                  value={autoImportZone}
+                  onChange={(e) => setAutoImportZone(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm text-[#EAF0FF]"
+                >
+                  {autoImportZones.map((z) => (
+                    <option key={z} value={z}>
+                      {z}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm text-[#EAF0FF]">
+                تاريخ البداية
+                <input
+                  type="date"
+                  value={autoImportStart}
+                  onChange={(e) => setAutoImportStart(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm text-[#EAF0FF] [color-scheme:dark]"
+                />
+              </label>
+              <label className="block text-sm text-[#EAF0FF]">
+                تاريخ النهاية
+                <input
+                  type="date"
+                  value={autoImportEnd}
+                  onChange={(e) => setAutoImportEnd(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm text-[#EAF0FF] [color-scheme:dark]"
+                />
+              </label>
+            </div>
+
+            <p className="text-xs text-[rgba(234,240,255,0.5)]">أقصى مدى مسموح به: {autoImportMaxRangeDays} يوم.</p>
+
+            <Button
+              type="button"
+              variant="primary"
+              onClick={handleAutoImport}
+              disabled={autoImportLoading || !autoImportZone || !autoImportStart || !autoImportEnd}
+            >
+              {autoImportLoading ? 'جاري الاستيراد من Rooster…' : 'استيراد تلقائي من Rooster'}
+            </Button>
+          </Card>
+        )}
 
         {tab === 'upload' && (
           <Card className="p-5 space-y-4">
