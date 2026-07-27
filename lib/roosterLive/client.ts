@@ -7,6 +7,7 @@
  * page or from `app/api/live-riders`.
  */
 import { getRoosterLiveHeaders, getRoosterLiveCityId } from '@/lib/roosterLive/tokenProvider';
+import { smartRefreshRoosterAuth } from '@/lib/roosterLive/authRefresh';
 import { logStructured } from '@/lib/requestTrace';
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -33,126 +34,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Auto-refresh dhh_token using Okta endpoint (same as website uses).
- * 
- * Architecture: CF_Authorization (24h) → POST /api/iam-login/auth/okta_token → new dhh_token (2h)
- * 
- * This eliminates manual intervention - when dhh_token expires (2h), automatically refresh it
- * using the long-lived CF_Authorization cookie (24h).
- */
-async function attemptTokenRefresh(currentHeaders: Record<string, string>): Promise<Record<string, string> | null> {
-  try {
-    const cookie = currentHeaders['Cookie'] || currentHeaders['cookie'];
-    if (!cookie) {
-      logStructured('error', 'rooster_live_refresh_no_cookie', { 
-        message: 'Cannot refresh: Cookie header missing'
-      });
-      return null;
-    }
-
-    // Verify CF_Authorization exists (required for refresh)
-    if (!cookie.includes('CF_Authorization=')) {
-      logStructured('error', 'rooster_live_refresh_no_cf_auth', { 
-        message: 'Cannot refresh: CF_Authorization cookie missing (need to update from browser)'
-      });
-      return null;
-    }
-
-    logStructured('info', 'rooster_live_refresh_attempt', { 
-      message: 'Attempting to refresh dhh_token via Okta endpoint'
-    });
-
-    // Call Okta token endpoint (same as website uses after login)
-    const res = await fetch('https://eg.me.logisticsbackoffice.com/api/iam-login/auth/okta_token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'Cookie': cookie, // CF_Authorization + CF_AppSession
-      },
-      body: JSON.stringify({}), // Empty body (session is in cookie)
-      cache: 'no-store',
-    });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      logStructured('error', 'rooster_live_refresh_failed', { 
-        status: res.status,
-        body: body.slice(0, 300),
-        message: 'Failed to refresh token via Okta endpoint'
-      });
-      return null;
-    }
-
-    // Node/undici: get('set-cookie') often returns only the first cookie.
-    const setCookies =
-      typeof res.headers.getSetCookie === 'function'
-        ? res.headers.getSetCookie()
-        : [res.headers.get('set-cookie')].filter(Boolean) as string[];
-
-    if (!setCookies.length) {
-      logStructured('error', 'rooster_live_refresh_no_set_cookie', {
-        message: 'Okta endpoint succeeded but no Set-Cookie header returned',
-      });
-      return null;
-    }
-
-    const joined = setCookies.join('\n');
-    const dhhMatch = joined.match(/dhh_token=([^;,\s]+)/);
-    const refreshMatch = joined.match(/refresh_token=([^;,\s]+)/);
-
-    const newDhhToken = dhhMatch ? dhhMatch[1] : null;
-    const newRefreshToken = refreshMatch ? refreshMatch[1] : null;
-
-    if (!newDhhToken) {
-      logStructured('error', 'rooster_live_refresh_no_dhh_token', {
-        message: 'Okta endpoint succeeded but dhh_token not found in Set-Cookie',
-        setCookieCount: setCookies.length,
-      });
-      return null;
-    }
-
-    logStructured('info', 'rooster_live_token_refreshed', {
-      message: 'Successfully refreshed dhh_token via Okta endpoint',
-      newDhhTokenLength: newDhhToken.length,
-      hasRefreshToken: !!newRefreshToken,
-    });
-
-    // Start from stable CF cookies only, then attach freshly minted tokens.
-    let updatedCookie = cookie
-      .replace(/dhh_token=[^;]+(;\s*)?/g, '')
-      .replace(/refresh_token=[^;]+(;\s*)?/g, '')
-      .replace(/;+/g, ';')
-      .replace(/^;\s*/, '')
-      .replace(/;\s*$/, '');
-
-    updatedCookie = `${updatedCookie}; dhh_token=${newDhhToken}`;
-    if (newRefreshToken) {
-      updatedCookie = `${updatedCookie}; refresh_token=${newRefreshToken}`;
-    }
-    updatedCookie = updatedCookie.replace(/;+/g, ';').replace(/^;\s*/, '').replace(/;\s*$/, '');
-
-    return {
-      ...currentHeaders,
-      Cookie: updatedCookie,
-    };
-
-  } catch (error: any) {
-    logStructured('error', 'rooster_live_refresh_exception', { 
-      error: error?.message || String(error),
-      stack: error?.stack?.slice(0, 500)
-    });
-    return null;
-  }
-}
-
 async function fetchWithRetry(
   url: string,
   headers: Record<string, string>
-): Promise<{ res: Response; headers: Record<string, string> }> {
+): Promise<{ res: Response; headers: Record<string, string>; healedDeep: boolean }> {
   let lastError: unknown;
   let currentHeaders = { ...headers };
+  let healedDeep = false;
 
   for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
     try {
@@ -167,41 +55,46 @@ async function fetchWithRetry(
         const contentType = res.headers.get('content-type') || '';
         if (contentType.includes('text/html')) {
           if (attempt === 1) {
-            const refreshed = await attemptTokenRefresh(currentHeaders);
-            if (refreshed) {
-              currentHeaders = refreshed;
+            const outcome = await smartRefreshRoosterAuth(currentHeaders);
+            if (outcome.headers) {
+              currentHeaders = outcome.headers;
+              healedDeep = healedDeep || outcome.healedViaDeepSessionRefresh;
               continue;
             }
           }
           const body = await res.text().catch(() => '');
           throw new Error(
             'Rooster live returned HTML login page instead of JSON (HTTP 200). ' +
-              'CF_Authorization / CF_AppSession cookies are missing or expired. ' +
-              'Update Google Sheet cron_config → ROOSTER_EXPORT_HEADERS_JSON with a fresh Cookie from the browser. ' +
+              'CF_Authorization / CF_AppSession cookies are missing or expired, and automatic self-heal ' +
+              '(dhh_token mint + silent Cloudflare Access session replay) also failed — the underlying ' +
+              'Okta session is truly gone. Update Google Sheet cron_config → ROOSTER_EXPORT_HEADERS_JSON ' +
+              'with a fresh Cookie from the browser. ' +
               body.slice(0, 120)
           );
         }
-        return { res, headers: currentHeaders };
+        return { res, headers: currentHeaders, healedDeep };
       }
 
       if (res.status === 401 && attempt === 1) {
         logStructured('warn', 'rooster_live_auth_expired', {
           url,
           attempt,
-          message: 'Received 401, attempting automatic token refresh via Okta endpoint',
+          message: 'Received 401, attempting automatic self-heal (Okta mint, then session replay if needed)',
         });
 
-        const refreshed = await attemptTokenRefresh(currentHeaders);
-        if (refreshed) {
+        const outcome = await smartRefreshRoosterAuth(currentHeaders);
+        if (outcome.headers) {
           logStructured('info', 'rooster_live_retry_with_new_token', {
-            message: 'Retrying request with refreshed dhh_token',
+            message: 'Retrying request with refreshed auth',
+            healedViaDeepSessionRefresh: outcome.healedViaDeepSessionRefresh,
           });
-          currentHeaders = refreshed;
+          currentHeaders = outcome.headers;
+          healedDeep = healedDeep || outcome.healedViaDeepSessionRefresh;
           continue;
         }
         logStructured('error', 'rooster_live_refresh_failed_permanent', {
-          message:
-            'Auto-refresh failed. CF_Authorization may have expired (24h TTL). Update Google Sheet with new cookies from browser.',
+          message: 'Both auto-refresh layers failed. Underlying Okta session has fully expired.',
+          reason: outcome.failureReason,
         });
       }
 
@@ -209,8 +102,8 @@ async function fetchWithRetry(
         const body = await res.text().catch(() => '');
         throw new Error(
           `Rooster live auth rejected (${res.status}). ` +
-            `Auto-refresh ${attempt === 1 ? 'failed' : 'not attempted (already tried)'}. ` +
-            `CF_Authorization cookie may have expired (24h TTL). ` +
+            `Auto-refresh (dhh_token mint + silent session replay) ${attempt === 1 ? 'failed' : 'not attempted (already tried)'}. ` +
+            `The underlying Okta session has fully expired. ` +
             `Update Google Sheet cron_config with new cookies from browser: ${body.slice(0, 200)}`
         );
       }
@@ -261,19 +154,24 @@ function isLastPageByMetadata(payload: unknown): boolean | null {
 
 export async function fetchAllRoosterLiveRiders(options?: {
   pageSize?: number;
-}): Promise<{ rawRiders: unknown[]; pagesFetched: number }> {
+}): Promise<{ rawRiders: unknown[]; pagesFetched: number; healedAuthDeep: boolean }> {
   const size = options?.pageSize ?? DEFAULT_PAGE_SIZE;
   let headers = await getRoosterLiveHeaders();
+  let healedAuthDeep = false;
 
-  // Mint a fresh dhh_token every sync from stable CF cookies.
-  // Prevents failure when the browser Live page rotates dhh_token every ~1 min.
-  const refreshed = await attemptTokenRefresh(headers);
-  if (refreshed) {
-    headers = refreshed;
+  // Mint a fresh dhh_token every sync from stable CF cookies (falling back to
+  // a silent Cloudflare Access session replay if CF_Authorization itself has
+  // expired or been invalidated). Prevents failure when the browser Live page
+  // rotates dhh_token every ~1 min, and self-heals the 24h CF_Authorization
+  // session (or an earlier server-side invalidation) without a human.
+  const proactive = await smartRefreshRoosterAuth(headers);
+  if (proactive.headers) {
+    headers = proactive.headers;
+    healedAuthDeep = proactive.healedViaDeepSessionRefresh;
   } else {
     logStructured('warn', 'rooster_live_proactive_refresh_failed', {
-      message:
-        'Could not mint dhh_token before sync; will still try with CF cookies and refresh on 401.',
+      message: 'Could not refresh auth before sync; will still try with current cookies and retry on 401.',
+      reason: proactive.failureReason,
     });
   }
 
@@ -282,14 +180,16 @@ export async function fetchAllRoosterLiveRiders(options?: {
 
   while (page < MAX_PAGES_SAFETY_CAP) {
     const url = buildPageUrl(page, size);
-    const { res, headers: nextHeaders } = await fetchWithRetry(url, headers);
+    const { res, headers: nextHeaders, healedDeep } = await fetchWithRetry(url, headers);
     headers = nextHeaders;
+    healedAuthDeep = healedAuthDeep || healedDeep;
     const rawText = await res.text();
     const trimmed = rawText.trim();
     if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
       throw new Error(
-        'Rooster live returned HTML instead of JSON — auth cookies expired or invalid. ' +
-          'Update cron_config → ROOSTER_EXPORT_HEADERS_JSON with Cookie containing CF_Authorization + CF_AppSession only (no dhh_token).'
+        'Rooster live returned HTML instead of JSON — auth cookies expired and automatic self-heal ' +
+          '(dhh_token mint + silent Cloudflare Access session replay) also failed. ' +
+          'Update cron_config → ROOSTER_EXPORT_HEADERS_JSON with a fresh full Cookie header from the browser.'
       );
     }
     let payload: unknown;
@@ -317,5 +217,5 @@ export async function fetchAllRoosterLiveRiders(options?: {
     logStructured('warn', 'rooster_live_page_cap_hit', { pagesFetched: page, riderCount: rawRiders.length });
   }
 
-  return { rawRiders, pagesFetched: page };
+  return { rawRiders, pagesFetched: page, healedAuthDeep };
 }

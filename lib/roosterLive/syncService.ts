@@ -12,6 +12,11 @@ export interface RunLiveSyncResult {
   syncDurationMs: number;
   lastSyncAt: string;
   error?: string;
+  /** true when the 24h Cloudflare Access session had expired (or been
+   *  invalidated early) and was recovered automatically via the silent
+   *  session replay — no human needed to paste fresh cookies. Surfaced for
+   *  operational visibility. */
+  healedAuthDeep?: boolean;
 }
 
 /** One full sync cycle: fetch all pages from Talabat, map, and store the snapshot. */
@@ -26,7 +31,7 @@ export async function runRoosterLiveSync(): Promise<RunLiveSyncResult> {
   }
 
   try {
-    const { rawRiders, pagesFetched } = await fetchAllRoosterLiveRiders();
+    const { rawRiders, pagesFetched, healedAuthDeep } = await fetchAllRoosterLiveRiders();
     const lastSyncAt = new Date().toISOString();
     const riders = mapRawRoosterLiveRiders(rawRiders, lastSyncAt);
     const syncDurationMs = Date.now() - startedAt;
@@ -46,9 +51,10 @@ export async function runRoosterLiveSync(): Promise<RunLiveSyncResult> {
       rawCount: rawRiders.length,
       pagesFetched,
       syncDurationMs,
+      healedAuthDeep,
     });
 
-    return { success: true, cityId, riderCount: riders.length, syncDurationMs, lastSyncAt };
+    return { success: true, cityId, riderCount: riders.length, syncDurationMs, lastSyncAt, healedAuthDeep };
   } catch (error: any) {
     const syncDurationMs = Date.now() - startedAt;
     logStructured('error', 'rooster_live_sync_failed', {
