@@ -88,10 +88,13 @@ Layer 2 — silent Cloudflare Access session replay (only when Layer 1 fails)
 This runs two ways:
 - **Reactively**, inside every live-sync call (`lib/roosterLive/client.ts`) on
   401 / HTML-instead-of-JSON.
-- **Proactively**, via `/api/cron/rooster-keepalive` every 3 hours (see
-  `vercel.json`) — well inside the confirmed 24h window, so in the common
-  case the session gets refreshed before it ever has a chance to expire, and
-  the live-sync never even hits a failure to react to.
+- **Proactively**, via `/api/cron/rooster-keepalive` every 3 hours. Note:
+  hitting the app while `CF_Authorization` is still valid does **not**
+  extend/renew it early (confirmed live — Cloudflare only reissues a fresh
+  token once the old one is actually gone) — so this doesn't *prevent*
+  expiry, but it does catch a dead session within 3h of it happening and
+  attempts recovery immediately, instead of waiting for the next live-sync
+  to notice and only then reacting.
 
 **Key Insight:**
 - `Authorization: Bearer` tokens expire every **2 hours** ❌ (never used)
@@ -172,28 +175,49 @@ claims and prints the account identity/issuer — useful for confirming which
 account the cookie belongs to and exactly when it expires, without waiting
 for a failure.
 
-### Step 1b (optional): Capturing an upstream IdP cookie for the deep self-heal
+### Step 1b (strongly recommended): Capturing the real Okta cookie for the deep self-heal
 
-The app-domain cookie above is enough for the cheap `dhh_token` refresh
-(Layer 1) and is what Layer 2 tries first. If Layer 2 ever needs to go one
-hop further upstream (the app session itself is dead, not just `dhh_token`),
-it can also replay a stored IdP-domain cookie if one is configured:
+**Confirmed by live-tracing the actual redirect chain with no `CF_Authorization`
+present** (not a guess): when the app session is dead, Cloudflare Access's
+hosted "Sign in" chooser page auto-redirects (via a client-side JS snippet,
+`data-auto-redirect-url`) to:
 
-1. Set `ROOSTER_OKTA_ORIGIN` (Vercel env var) to the IdP's own origin.
-   `dhlogisticsauth.cloudflareaccess.com`'s `iss` claim doesn't reveal which
-   upstream identity provider backs it, but a real captured cookie export
-   for this account also contained a live `accounts.google.com` session
-   (matching a `@talabat.com` Google Workspace-style login) — `
-   https://accounts.google.com` is the best current candidate to try.
-2. Capture that domain's `Cookie` header the same way (DevTools → Network,
-   any request to that domain) and add a second row to `cron_config`:
+```
+https://deliveryhero.okta.com/oauth2/v1/authorize?client_id=0oac661bnq7bZphwO416&...
+```
+
+So the real upstream IdP is **`deliveryhero.okta.com`** ("DH Logistics
+Okta"), not Google — an earlier version of this doc guessed Google because a
+live Google session happened to be present in the same cookie export; that
+was a red herring. `sessionKeepAlive.ts` now follows this client-side
+redirect itself (a real browser executes the JS automatically; a plain
+server-side fetch doesn't, so this hop used to silently dead-end — fixed).
+
+**Without an Okta session cookie configured, Layer 2 will correctly detect
+`okta_login_form_required` and stop** (verified live) — meaning **a fresh
+CF_Authorization still requires one manual cookie paste whenever the
+session dies**, exactly like before, just with a clear Telegram alert
+instead of a silent failure. To close this last gap and get true zero-touch
+recovery:
+
+1. Log in at `eg.me.logisticsbackoffice.com` normally, then in DevTools →
+   Network, filter for requests to `deliveryhero.okta.com` (visible during
+   the login redirect) and copy that request's `Cookie` header (this is
+   Okta's own session cookie, typically named `sid` — a **different** value
+   from the app cookie, never sent to `eg.me.logisticsbackoffice.com`).
+2. Set `ROOSTER_OKTA_ORIGIN=https://deliveryhero.okta.com` (Vercel env var).
+3. Add a second row to `cron_config`:
 
 | Key | Value |
 |-----|-------|
-| `ROOSTER_OKTA_COOKIE` | `{"Cookie":"...IdP domain cookie header..."}` |
+| `ROOSTER_OKTA_COOKIE` | `{"Cookie":"sid=...deliveryhero.okta.com session cookie..."}` |
 
-Without this, Layer 2 still runs on the app cookie alone and may still
-succeed — this step only matters if that alone isn't enough.
+This only helps as long as *that* Okta session itself stays alive (Okta org
+session-lifetime policies vary, but are typically longer-lived than 24h) —
+it is not a permanent fix either, just one layer further upstream. **The
+only truly permanent, zero-maintenance fix is a Cloudflare Access Service
+Token (Layer 0, see above)** — worth requesting from IT/Talabat once, since
+it eliminates all of this cookie-chasing entirely.
 
 **Recommended, separately:** use a dedicated account for this integration
 (not a human's daily-use login) so the cron's session is never silently

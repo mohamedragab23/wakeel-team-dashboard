@@ -37,6 +37,32 @@ const LOGIN_FORM_MARKERS = [
   /data-se=["']o-form["']/i,
 ];
 
+/**
+ * Cloudflare Access's hosted "Sign in" chooser page (reached when
+ * CF_Authorization is missing/expired) is a client-side rendered page: when
+ * only one IdP is configured, it embeds `data-auto-redirect-to-identity`
+ * and `data-auto-redirect-url` attributes and a small JS snippet does
+ * `window.location = data-auto-redirect-url` — a real browser follows this
+ * automatically, but a plain server-side fetch does not execute JS, so
+ * without this, the chain silently dead-ends on this page. This decodes
+ * the (HTML-entity-encoded) URL so the redirect loop below can continue
+ * the hop itself.
+ */
+function extractClientSideAutoRedirectUrl(html: string): string | null {
+  const match = html.match(/data-auto-redirect-url=["']([^"']+)["']/);
+  if (!match) return null;
+  return decodeHtmlEntities(match[1]);
+}
+
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
 function seedCookies(jar: CookieJar, cookieHeader: string | undefined | null, url: string): void {
   if (!cookieHeader) return;
   const pairs = cookieHeader
@@ -126,6 +152,16 @@ export async function silentlyRefreshRoosterSession(params: {
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('text/html')) {
       lastHtml = await res.text().catch(() => '');
+
+      // Cloudflare Access's own hosted "Sign in" chooser (single-IdP case)
+      // client-side-redirects via JS instead of an HTTP 3xx — follow that
+      // ourselves rather than treating this page as the final destination.
+      const clientSideRedirect = extractClientSideAutoRedirectUrl(lastHtml);
+      if (clientSideRedirect) {
+        logStructured('info', 'rooster_session_refresh_client_side_redirect', { hop, target: clientSideRedirect.split('?')[0] });
+        url = clientSideRedirect;
+        continue;
+      }
     }
     resolvedWithoutRedirect = true;
     break;

@@ -14,7 +14,8 @@
  *
  * Both the reactive path (`client.ts`, called on 401 / HTML-instead-of-JSON)
  * and the proactive path (`/api/cron/rooster-keepalive`, run every few
- * hours so the session never actually gets a chance to expire) call
+ * hours to catch a dead session quickly rather than prevent it — visiting
+ * the app early does not renew a still-valid CF_Authorization) call
  * `smartRefreshRoosterAuth`.
  */
 import { logStructured } from '@/lib/requestTrace';

@@ -10,11 +10,13 @@ export const dynamic = 'force-dynamic';
 /**
  * Proactive Rooster Live session keepalive.
  *
- * Runs every few hours (well inside the confirmed 24h Cloudflare Access
- * session window) and refreshes the auth cookie *before* it ever gets a
- * chance to expire — the same way an open browser tab keeps itself alive,
- * except this runs unattended on a schedule, so nobody needs to be near a
- * laptop for the session to survive.
+ * Runs every few hours to detect and recover a dead session (24h
+ * CF_Authorization expiry, or an earlier session-collision invalidation)
+ * within 3h of it happening, instead of waiting for the next live-sync
+ * call to notice and react. Note: this does not *extend* a still-valid
+ * CF_Authorization early — confirmed live that Cloudflare only reissues a
+ * fresh token once the old one is actually gone, so the 24h clock runs
+ * from the original login regardless of how often this runs.
  *
  * This is purely a proactive layer: `lib/roosterLive/client.ts` already
  * self-heals reactively on every sync (401 / HTML-instead-of-JSON), so a
