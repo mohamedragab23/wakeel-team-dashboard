@@ -17,6 +17,12 @@ export interface RunLiveSyncResult {
    *  session replay — no human needed to paste fresh cookies. Surfaced for
    *  operational visibility. */
   healedAuthDeep?: boolean;
+  /** true when even the silent replay failed and the underlying Okta SSO
+   *  session itself was dead — recovered via a full automatic Okta login +
+   *  Gmail-OTP read (SRS-012, Layer 3). No human involved; still surfaced
+   *  because it's a stronger signal than `healedAuthDeep` that something
+   *  upstream is invalidating sessions more aggressively than expected. */
+  healedAuthFull?: boolean;
 }
 
 /** One full sync cycle: fetch all pages from Talabat, map, and store the snapshot. */
@@ -31,7 +37,7 @@ export async function runRoosterLiveSync(): Promise<RunLiveSyncResult> {
   }
 
   try {
-    const { rawRiders, pagesFetched, healedAuthDeep } = await fetchAllRoosterLiveRiders();
+    const { rawRiders, pagesFetched, healedAuthDeep, healedAuthFull } = await fetchAllRoosterLiveRiders();
     const lastSyncAt = new Date().toISOString();
     const riders = mapRawRoosterLiveRiders(rawRiders, lastSyncAt);
     const syncDurationMs = Date.now() - startedAt;
@@ -52,9 +58,10 @@ export async function runRoosterLiveSync(): Promise<RunLiveSyncResult> {
       pagesFetched,
       syncDurationMs,
       healedAuthDeep,
+      healedAuthFull,
     });
 
-    return { success: true, cityId, riderCount: riders.length, syncDurationMs, lastSyncAt, healedAuthDeep };
+    return { success: true, cityId, riderCount: riders.length, syncDurationMs, lastSyncAt, healedAuthDeep, healedAuthFull };
   } catch (error: any) {
     const syncDurationMs = Date.now() - startedAt;
     logStructured('error', 'rooster_live_sync_failed', {

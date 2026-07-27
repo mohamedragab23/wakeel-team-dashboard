@@ -1,16 +1,27 @@
 /**
- * Orchestrates the two layers of automatic Rooster Live auth recovery:
+ * Orchestrates the three layers of automatic Rooster Live auth recovery:
  *
  * 1. `mintDhhTokenViaOkta` — mints a fresh `dhh_token` (2h TTL) from the
  *    stable Cloudflare Access cookies via the same Okta endpoint the
  *    website itself calls. Cheap, fast, works as long as CF_Authorization
  *    is still valid.
- * 2. `smartRefreshRoosterAuth` — if (1) fails (CF_Authorization itself has
- *    expired), falls back to `silentlyRefreshRoosterSession` (the
- *    Cloudflare Access → Okta → Cloudflare Access redirect replay), and on
- *    success re-attempts (1) with the refreshed cookies, then persists the
- *    result to the Google Sheet automatically — no human, no DevTools, no
- *    laptop required, as long as the underlying Okta SSO session is alive.
+ * 2. Silent session replay (`silentlyRefreshRoosterSession`) — if (1) fails
+ *    (CF_Authorization itself has expired) but the underlying Okta SSO
+ *    session is still alive, replays the Cloudflare Access → Okta →
+ *    Cloudflare Access redirect chain silently (no credentials needed) and
+ *    re-attempts (1).
+ * 3. Full recovery (`recoverRoosterAuthFully`, SRS-012) — if (2) fails too
+ *    (the Okta SSO session itself is dead, e.g. after ~24h of total
+ *    inactivity), performs a genuine Okta username/password + email-OTP
+ *    login, reading the OTP automatically from Gmail (no human), then
+ *    exchanges the resulting sessionToken for fresh cookies and retries (1).
+ *    Only attempted if ROOSTER_OKTA_USERNAME/PASSWORD and the GMAIL_OAUTH_*
+ *    vars are configured; otherwise this layer is skipped entirely (fast
+ *    fail, same behavior as before SRS-012).
+ *
+ * On success at any layer, the recovered long-lived cookies are persisted
+ * to the Google Sheet automatically — no human, no DevTools, no laptop
+ * required. Telegram is only notified if ALL THREE layers fail.
  *
  * Both the reactive path (`client.ts`, called on 401 / HTML-instead-of-JSON)
  * and the proactive path (`/api/cron/rooster-keepalive`, run every few
@@ -27,12 +38,15 @@ import {
   getRoosterKeepAliveUrl,
   getRoosterOktaSession,
 } from '@/lib/roosterLive/tokenProvider';
+import { isFullAuthRecoveryConfigured, recoverRoosterAuthFully } from '@/lib/roosterLive/authRecovery/engine';
 
 export type SmartRefreshOutcome = {
   headers: Record<string, string> | null;
   /** true when the deep (Okta-replay) path was needed — i.e. CF_Authorization itself had expired. */
   healedViaDeepSessionRefresh: boolean;
-  /** Present when both layers failed — human-readable reason for alerting. */
+  /** true when even the deep replay failed and the full Okta-login + Gmail-OTP recovery (Layer 3) was needed. */
+  healedViaFullRecovery?: boolean;
+  /** Present when every layer failed — human-readable reason for alerting. */
   failureReason?: string;
 };
 
@@ -170,11 +184,55 @@ export async function smartRefreshRoosterAuth(
 
   if (!sessionResult.success) {
     logStructured('error', 'rooster_live_deep_refresh_failed', { reason: sessionResult.reason });
-    return {
-      headers: null,
-      healedViaDeepSessionRefresh: false,
-      failureReason: sessionResult.reason,
-    };
+
+    // Layer 2 failed — the underlying Okta SSO session itself is dead
+    // (not just CF_Authorization's own JWT). Fall back to Layer 3: a full
+    // Okta username/password + email-OTP login, with the OTP read
+    // automatically from Gmail. Skipped entirely (fast fail) unless both
+    // ROOSTER_OKTA_USERNAME/PASSWORD and the Gmail OAuth vars are set.
+    if (!isFullAuthRecoveryConfigured()) {
+      return {
+        headers: null,
+        healedViaDeepSessionRefresh: false,
+        failureReason: sessionResult.reason,
+      };
+    }
+
+    const fullRecovery = await recoverRoosterAuthFully();
+    if (!fullRecovery.success) {
+      logStructured('error', 'rooster_live_full_recovery_failed', { reason: fullRecovery.reason });
+      return {
+        headers: null,
+        healedViaDeepSessionRefresh: false,
+        healedViaFullRecovery: false,
+        failureReason: `layer2:${sessionResult.reason};layer3:${fullRecovery.reason}`,
+      };
+    }
+
+    const stableFullyRecoveredCookie = extractStableRoosterCookies(fullRecovery.appCookieHeader);
+    const retryHeadersAfterFull: Record<string, string> = { ...currentHeaders, Cookie: stableFullyRecoveredCookie };
+    delete (retryHeadersAfterFull as any).cookie;
+
+    const mintedAfterFullRecovery = await mintDhhTokenViaOkta(retryHeadersAfterFull);
+    if (!mintedAfterFullRecovery) {
+      logStructured('error', 'rooster_live_full_recovery_mint_failed', {
+        message: 'Full recovery succeeded but dhh_token mint still failed afterwards — unexpected.',
+      });
+      return {
+        headers: null,
+        healedViaDeepSessionRefresh: false,
+        healedViaFullRecovery: false,
+        failureReason: 'mint_failed_after_full_recovery',
+      };
+    }
+
+    void setRoosterExportHeadersInSheet(stableFullyRecoveredCookie).catch(() => {});
+
+    logStructured('info', 'rooster_live_full_recovery_ok', {
+      message: 'Recovered from a fully-dead Okta SSO session automatically via login + Gmail OTP — zero human involvement.',
+    });
+
+    return { headers: mintedAfterFullRecovery, healedViaDeepSessionRefresh: false, healedViaFullRecovery: true };
   }
 
   const stableRefreshedCookie = extractStableRoosterCookies(sessionResult.appCookieHeader);

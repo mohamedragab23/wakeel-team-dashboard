@@ -78,3 +78,6 @@ Thumbs.db
 .env*
 
 .env*
+
+# SRS-012 temp validation state (contains short-lived tokens)
+.tmp-okta-state.json

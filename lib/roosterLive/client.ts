@@ -37,10 +37,11 @@ function sleep(ms: number): Promise<void> {
 async function fetchWithRetry(
   url: string,
   headers: Record<string, string>
-): Promise<{ res: Response; headers: Record<string, string>; healedDeep: boolean }> {
+): Promise<{ res: Response; headers: Record<string, string>; healedDeep: boolean; healedFull: boolean }> {
   let lastError: unknown;
   let currentHeaders = { ...headers };
   let healedDeep = false;
+  let healedFull = false;
 
   for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
     try {
@@ -59,20 +60,21 @@ async function fetchWithRetry(
             if (outcome.headers) {
               currentHeaders = outcome.headers;
               healedDeep = healedDeep || outcome.healedViaDeepSessionRefresh;
+              healedFull = healedFull || !!outcome.healedViaFullRecovery;
               continue;
             }
           }
           const body = await res.text().catch(() => '');
           throw new Error(
             'Rooster live returned HTML login page instead of JSON (HTTP 200). ' +
-              'CF_Authorization / CF_AppSession cookies are missing or expired, and automatic self-heal ' +
-              '(dhh_token mint + silent Cloudflare Access session replay) also failed — the underlying ' +
-              'Okta session is truly gone. Update Google Sheet cron_config → ROOSTER_EXPORT_HEADERS_JSON ' +
+              'CF_Authorization / CF_AppSession cookies are missing or expired, and ALL automatic self-heal layers ' +
+              'failed (dhh_token mint + silent Cloudflare Access session replay + full Okta login/Gmail-OTP recovery ' +
+              'if configured). Update Google Sheet cron_config → ROOSTER_EXPORT_HEADERS_JSON ' +
               'with a fresh Cookie from the browser. ' +
               body.slice(0, 120)
           );
         }
-        return { res, headers: currentHeaders, healedDeep };
+        return { res, headers: currentHeaders, healedDeep, healedFull };
       }
 
       if (res.status === 401 && attempt === 1) {
@@ -90,6 +92,7 @@ async function fetchWithRetry(
           });
           currentHeaders = outcome.headers;
           healedDeep = healedDeep || outcome.healedViaDeepSessionRefresh;
+          healedFull = healedFull || !!outcome.healedViaFullRecovery;
           continue;
         }
         logStructured('error', 'rooster_live_refresh_failed_permanent', {
@@ -102,8 +105,9 @@ async function fetchWithRetry(
         const body = await res.text().catch(() => '');
         throw new Error(
           `Rooster live auth rejected (${res.status}). ` +
-            `Auto-refresh (dhh_token mint + silent session replay) ${attempt === 1 ? 'failed' : 'not attempted (already tried)'}. ` +
-            `The underlying Okta session has fully expired. ` +
+            `Auto-refresh (all layers: dhh_token mint + silent session replay + full Okta/Gmail-OTP recovery) ` +
+            `${attempt === 1 ? 'failed' : 'not attempted (already tried)'}. ` +
+            `The underlying Okta session has fully expired and could not be recovered automatically. ` +
             `Update Google Sheet cron_config with new cookies from browser: ${body.slice(0, 200)}`
         );
       }
@@ -154,10 +158,11 @@ function isLastPageByMetadata(payload: unknown): boolean | null {
 
 export async function fetchAllRoosterLiveRiders(options?: {
   pageSize?: number;
-}): Promise<{ rawRiders: unknown[]; pagesFetched: number; healedAuthDeep: boolean }> {
+}): Promise<{ rawRiders: unknown[]; pagesFetched: number; healedAuthDeep: boolean; healedAuthFull: boolean }> {
   const size = options?.pageSize ?? DEFAULT_PAGE_SIZE;
   let headers = await getRoosterLiveHeaders();
   let healedAuthDeep = false;
+  let healedAuthFull = false;
 
   // Mint a fresh dhh_token every sync from stable CF cookies (falling back to
   // a silent Cloudflare Access session replay if CF_Authorization itself has
@@ -168,6 +173,7 @@ export async function fetchAllRoosterLiveRiders(options?: {
   if (proactive.headers) {
     headers = proactive.headers;
     healedAuthDeep = proactive.healedViaDeepSessionRefresh;
+    healedAuthFull = !!proactive.healedViaFullRecovery;
   } else {
     logStructured('warn', 'rooster_live_proactive_refresh_failed', {
       message: 'Could not refresh auth before sync; will still try with current cookies and retry on 401.',
@@ -180,15 +186,16 @@ export async function fetchAllRoosterLiveRiders(options?: {
 
   while (page < MAX_PAGES_SAFETY_CAP) {
     const url = buildPageUrl(page, size);
-    const { res, headers: nextHeaders, healedDeep } = await fetchWithRetry(url, headers);
+    const { res, headers: nextHeaders, healedDeep, healedFull } = await fetchWithRetry(url, headers);
     headers = nextHeaders;
     healedAuthDeep = healedAuthDeep || healedDeep;
+    healedAuthFull = healedAuthFull || healedFull;
     const rawText = await res.text();
     const trimmed = rawText.trim();
     if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
       throw new Error(
-        'Rooster live returned HTML instead of JSON — auth cookies expired and automatic self-heal ' +
-          '(dhh_token mint + silent Cloudflare Access session replay) also failed. ' +
+        'Rooster live returned HTML instead of JSON — auth cookies expired and ALL automatic self-heal layers ' +
+          '(dhh_token mint + silent Cloudflare Access session replay + full Okta login/Gmail-OTP recovery) also failed. ' +
           'Update cron_config → ROOSTER_EXPORT_HEADERS_JSON with a fresh full Cookie header from the browser.'
       );
     }
@@ -217,5 +224,5 @@ export async function fetchAllRoosterLiveRiders(options?: {
     logStructured('warn', 'rooster_live_page_cap_hit', { pagesFetched: page, riderCount: rawRiders.length });
   }
 
-  return { rawRiders, pagesFetched: page, healedAuthDeep };
+  return { rawRiders, pagesFetched: page, healedAuthDeep, healedAuthFull };
 }

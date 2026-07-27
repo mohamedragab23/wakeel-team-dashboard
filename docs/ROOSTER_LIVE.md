@@ -81,11 +81,28 @@ Layer 2 — silent Cloudflare Access session replay (only when Layer 1 fails)
   automatically (lib/roosterSessionStore.ts → setRoosterExportHeadersInSheet)
   — no DevTools, no laptop, no human.
   → If a real login FORM is actually reached, the underlying SSO session is
-    truly dead and Layer 2 fails on purpose; only then does the existing
-    Telegram alert ask a human to log in for real.
+    truly dead and Layer 2 fails on purpose; falls through to Layer 3.
+
+Layer 3 — full Okta login + Gmail OTP (SRS-012, only when Layer 2 fails too)
+  Genuinely dead SSO session → real username+password login against Okta's
+  Authentication API (POST /api/v1/authn), triggers the email-OTP factor,
+  reads the 6-digit code automatically from Gmail (OAuth2, read-only,
+  lib/roosterLive/authRecovery/gmailOtpReader.ts), submits it, exchanges the
+  resulting sessionToken for fresh cookies (reusing the same Cloudflare
+  Access redirect-following logic as Layer 2), then persists to the Sheet
+  exactly like Layer 2 does. Skipped entirely (fast fail, no regression) if
+  ROOSTER_OKTA_USERNAME/PASSWORD or the GMAIL_OAUTH_* vars aren't set.
+  Manually validated end-to-end on 2026-07-27 (real password + real OTP,
+  full chain confirmed to produce a working CF_Authorization). See
+  docs/SRS012_AUTH_RECOVERY_ENGINE_DESIGN.md for the full design/security
+  writeup.
+  → Only if THIS also fails does the existing Telegram alert ask a human
+    to log in for real — this is now the true last resort.
 ```
 
-This runs two ways:
+All three layers run inside the SAME call to `smartRefreshRoosterAuth`
+(`lib/roosterLive/authRefresh.ts`), tried in order, each one only attempted
+if the previous one failed. This runs two ways:
 - **Reactively**, inside every live-sync call (`lib/roosterLive/client.ts`) on
   401 / HTML-instead-of-JSON.
 - **Proactively**, via `/api/cron/rooster-keepalive` every 3 hours. Note:
@@ -119,6 +136,8 @@ This runs two ways:
 | `ROOSTER_KEEPALIVE_URL` | No | Real HTML page behind Cloudflare Access used for the silent replay. Defaults to `{ROOSTER_APP_ORIGIN}/dashboard/rooster/live-3pl`. |
 | `ROOSTER_OKTA_ORIGIN` / `ROOSTER_OKTA_COOKIE` (or Sheet row `ROOSTER_OKTA_COOKIE`) | No, but may improve Layer 2's odds | The upstream IdP's own session cookie — see "Capturing the IdP cookie" below. Without it, Layer 2 still runs on the app cookie alone and may still succeed, but is more likely to hit a real login form if the app session itself is what expired. |
 | `ROOSTER_DROP_COOKIE_NAMES` | No | Comma-separated extra cookie names to strip (beyond `dhh_token`/`refresh_token`/known analytics) if a new rotating cookie shows up. |
+| `ROOSTER_OKTA_USERNAME` / `ROOSTER_OKTA_PASSWORD` | No (enables Layer 3) | Real Okta login credentials for the fully-automated recovery (SRS-012). Store as encrypted Vercel env vars, never in the Sheet. |
+| `GMAIL_OAUTH_CLIENT_ID` / `GMAIL_OAUTH_CLIENT_SECRET` / `GMAIL_OAUTH_REFRESH_TOKEN` | No (enables Layer 3) | One-time OAuth2 setup via `node scripts/gmail-oauth-bootstrap.mjs` — lets Layer 3 read the OTP email automatically from the personal Gmail inbox. `gmail.readonly` scope only. |
 
 ## One-time setup
 

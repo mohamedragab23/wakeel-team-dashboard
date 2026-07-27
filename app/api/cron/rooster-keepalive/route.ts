@@ -39,23 +39,29 @@ export async function GET(req: NextRequest) {
     const outcome = await smartRefreshRoosterAuth(headers);
 
     if (outcome.headers) {
-      logStructured('info', 'rooster_keepalive_ok', { healedViaDeepSessionRefresh: outcome.healedViaDeepSessionRefresh });
+      logStructured('info', 'rooster_keepalive_ok', {
+        healedViaDeepSessionRefresh: outcome.healedViaDeepSessionRefresh,
+        healedViaFullRecovery: outcome.healedViaFullRecovery,
+      });
       return NextResponse.json({
         success: true,
         healedViaDeepSessionRefresh: outcome.healedViaDeepSessionRefresh,
+        healedViaFullRecovery: outcome.healedViaFullRecovery,
       });
     }
 
     logStructured('error', 'rooster_keepalive_failed', { reason: outcome.failureReason });
 
     // Proactive warning — fires hours before the live-sync itself would
-    // start failing, giving whoever's on call time to log in again calmly
-    // instead of reacting to an already-broken dashboard.
+    // start failing. With SRS-012, `smartRefreshRoosterAuth` already tried
+    // every layer including the full Okta login + Gmail-OTP recovery, so
+    // reaching this point means that failed too (wrong credentials, Gmail
+    // OAuth token expired, etc.) — genuinely needs a human this time.
     await sendAdminTelegramNotificationSafe({
       type: 'system_alert',
       alertTitle: '⚠️ *تنبيه استباقي: جلسة Rooster Live قربت تنتهي*',
       alertMessage:
-        `محاولة التجديد الاستباقي للجلسة فشلت — جلسة Okta الأساسية غالبًا انتهت.\n\n` +
+        `محاولة التجديد الاستباقي للجلسة فشلت بكل الطرق التلقائية المتاحة (تجديد صامت + تسجيل دخول كامل بـ Gmail OTP لو متفعّل).\n\n` +
         `*السبب:* ${outcome.failureReason || 'غير معروف'}\n\n` +
         `المزامنة الحيّة (Rooster Live Sync) لسه شغالة دلوقتي لكنها هتبدأ تفشل قريب. ` +
         `سجّل دخول وحدّث الكوكي في Google Sheet (cron_config → ROOSTER_EXPORT_HEADERS_JSON) قبل ما ينقطع الاتصال فعليًا — ` +

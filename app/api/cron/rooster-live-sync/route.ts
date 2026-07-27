@@ -23,28 +23,46 @@ export async function GET(req: NextRequest) {
   const result = await runRoosterLiveSync();
 
   // Send Telegram alert on failure — the system already tried to self-heal
-  // automatically (dhh_token mint, then a silent Cloudflare Access session
-  // replay). Reaching this alert means BOTH layers failed, i.e. the
-  // underlying Okta SSO session itself is fully gone — a human really does
-  // need to log in fresh. See docs/ROOSTER_LIVE.md → "Authentication Architecture".
+  // automatically through ALL THREE layers (dhh_token mint, then a silent
+  // Cloudflare Access session replay, then — if configured — a full Okta
+  // login with the OTP read automatically from Gmail). Reaching this alert
+  // means every layer failed, i.e. something beyond auth expiry is wrong
+  // (e.g. wrong Okta password, Gmail OAuth refresh token expired, IP block).
+  // See docs/ROOSTER_LIVE.md → "Authentication Architecture".
   if (!result.success) {
     await sendAdminTelegramNotificationSafe({
       type: 'system_alert',
-      alertTitle: '🚨 *تنبيه: فشل مزامنة العمليات المباشرة (الإصلاح التلقائي فشل أيضًا)*',
+      alertTitle: '🚨 *تنبيه: فشل مزامنة العمليات المباشرة (كل محاولات الإصلاح التلقائي فشلت)*',
       alertMessage:
         `فشلت عملية مزامنة البيانات المباشرة من طلبات (Rooster Live Sync).\n\n` +
-        `النظام حاول يصلّح المشكلة تلقائيًا (تجديد dhh_token ثم محاولة تجديد الجلسة بصمت) ولم ينجح — ` +
-        `يعني جلسة Okta الأساسية انتهت فعليًا ومحتاجة تسجيل دخول حقيقي.\n\n` +
+        `النظام حاول يصلّح المشكلة تلقائيًا بكل الطرق المتاحة (تجديد dhh_token، تجديد الجلسة بصمت، ` +
+        `وتسجيل دخول Okta كامل بقراءة رمز OTP تلقائيًا من Gmail) ولم ينجح أي منها — ` +
+        `المشكلة أعمق من انتهاء صلاحية الجلسة العادي (زي تغيير الباسورد، أو انتهاء صلاحية صلاحية Gmail).\n\n` +
         `*السبب:* ${result.error}\n\n` +
         `*الإجراء المطلوب:*\n` +
         `1) افتح eg.me.logisticsbackoffice.com وسجّل دخول\n` +
         `2) من DevTools → Network انسخ الـ Cookie header كاملاً (مش بس CF_Authorization/CF_AppSession — سيب أي كوكيز تانية زي "session" موجودة برضه، النظام هيحتفظ بيها عشان يحاول يجدد نفسه لوحده المرة الجاية)\n` +
         `3) حدّث Google Sheet تبويب cron_config المفتاح ROOSTER_EXPORT_HEADERS_JSON بالقيمة:\n` +
         `{"Cookie":"...الصق الكوكي هنا..."}\n` +
-        `4) (اختياري لتقليل تكرار هذا التنبيه مستقبلاً) لو حابب تفعّل التجديد الصامت الكامل، ضيف كمان صف` +
-        ` ROOSTER_OKTA_COOKIE بكوكي دومين Okta نفسه (مش دومين eg.me.logisticsbackoffice.com) — راجع docs/ROOSTER_LIVE.md\n` +
+        `4) راجع docs/ROOSTER_LIVE.md قسم SRS-012 عشان تتأكد إن بيانات Okta و Gmail OAuth لسه صحيحة\n` +
         `5) انتظر دقيقة ثم افتح /live-riders`,
       priority: 'high',
+      url: `${process.env.NEXT_PUBLIC_APP_URL || ''}/live-riders`,
+    });
+  } else if (result.healedAuthFull) {
+    // Slightly more notable than healedAuthDeep: the silent replay itself
+    // failed and the underlying Okta SSO session was genuinely dead — the
+    // system recovered by doing a full login with the OTP read from Gmail
+    // automatically. No action needed, but worth flagging since it's a
+    // stronger signal that sessions are being invalidated unusually early.
+    await sendAdminTelegramNotificationSafe({
+      type: 'system_alert',
+      alertTitle: '✅ *تم إصلاح جلسة Rooster Live تلقائيًا (تسجيل دخول كامل + Gmail OTP)*',
+      alertMessage:
+        `جلسة Okta الأساسية كانت منتهية فعليًا (مش بس CF_Authorization)، فالنظام سجّل دخول كامل تلقائيًا ` +
+        `وقرأ رمز التحقق من Gmail بنفسه بدون أي تدخل، والمزامنة رجعت تشتغل عادي.\n\n` +
+        `لا يوجد إجراء مطلوب منك — لكن لو تكرر ده كتير يستحق مراجعة سياسة انتهاء الجلسات.`,
+      priority: 'low',
       url: `${process.env.NEXT_PUBLIC_APP_URL || ''}/live-riders`,
     });
   } else if (result.healedAuthDeep) {
