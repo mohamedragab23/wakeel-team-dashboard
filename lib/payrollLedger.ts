@@ -147,6 +147,14 @@ export async function appendLedgerTransaction(params: {
   createdByName: string;
   source: LedgerSource;
   correctsTransactionId?: string;
+  /**
+   * Internal use only: `correctLedgerTransaction()` calls this function to
+   * append the new "active" replacement row and already writes its own
+   * `correct_transaction` audit entry covering that same row right after
+   * -- set true there to avoid double-logging the same row as both
+   * "created" and "corrected".
+   */
+  skipCreateAudit?: boolean;
 }): Promise<LedgerTransaction> {
   await ensureLedgerSheet();
 
@@ -174,6 +182,23 @@ export async function appendLedgerTransaction(params: {
     metric: 'audit_event',
     tags: { type: transaction.type, source: transaction.source },
   });
+
+  // Audit trail: log every genuinely new transaction (bonus/deduction/
+  // advance/adjustment, whether ledger_native from the admin UI or an
+  // automatic legacy_mirror). Skipped only for correctLedgerTransaction()'s
+  // internal replacement-row append, which logs its own combined
+  // before/after `correct_transaction` entry instead (see below).
+  if (!params.skipCreateAudit) {
+    void appendAuditLog({
+      domain: 'payroll',
+      action: 'create_transaction',
+      entityType: transaction.entityType,
+      entityCode: transaction.entityCode,
+      actorCode: transaction.createdBy,
+      actorName: transaction.createdByName,
+      after: transaction,
+    });
+  }
 
   return transaction;
 }
@@ -282,6 +307,7 @@ export async function correctLedgerTransaction(
     createdByName: actor.name,
     source: 'ledger_native',
     correctsTransactionId: found.transaction.transactionId,
+    skipCreateAudit: true,
   });
 
   const original = { ...found.transaction, status: 'corrected' as LedgerStatus };
