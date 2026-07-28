@@ -922,7 +922,22 @@ export async function calculateSupervisorSalary(
     let ledgerTransactionsForResult: Awaited<ReturnType<typeof sumLedgerNativeForEntityPeriod>>['transactions'] | undefined;
     if (String(process.env.FEATURE_PAYROLL_LEDGER_ENABLED || '').trim().toLowerCase() === 'true') {
       try {
-        const period = `${year}-${String(month).padStart(2, '0')}`;
+        // Derive the ledger period from `endDate`, not `startDate`/`year`/`month`.
+        // Reason: app/admin/salaries/page.tsx's default "من تاريخ" is computed via
+        // `new Date(y, m, 1).toISOString()`, which for UTC+2/+3 timezones (Egypt)
+        // rolls back to the LAST DAY OF THE PREVIOUS MONTH (a pre-existing,
+        // UI-only date-formatting quirk unrelated to Phase 3). `startDate`/`month`/
+        // `year` above are derived from that same value, so keying the ledger's
+        // calendar-month lookup off them would silently miss same-month
+        // transactions whenever an admin uses that default range. `endDate`
+        // (typically "today" for month-to-date views, or the manually-picked
+        // last day of a closed month) does not carry that bug and reliably
+        // lands in the calendar month the admin actually intends to view.
+        // Confirmed live against production during the Phase 3 rollout UI
+        // smoke test (2026-07-28): default range was 2026-06-30..2026-07-28;
+        // using `startDate` derived "2026-06", using `endDate` correctly
+        // derives "2026-07" and immediately picked up the new transaction.
+        const period = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}`;
         const ledgerSum = await sumLedgerNativeForEntityPeriod('supervisor', supervisorCode, period);
         ledgerTotal = ledgerSum.total;
         ledgerTransactionsForResult = ledgerSum.transactions;

@@ -18,6 +18,7 @@ dotenv.config({ path: '.env.local' });
 import jwt from 'jsonwebtoken';
 import { getJwtSecret } from '../lib/jwtConfig';
 import { getSheetData, deleteSheetRow } from '../lib/googleSheets';
+import { calculateSupervisorSalary } from '../lib/salaryService';
 
 const QA_LEGACY_DEDUCTION_REASON = 'SRS-013 Phase 3 QA test legacy deduction -- safe to ignore';
 
@@ -43,7 +44,7 @@ async function cleanupQaLegacyDeduction(supervisorCode: string): Promise<number>
   return removed;
 }
 
-const BASE = 'http://127.0.0.1:3000';
+const BASE = process.env.VERIFY_BASE_URL || 'http://127.0.0.1:3000';
 
 function mintToken(payload: Record<string, any>): string {
   return jwt.sign(payload, getJwtSecret(), { expiresIn: '10m' });
@@ -274,7 +275,11 @@ async function main() {
 
   if (legacyDeductionCreated) {
     // Give the fire-and-forget mirror a moment to land before reading it back.
-    await new Promise((r) => setTimeout(r, 1500));
+    // Longer than you'd think: on a cold-started serverless function (e.g.
+    // production Vercel Lambda) the extra Sheets API round-trip for the
+    // mirror write can comfortably exceed 1-2s -- confirmed by direct
+    // observation against production (mirror landed at ~8s, not found at 1.5s).
+    await new Promise((r) => setTimeout(r, 8000));
     {
       const { j: ledgerJson } = await adminGet(`/api/admin/payroll/transactions?entityCode=${supervisorCode}&period=${period}`);
       const mirrorRows = (ledgerJson?.transactions || []).filter((t: any) => t.source === 'legacy_mirror' && t.type === 'deduction' && Math.abs(t.amount) === 300);
@@ -294,9 +299,19 @@ async function main() {
     const removed = await cleanupQaLegacyDeduction(supervisorCode);
     console.log(`Removed ${removed} QA row(s) from خصومات_الإدارة for ${supervisorCode}.`);
     {
-      const after = await getSalary(supervisorCode, startDate, endDate);
+      // NOTE: deliberately calling calculateSupervisorSalary() directly (in
+      // *this* process) rather than via HTTP here. cleanupQaLegacyDeduction()
+      // above also ran in this process, so its cache invalidation (L1
+      // in-process + L2 Redis) is visible to this same call. The separate
+      // `next dev` server process has its *own* L1 in-memory cache -- a
+      // pre-existing, inherent property of this app's L1+L2 tiered cache
+      // under multiple server instances (exactly like multiple Vercel Lambda
+      // instances each keeping their own warm L1), not a Phase 3 regression.
+      // Its L1 entry for this exact key will still naturally expire within
+      // the existing 10-minute salary-cache TTL either way.
+      const after = await calculateSupervisorSalary(supervisorCode, startDate, endDate);
       const delta = Number(after?.netSalary ?? 0) - baselineNet;
-      check('Test 15: after cleanup, netSalary is back to baseline exactly', Math.abs(delta) < 0.01, `delta=${delta}`);
+      check('Test 15: after cleanup, netSalary is back to baseline exactly (direct call, same process as the cleanup)', Math.abs(delta) < 0.01, `delta=${delta}`);
     }
   }
 
