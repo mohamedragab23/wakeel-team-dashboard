@@ -8,6 +8,8 @@ import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
 import { assertLimitedAdminSupervisorZoneAccess, getSupervisorCodesInZoneScope } from '@/lib/adminZoneScope';
 import { appendToSheet, getSheetData } from '@/lib/googleSheets';
+import { getAllSupervisors } from '@/lib/adminService';
+import { mirrorLegacyAdminDeduction } from '@/lib/payrollLedger';
 
 export const dynamic = 'force-dynamic';
 
@@ -102,6 +104,32 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    // SRS-013 Phase 3: fire-and-forget mirror into the new Payroll Ledger
+    // (source='legacy_mirror', excluded from salary sums to avoid double-
+    // counting -- see lib/payrollLedger.ts). Never awaited-blocking, never
+    // allowed to affect this response either way. Skipped entirely while
+    // the flag is off -- zero behavior change from today until you enable it.
+    if (String(process.env.FEATURE_PAYROLL_LEDGER_ENABLED || '').trim().toLowerCase() === 'true') {
+      void (async () => {
+        try {
+          const supervisors = await getAllSupervisors();
+          const supervisorName = supervisors.find((s) => s.code === supervisorCode)?.name || supervisorCode;
+          await mirrorLegacyAdminDeduction({
+            supervisorCode,
+            supervisorName,
+            dateStr,
+            reason,
+            amount,
+            createdBy: decoded.code || '',
+            createdByName: decoded.name || adminLabel,
+          });
+        } catch (e) {
+          console.error('[admin-deductions POST] legacy_mirror failed (non-fatal):', e);
+        }
+      })();
+    }
+
     return NextResponse.json({ success: true, message: 'تم تسجيل الخصم' });
   } catch (error: any) {
     console.error('admin-deductions POST:', error);

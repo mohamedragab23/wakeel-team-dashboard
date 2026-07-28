@@ -176,7 +176,12 @@ export async function invalidateAfterSheetWrite(sheetName: string): Promise<void
     sheetName === 'الخصومات' ||
     sheetName === 'المعدات' ||
     sheetName === 'استعلام أمني' ||
-    sheetName === 'قبض_المشرفين'
+    sheetName === 'قبض_المشرفين' ||
+    // SRS-013 Phase 3: Payroll Ledger rows feed straight into netSalary
+    // (see lib/payrollLedger.ts / lib/salaryService.ts additive step) --
+    // without this, a new bonus/deduction/void/correction would sit in the
+    // stale 10-minute salary cache exactly like every other sheet above.
+    sheetName === 'سجل_المعاملات_المالية'
   ) {
     await invalidateSalaryCaches();
   }

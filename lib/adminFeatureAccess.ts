@@ -30,7 +30,8 @@ export type AdminFeatureKey =
   | 'ghost_riders_export'
   | 'rider_comments'
   | 'rider_comments_dashboard'
-  | 'missing_data_audit';
+  | 'missing_data_audit'
+  | 'payroll_ledger';
 
 const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   main_inventory: 'main_inventory',
@@ -58,6 +59,7 @@ const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   rider_comments: 'rider_comments',
   rider_comments_dashboard: 'rider_comments_dashboard',
   missing_data_audit: 'missing_data_audit',
+  payroll_ledger: 'payroll_ledger',
 };
 
 export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
@@ -87,6 +89,7 @@ export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
   rider_comments: 'التعليقات اليومية',
   rider_comments_dashboard: 'لوحة التعليقات اليومية',
   missing_data_audit: 'تدقيق البيانات الناقصة',
+  payroll_ledger: 'سجل المعاملات المالية (Payroll Ledger)',
 };
 
 export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
@@ -116,6 +119,7 @@ export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
   'rider_comments',
   'rider_comments_dashboard',
   'missing_data_audit',
+  'payroll_ledger',
 ];
 
 export type AdminMenuDef = { href: string; label: string; icon: string; feature: AdminFeatureKey };

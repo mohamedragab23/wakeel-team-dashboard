@@ -3,6 +3,7 @@ import { getSupervisorRiders } from './dataService';
 import { getAllSupervisors } from './adminService';
 import { CACHE_KEYS } from './cache';
 import { tieredCacheGet, tieredCacheSet } from './tieredCache';
+import { sumLedgerNativeForEntityPeriod } from './payrollLedger';
 import {
   aggregateSupervisorDailyPerformance,
   normalizeRiderCodeForPerformance,
@@ -909,6 +910,27 @@ export async function calculateSupervisorSalary(
     const equipmentCost = equipmentDetails.totalCost;
     const adminDeductionTotal = adminDeductions.total;
 
+    // SRS-013 Phase 3 — additive Payroll Ledger step (frozen design,
+    // SRS013_DESIGN_FREEZE.md Phase 3 §3). Flag OFF (default): this block
+    // is skipped entirely, `ledgerTotal` stays 0 and `ledgerTransactions`
+    // stays undefined -- `netSalary`/every other field is byte-identical to
+    // today (verified by the Phase 3 regression-guard acceptance test).
+    // Only `source='ledger_native'` rows are summed -- `legacy_mirror` rows
+    // (auto-created from خصومات_الإدارة below) are already counted via
+    // `adminDeductionTotal` above, so summing them here too would double-count.
+    let ledgerTotal = 0;
+    let ledgerTransactionsForResult: Awaited<ReturnType<typeof sumLedgerNativeForEntityPeriod>>['transactions'] | undefined;
+    if (String(process.env.FEATURE_PAYROLL_LEDGER_ENABLED || '').trim().toLowerCase() === 'true') {
+      try {
+        const period = `${year}-${String(month).padStart(2, '0')}`;
+        const ledgerSum = await sumLedgerNativeForEntityPeriod('supervisor', supervisorCode, period);
+        ledgerTotal = ledgerSum.total;
+        ledgerTransactionsForResult = ledgerSum.transactions;
+      } catch (e) {
+        console.warn('[Salary] Payroll ledger sum failed (non-fatal, netSalary computed without it):', e);
+      }
+    }
+
     const netSalary =
       totalSalary +
       bonus -
@@ -916,7 +938,8 @@ export async function calculateSupervisorSalary(
       advances -
       securityCost -
       equipmentCost -
-      adminDeductionTotal;
+      adminDeductionTotal +
+      ledgerTotal;
 
     console.log(`[Salary] Calculation for ${supervisorCode}:`);
     console.log(`  Base/Commission: ${totalSalary}, Bonus: ${bonus}`);
@@ -985,6 +1008,10 @@ export async function calculateSupervisorSalary(
       netSalary,
       breakdown,
       riderPerformance,
+      // SRS-013 Phase 3 -- additive optional field, only present when the
+      // ledger feature flag is on. Absent (undefined) otherwise, so old
+      // consumers reading this object are completely unaffected either way.
+      ...(ledgerTransactionsForResult ? { ledgerTransactions: ledgerTransactionsForResult } : {}),
     };
 
     await tieredCacheSet(salaryCacheKey, salaryResult, SALARY_TTL_MS);

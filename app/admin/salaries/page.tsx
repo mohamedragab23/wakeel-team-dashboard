@@ -1,9 +1,35 @@
 'use client';
 
 import { authFetch } from '@/lib/authFetch';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+
+type LedgerTxType = 'bonus' | 'deduction' | 'advance' | 'adjustment';
+
+interface LedgerTransaction {
+  transactionId: string;
+  entityType: 'rider' | 'supervisor';
+  entityCode: string;
+  entityNameSnapshot: string;
+  type: LedgerTxType;
+  amount: number;
+  reason: string;
+  period: string;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  status: 'active' | 'voided' | 'corrected';
+  correctsTransactionId: string;
+  source: 'ledger_native' | 'legacy_mirror';
+}
+
+const LEDGER_TYPE_LABELS_AR: Record<LedgerTxType, string> = {
+  bonus: 'مكافأة',
+  deduction: 'خصم',
+  advance: 'سلفة',
+  adjustment: 'تعديل',
+};
 
 interface Supervisor {
   code: string;
@@ -63,6 +89,126 @@ export default function AdminSalariesPage() {
     const today = new Date();
     return today.toISOString().split('T')[0];
   });
+
+  // --- SRS-013 Phase 3: Payroll Ledger (additive; admin-deductions form above is untouched) ---
+  const [ledgerEnabled, setLedgerEnabled] = useState(false);
+  const [ledgerType, setLedgerType] = useState<LedgerTxType>('bonus');
+  const [ledgerAmount, setLedgerAmount] = useState('');
+  const [ledgerReason, setLedgerReason] = useState('');
+  const [ledgerPeriod, setLedgerPeriod] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [ledgerSaving, setLedgerSaving] = useState(false);
+  const [ledgerMsg, setLedgerMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [editingTx, setEditingTx] = useState<LedgerTransaction | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editReason, setEditReason] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await authFetch('/api/admin/payroll/transactions');
+        const j = await res.json();
+        setLedgerEnabled(Boolean(j?.enabled));
+      } catch {
+        setLedgerEnabled(false);
+      }
+    })();
+  }, []);
+
+  const { data: ledgerTransactions = [], refetch: refetchLedger } = useQuery({
+    queryKey: ['admin', 'payroll-ledger', selectedSupervisor, ledgerPeriod],
+    queryFn: async () => {
+      if (!selectedSupervisor) return [];
+      const res = await authFetch(
+        `/api/admin/payroll/transactions?entityCode=${selectedSupervisor}&period=${ledgerPeriod}`
+      );
+      const data = await res.json();
+      return data.success ? (data.transactions as LedgerTransaction[]) : [];
+    },
+    enabled: ledgerEnabled && !!selectedSupervisor && !!ledgerPeriod,
+  });
+
+  async function submitLedgerTransaction(e: React.FormEvent) {
+    e.preventDefault();
+    setLedgerMsg(null);
+    if (!selectedSupervisor) {
+      setLedgerMsg({ type: 'err', text: 'اختر مشرفاً أولاً' });
+      return;
+    }
+    const amount = parseFloat(ledgerAmount);
+    if (!Number.isFinite(amount) || amount === 0) {
+      setLedgerMsg({ type: 'err', text: 'أدخل مبلغاً صحيحاً' });
+      return;
+    }
+    setLedgerSaving(true);
+    try {
+      const res = await authFetch('/api/admin/payroll/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entityType: 'supervisor',
+          entityCode: selectedSupervisor,
+          type: ledgerType,
+          amount,
+          reason: ledgerReason.trim(),
+          period: ledgerPeriod,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'فشل الحفظ');
+      setLedgerMsg({ type: 'ok', text: 'تم تسجيل المعاملة' });
+      setLedgerAmount('');
+      setLedgerReason('');
+      void refetchLedger();
+      queryClient.invalidateQueries({ queryKey: ['admin', 'salary', selectedSupervisor, startDate, endDate] });
+    } catch (err: unknown) {
+      setLedgerMsg({ type: 'err', text: err instanceof Error ? err.message : 'خطأ' });
+    } finally {
+      setLedgerSaving(false);
+    }
+  }
+
+  async function voidLedgerTx(transactionId: string) {
+    if (!confirm('هل تريد حذف (إلغاء) هذه المعاملة؟')) return;
+    try {
+      const res = await authFetch(`/api/admin/payroll/transactions/${transactionId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'فشل الحذف');
+      void refetchLedger();
+      queryClient.invalidateQueries({ queryKey: ['admin', 'salary', selectedSupervisor, startDate, endDate] });
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'خطأ');
+    }
+  }
+
+  function startEditTx(t: LedgerTransaction) {
+    setEditingTx(t);
+    setEditAmount(String(Math.abs(t.amount)));
+    setEditReason(t.reason);
+  }
+
+  async function submitEditTx(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingTx) return;
+    const amount = parseFloat(editAmount);
+    if (!Number.isFinite(amount) || amount === 0) return;
+    try {
+      const res = await authFetch(`/api/admin/payroll/transactions/${editingTx.transactionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, reason: editReason.trim() }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'فشل التعديل');
+      setEditingTx(null);
+      void refetchLedger();
+      queryClient.invalidateQueries({ queryKey: ['admin', 'salary', selectedSupervisor, startDate, endDate] });
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'خطأ');
+    }
+  }
 
   // Fetch supervisors
   const { data: supervisors = [] } = useQuery({
@@ -229,6 +375,151 @@ export default function AdminSalariesPage() {
             </p>
           )}
         </div>
+
+        {/* SRS-013 Phase 3: Payroll Ledger -- additive, alongside (not replacing) the form above. */}
+        {ledgerEnabled && (
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <h2 className="text-lg font-semibold text-gray-800 mb-3">سجل المعاملات المالية (مكافأة / خصم / سلفة / تعديل)</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              يُسجَّل في تبويب «سجل_المعاملات_المالية» الجديد (append-only) ويُضاف مباشرةً لحساب الراتب الصافي لهذا
+              المشرف عن هذا الشهر. لا يستبدل خصم الإدارة الحالي أعلاه.
+            </p>
+            <form onSubmit={submitLedgerTransaction} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">النوع</label>
+                <select
+                  value={ledgerType}
+                  onChange={(e) => setLedgerType(e.target.value as LedgerTxType)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  {Object.entries(LEDGER_TYPE_LABELS_AR).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">الشهر (YYYY-MM)</label>
+                <input
+                  type="month"
+                  value={ledgerPeriod}
+                  onChange={(e) => setLedgerPeriod(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">السبب</label>
+                <input
+                  type="text"
+                  value={ledgerReason}
+                  onChange={(e) => setLedgerReason(e.target.value)}
+                  placeholder="مثال: مكافأة أداء شهر ..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  المبلغ (ج.م){ledgerType === 'adjustment' ? ' — موجب/سالب' : ''}
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={ledgerAmount}
+                  onChange={(e) => setLedgerAmount(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={ledgerSaving || !selectedSupervisor}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium disabled:opacity-50"
+              >
+                {ledgerSaving ? 'جاري الحفظ...' : 'تسجيل المعاملة'}
+              </button>
+            </form>
+            {ledgerMsg && (
+              <p className={`mt-2 text-sm ${ledgerMsg.type === 'ok' ? 'text-green-700' : 'text-red-600'}`}>{ledgerMsg.text}</p>
+            )}
+
+            {selectedSupervisor && ledgerTransactions.length > 0 && (
+              <div className="mt-5 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="text-right py-2 px-3 font-semibold text-gray-700">النوع</th>
+                      <th className="text-right py-2 px-3 font-semibold text-gray-700">المبلغ</th>
+                      <th className="text-right py-2 px-3 font-semibold text-gray-700">السبب</th>
+                      <th className="text-right py-2 px-3 font-semibold text-gray-700">المصدر</th>
+                      <th className="text-right py-2 px-3 font-semibold text-gray-700">الحالة</th>
+                      <th className="text-right py-2 px-3 font-semibold text-gray-700">إجراء</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {ledgerTransactions.map((t) => (
+                      <tr key={t.transactionId} className={t.status !== 'active' ? 'opacity-50' : undefined}>
+                        <td className="py-2 px-3">{LEDGER_TYPE_LABELS_AR[t.type]}</td>
+                        <td className={`py-2 px-3 font-semibold ${t.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {t.amount >= 0 ? '+' : ''}
+                          {t.amount.toFixed(2)} ج.م
+                        </td>
+                        <td className="py-2 px-3 text-gray-600">{t.reason || '—'}</td>
+                        <td className="py-2 px-3 text-gray-500">{t.source === 'legacy_mirror' ? 'خصم إداري (قديم)' : 'مباشر'}</td>
+                        <td className="py-2 px-3 text-gray-500">
+                          {t.status === 'active' ? 'نشطة' : t.status === 'corrected' ? 'مُعدَّلة' : 'ملغاة'}
+                        </td>
+                        <td className="py-2 px-3">
+                          {t.status === 'active' && t.source === 'ledger_native' && (
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => startEditTx(t)} className="text-blue-600 hover:underline">
+                                تعديل
+                              </button>
+                              <button type="button" onClick={() => voidLedgerTx(t.transactionId)} className="text-red-600 hover:underline">
+                                حذف
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {editingTx && (
+              <form onSubmit={submitEditTx} className="mt-4 p-4 bg-blue-50 rounded-lg grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">تعديل السبب</label>
+                  <input
+                    type="text"
+                    value={editReason}
+                    onChange={(e) => setEditReason(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">المبلغ الجديد</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editAmount}
+                    onChange={(e) => setEditAmount(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium">
+                    حفظ التعديل
+                  </button>
+                  <button type="button" onClick={() => setEditingTx(null)} className="px-4 py-2 bg-gray-200 rounded-lg">
+                    إلغاء
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
 
         {isLoading && (
           <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-100 text-center">

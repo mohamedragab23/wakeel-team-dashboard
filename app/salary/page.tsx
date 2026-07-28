@@ -47,7 +47,25 @@ interface SalaryCalculation {
   }[];
   riderPerformance?: { code: string; name: string; totalOrders: number; totalHours: number }[];
   periodTotals?: { totalOrders: number; totalHours: number };
+  /** SRS-013 Phase 3 -- present only when FEATURE_PAYROLL_LEDGER_ENABLED is on. */
+  ledgerTransactions?: {
+    transactionId: string;
+    type: 'bonus' | 'deduction' | 'advance' | 'adjustment';
+    amount: number;
+    reason: string;
+    createdAt: string;
+    createdByName: string;
+    status: 'active' | 'voided' | 'corrected';
+    source: 'ledger_native' | 'legacy_mirror';
+  }[];
 }
+
+const LEDGER_TYPE_LABELS_AR: Record<string, string> = {
+  bonus: 'مكافأة',
+  deduction: 'خصم',
+  advance: 'سلفة',
+  adjustment: 'تعديل',
+};
 
 export default function SalaryPage() {
   // Use refs to track pending date changes
@@ -494,6 +512,46 @@ export default function SalaryPage() {
               </table>
             </div>
             </SupervisorTableSection>
+          </div>
+        )}
+
+        {/* SRS-013 Phase 3 -- additive, only rendered when the ledger feature flag is on server-side. */}
+        {salaryData && salaryData.ledgerTransactions && salaryData.ledgerTransactions.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <h3 className="text-lg font-bold text-gray-800 mb-4">سجل المعاملات المالية (الفترة المحددة)</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">النوع</th>
+                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">المبلغ</th>
+                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">السبب</th>
+                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">بواسطة</th>
+                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">التاريخ</th>
+                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">الحالة</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {salaryData.ledgerTransactions.map((t) => (
+                    <tr key={t.transactionId} className={t.status !== 'active' ? 'opacity-50' : undefined}>
+                      <td className="py-3 px-4 text-sm text-gray-800">{LEDGER_TYPE_LABELS_AR[t.type] || t.type}</td>
+                      <td className={`py-3 px-4 text-sm font-semibold ${t.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {t.amount >= 0 ? '+' : ''}
+                        {formatCurrency(t.amount)}
+                      </td>
+                      <td className="py-3 px-4 text-sm text-gray-600">{t.reason || '—'}</td>
+                      <td className="py-3 px-4 text-sm text-gray-600">{t.createdByName || '—'}</td>
+                      <td className="py-3 px-4 text-sm text-gray-600">
+                        {new Date(t.createdAt).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' })}
+                      </td>
+                      <td className="py-3 px-4 text-sm text-gray-500">
+                        {t.status === 'active' ? 'نشطة' : t.status === 'corrected' ? 'مُعدَّلة' : 'ملغاة'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
