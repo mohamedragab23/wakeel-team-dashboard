@@ -126,6 +126,7 @@ export function getAdminMenuDefs(): AdminMenuDef[] {
     { href: '/live-riders', label: 'العمليات المباشرة', icon: '📡', feature: 'live_riders' },
     { href: '/admin/supervisors', label: 'إدارة المشرفين', icon: '👔', feature: 'supervisors' },
     { href: '/admin/riders', label: 'إدارة المناديب', icon: '👥', feature: 'riders' },
+    { href: '/rider-search', label: 'بحث المناديب (روستر)', icon: '🔎', feature: 'riders' },
     { href: '/admin/termination-requests', label: 'طلبات الإقالة', icon: '🚫', feature: 'termination_requests' },
     { href: '/admin/assignment-requests', label: 'طلبات التعيين', icon: '➕', feature: 'assignment_requests' },
     { href: '/admin/reactivation-requests', label: 'طلبات إعادة التفعيل', icon: '🔄', feature: 'assignment_requests' },
