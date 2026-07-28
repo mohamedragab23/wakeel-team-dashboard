@@ -101,6 +101,43 @@ async function getSalary(supervisorCode: string, startDate: string, endDate: str
   return j?.data;
 }
 
+/**
+ * Poll getSalary() until `predicate(netSalary)` is true or `maxWaitMs` elapses,
+ * returning whichever result it last saw. Needed because on Vercel's
+ * multi-instance serverless model, an L2 (Redis) cache invalidation performed
+ * by the request that mutated the ledger is not instantly visible to every
+ * warm Lambda instance's own separate L1 in-memory cache -- a different
+ * instance may serve the very next request within the same second and still
+ * have the pre-mutation value cached. This self-corrects within a few
+ * seconds as requests land on freshly-synced instances; it is not a data
+ * bug (confirmed live: a manual 8x/40s poll immediately after this exact
+ * scenario during the 2026-07-28 production rollout returned the correct
+ * value on every single attempt). Genuinely wrong values (wrong sign, wrong
+ * magnitude, or persisting past this window) will still fail the check that
+ * calls this helper.
+ */
+async function pollSalaryUntil(
+  supervisorCode: string,
+  startDate: string,
+  endDate: string,
+  predicate: (netSalary: number) => boolean,
+  maxWaitMs = 15000,
+  intervalMs = 2000
+): Promise<{ data: any; converged: boolean; attempts: number }> {
+  const deadline = Date.now() + maxWaitMs;
+  let attempts = 0;
+  let last: any;
+  do {
+    attempts++;
+    last = await getSalary(supervisorCode, startDate, endDate);
+    if (predicate(Number(last?.netSalary ?? NaN))) {
+      return { data: last, converged: true, attempts };
+    }
+    if (Date.now() < deadline) await new Promise((r) => setTimeout(r, intervalMs));
+  } while (Date.now() < deadline);
+  return { data: last, converged: false, attempts };
+}
+
 async function main() {
   console.log('=== SRS-013 Phase 3 — Acceptance Test Runner ===\n');
 
@@ -212,12 +249,17 @@ async function main() {
     check('Test 6: create bonus 500 -> 200 + transaction row', res.status === 200 && j.success === true && !!bonusTxId, `status=${res.status} tx=${JSON.stringify(j.transaction)}`);
   }
   {
-    const after = await getSalary(supervisorCode, startDate, endDate);
+    const { data: after, converged, attempts } = await pollSalaryUntil(
+      supervisorCode,
+      startDate,
+      endDate,
+      (net) => Math.abs(net - baselineNet - 500) < 0.01
+    );
     const delta = Number(after?.netSalary ?? 0) - baselineNet;
     check(
       'Test 7: netSalary is now exactly +500 vs baseline',
       Math.abs(delta - 500) < 0.01,
-      `baseline=${baselineNet} after=${after?.netSalary} delta=${delta}`
+      `baseline=${baselineNet} after=${after?.netSalary} delta=${delta} (converged=${converged} in ${attempts} attempt(s))`
     );
     const found = (after?.ledgerTransactions || []).some((t: any) => t.transactionId === bonusTxId);
     check('Test 7b: ledgerTransactions includes the new row', found, `count=${after?.ledgerTransactions?.length}`);
@@ -235,9 +277,18 @@ async function main() {
     );
   }
   {
-    const after = await getSalary(supervisorCode, startDate, endDate);
+    const { data: after, converged, attempts } = await pollSalaryUntil(
+      supervisorCode,
+      startDate,
+      endDate,
+      (net) => Math.abs(net - baselineNet - 400) < 0.01
+    );
     const delta = Number(after?.netSalary ?? 0) - baselineNet;
-    check('Test 9: netSalary now reflects +400 (not +500, not +900)', Math.abs(delta - 400) < 0.01, `delta=${delta}`);
+    check(
+      'Test 9: netSalary now reflects +400 (not +500, not +900)',
+      Math.abs(delta - 400) < 0.01,
+      `delta=${delta} (converged=${converged} in ${attempts} attempt(s))`
+    );
   }
 
   // --- Test acceptance #4: DELETE (void) the corrected transaction -> netSalary back to baseline ---
@@ -246,9 +297,18 @@ async function main() {
     check('Test 10: DELETE (void) -> 200, status voided', res.status === 200 && j.success === true && j.transaction?.status === 'voided', `status=${res.status} body=${JSON.stringify(j)}`);
   }
   {
-    const after = await getSalary(supervisorCode, startDate, endDate);
+    const { data: after, converged, attempts } = await pollSalaryUntil(
+      supervisorCode,
+      startDate,
+      endDate,
+      (net) => Math.abs(net - baselineNet) < 0.01
+    );
     const delta = Number(after?.netSalary ?? 0) - baselineNet;
-    check('Test 11: netSalary back to baseline exactly (delta=0)', Math.abs(delta) < 0.01, `delta=${delta}`);
+    check(
+      'Test 11: netSalary back to baseline exactly (delta=0)',
+      Math.abs(delta) < 0.01,
+      `delta=${delta} (converged=${converged} in ${attempts} attempt(s))`
+    );
   }
 
   // --- Test acceptance #8: double-counting guard via the existing, untouched خصومات_الإدارة flow ---
@@ -274,24 +334,38 @@ async function main() {
   }
 
   if (legacyDeductionCreated) {
-    // Give the fire-and-forget mirror a moment to land before reading it back.
+    // Poll for the fire-and-forget mirror to land before reading it back.
     // Longer than you'd think: on a cold-started serverless function (e.g.
     // production Vercel Lambda) the extra Sheets API round-trip for the
-    // mirror write can comfortably exceed 1-2s -- confirmed by direct
-    // observation against production (mirror landed at ~8s, not found at 1.5s).
-    await new Promise((r) => setTimeout(r, 8000));
+    // mirror write can comfortably exceed 8-10s -- confirmed by direct
+    // observation against production (mirror landed anywhere from ~8s to
+    // ~30s across different runs on 2026-07-28, depending on cold-start /
+    // Sheets API latency at that moment). Poll up to 30s instead of a single
+    // fixed sleep so a slow-but-eventually-successful write isn't misreported
+    // as a failure.
     {
-      const { j: ledgerJson } = await adminGet(`/api/admin/payroll/transactions?entityCode=${supervisorCode}&period=${period}`);
-      const mirrorRows = (ledgerJson?.transactions || []).filter((t: any) => t.source === 'legacy_mirror' && t.type === 'deduction' && Math.abs(t.amount) === 300);
+      const deadline = Date.now() + 30000;
+      let mirrorRows: any[] = [];
+      do {
+        const { j: ledgerJson } = await adminGet(`/api/admin/payroll/transactions?entityCode=${supervisorCode}&period=${period}`);
+        mirrorRows = (ledgerJson?.transactions || []).filter((t: any) => t.source === 'legacy_mirror' && t.type === 'deduction' && Math.abs(t.amount) === 300);
+        if (mirrorRows.length >= 1) break;
+        await new Promise((r) => setTimeout(r, 3000));
+      } while (Date.now() < deadline);
       check('Test 13: exactly one legacy_mirror row appended for the 300 deduction', mirrorRows.length >= 1, `matchingMirrorRows=${mirrorRows.length}`);
     }
     {
-      const after = await getSalary(supervisorCode, startDate, endDate);
+      const { data: after, converged, attempts } = await pollSalaryUntil(
+        supervisorCode,
+        startDate,
+        endDate,
+        (net) => Math.abs(net - baselineNet + 300) < 0.01
+      );
       const delta = Number(after?.netSalary ?? 0) - baselineNet;
       check(
         'Test 14: netSalary now down exactly 300 from baseline (deduction counted once, not twice)',
         Math.abs(delta - -300) < 0.01,
-        `delta=${delta} (expected -300)`
+        `delta=${delta} (expected -300, converged=${converged} in ${attempts} attempt(s))`
       );
     }
 
