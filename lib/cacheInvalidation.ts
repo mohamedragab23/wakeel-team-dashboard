@@ -177,6 +177,17 @@ export async function invalidateAfterSheetWrite(sheetName: string): Promise<void
     sheetName === 'المعدات' ||
     sheetName === 'استعلام أمني' ||
     sheetName === 'قبض_المشرفين' ||
+    // Pre-existing gap discovered during the SRS-013 Phase 3 production
+    // rollout verification (2026-07-28): خصومات_الإدارة (admin-applied
+    // supervisor deductions, app/api/admin/salary/admin-deductions/route.ts)
+    // feeds straight into calculateSupervisorSalary()'s `adminDeductionTotal`
+    // exactly like the sheets above, but was never added to this list --
+    // meaning a brand-new admin deduction silently sat invisible in the
+    // salary calc for up to the full 10-minute cache TTL. Confirmed via the
+    // Phase 3 acceptance script's double-counting-guard test (delta stayed
+    // 0 instead of -300 immediately after posting a deduction). Unrelated to
+    // the new Payroll Ledger's own logic -- fixed here as a plain bugfix.
+    sheetName === 'خصومات_الإدارة' ||
     // SRS-013 Phase 3: Payroll Ledger rows feed straight into netSalary
     // (see lib/payrollLedger.ts / lib/salaryService.ts additive step) --
     // without this, a new bonus/deduction/void/correction would sit in the
