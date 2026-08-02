@@ -343,16 +343,16 @@ async function main() {
     // Sheets API latency at that moment). Poll up to 30s instead of a single
     // fixed sleep so a slow-but-eventually-successful write isn't misreported
     // as a failure.
+    let mirrorRowsFound: any[] = [];
     {
       const deadline = Date.now() + 30000;
-      let mirrorRows: any[] = [];
       do {
         const { j: ledgerJson } = await adminGet(`/api/admin/payroll/transactions?entityCode=${supervisorCode}&period=${period}`);
-        mirrorRows = (ledgerJson?.transactions || []).filter((t: any) => t.source === 'legacy_mirror' && t.type === 'deduction' && Math.abs(t.amount) === 300);
-        if (mirrorRows.length >= 1) break;
+        mirrorRowsFound = (ledgerJson?.transactions || []).filter((t: any) => t.source === 'legacy_mirror' && t.type === 'deduction' && Math.abs(t.amount) === 300 && t.status === 'active');
+        if (mirrorRowsFound.length >= 1) break;
         await new Promise((r) => setTimeout(r, 3000));
       } while (Date.now() < deadline);
-      check('Test 13: exactly one legacy_mirror row appended for the 300 deduction', mirrorRows.length >= 1, `matchingMirrorRows=${mirrorRows.length}`);
+      check('Test 13: exactly one legacy_mirror row appended for the 300 deduction', mirrorRowsFound.length >= 1, `matchingMirrorRows=${mirrorRowsFound.length}`);
     }
     {
       const { data: after, converged, attempts } = await pollSalaryUntil(
@@ -372,6 +372,27 @@ async function main() {
     console.log('\nCleaning up this script\'s own test artifact in خصومات_الإدارة (the legacy sheet has no app-level delete)...');
     const removed = await cleanupQaLegacyDeduction(supervisorCode);
     console.log(`Removed ${removed} QA row(s) from خصومات_الإدارة for ${supervisorCode}.`);
+
+    // The legacy sheet's raw row is gone, but appendLedgerTransaction()'s
+    // fire-and-forget mirror already wrote a *separate*, append-only row into
+    // سجل_المعاملات_المالية (source: 'legacy_mirror') -- deleting the legacy
+    // row above does nothing to that ledger row, and it is `source:
+    // 'legacy_mirror'` so it's never summed into netSalary either way (the
+    // frozen double-counting guard), but left `status: 'active'` it would
+    // otherwise sit in the ledger forever as a stray QA artifact, visible in
+    // the admin/salaries ledger table for this supervisor+period. Void it the
+    // same way a real admin would "delete" any ledger row -- discovered as a
+    // genuine missing-cleanup gap during the 2026-07-28 Phase 3 production
+    // hardening pass (a leftover active legacy_mirror QA row was found still
+    // sitting in production after this script's very own earlier runs).
+    for (const row of mirrorRowsFound) {
+      const { j: voidJson } = await adminDelete(`/api/admin/payroll/transactions/${row.transactionId}`);
+      console.log(
+        voidJson?.success
+          ? `Voided leftover legacy_mirror QA row ${row.transactionId} in سجل_المعاملات_المالية.`
+          : `WARNING: failed to void leftover legacy_mirror QA row ${row.transactionId}: ${JSON.stringify(voidJson)}`
+      );
+    }
     {
       // NOTE: deliberately calling calculateSupervisorSalary() directly (in
       // *this* process) rather than via HTTP here. cleanupQaLegacyDeduction()

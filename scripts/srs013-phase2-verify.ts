@@ -12,7 +12,9 @@ dotenv.config({ path: '.env.local' });
 import jwt from 'jsonwebtoken';
 import { getJwtSecret } from '../lib/jwtConfig';
 
-const BASE = 'http://127.0.0.1:3000';
+// Defaults to a local `next dev` server; set VERIFY_BASE_URL to point this at
+// production instead (same convention as scripts/srs013-phase3-verify.ts).
+const BASE = process.env.VERIFY_BASE_URL || 'http://127.0.0.1:3000';
 
 function mintToken(payload: Record<string, any>): string {
   return jwt.sign(payload, getJwtSecret(), { expiresIn: '10m' });
