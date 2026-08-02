@@ -80,7 +80,7 @@ function newTransactionId(): string {
  * correction). Storing the *signed* value in column F means the salary
  * step below is a trivial sum — no per-type branching needed at read time.
  */
-export function computeSignedAmount(type: LedgerTransactionType, rawAmount: number): number {
+function computeSignedAmount(type: LedgerTransactionType, rawAmount: number): number {
   const magnitude = Math.abs(rawAmount);
   switch (type) {
     case 'bonus':

@@ -3,7 +3,7 @@
 **Status:** 🟢 FULLY FROZEN — all previously-open items resolved (Rider Search endpoint confirmed live, PDF frozen to `pdf-lib`, Payroll dual-write decided, telemetry requirement adopted). Final architecture review passed (companion doc §14). Implementation starts only after explicit Phase 0 approval, and Phase *N+1* starts only after Phase *N* passes its acceptance tests in production.
 **Companion doc:** `docs/SRS013_ROOSTER_API_PAYROLL_ARCHITECTURE.md` (rationale/why). This document is the *what, exactly* — frozen contracts, not architecture prose.
 **Baseline commit:** `eed9c44` (current `main`, includes the rooster-live-sync cron fix + Gmail OTP automation, both already in production).
-**Validation evidence:** `scripts/rooster-employees-endpoint-check.ts` — read-only, reuses only the existing production Rooster auth layer, no captured credentials stored anywhere.
+**Validation evidence:** the original endpoint-contract probe (`scripts/rooster-employees-endpoint-check.ts`, read-only, reused only the existing production Rooster auth layer, no captured credentials stored anywhere) confirmed the findings below and was removed after the 2026-08-02 hardening pass once its contract was fully codified in `lib/rooster/RoosterClient.ts` and this document — nothing it validated is still open or unverified.
 
 Every phase below follows the same six-part contract you asked for:
 Endpoints → Sheets changes → New APIs → Impact on existing code → Rollback plan → Acceptance tests.

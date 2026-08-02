@@ -2,12 +2,24 @@
  * SRS-013 Phase 3 — regression guard (design doc §6 test #1).
  *
  * Proves `calculateSupervisorSalary()` is byte-identical with the flag OFF
- * vs ON (when no active `ledger_native` rows exist) for several real
- * supervisors and several periods. Calls the library function directly
- * (single process) and explicitly clears both cache layers between the two
- * measurements so neither run can observe the other's cached result --
- * see scripts/srs013-phase3-verify.ts's Test 15 comment for why that
- * matters with this app's L1(in-process)+L2(Redis) tiered cache.
+ * vs ON *for any supervisor+period that has no active `ledger_native` rows*.
+ * Calls the library function directly (single process) and explicitly
+ * clears both cache layers between the two measurements so neither run can
+ * observe the other's cached result -- see scripts/srs013-phase3-verify.ts's
+ * Test 15 comment for why that matters with this app's L1(in-process)+
+ * L2(Redis) tiered cache.
+ *
+ * IMPORTANT: since the flag went live in production (2026-07-28), real
+ * admins have started recording real bonuses/deductions/advances through
+ * the ledger (confirmed live, e.g. WA-002/2026-07). That is a *feature
+ * working as intended*, not a regression -- a period with real active
+ * ledger_native rows is expected to legitimately differ between flag-off
+ * and flag-on (flag-on correctly includes it, flag-off correctly can't).
+ * This script therefore fetches each candidate combo's ledger rows first
+ * and skips (rather than fails) any combo with active ledger_native rows,
+ * so the byte-identical assertion only ever runs where it's actually a
+ * meaningful guarantee: the untouched legacy path for periods the new
+ * feature hasn't touched yet.
  *
  * Run: npx tsx scripts/srs013-phase3-regression-check.ts
  */
@@ -16,6 +28,7 @@ dotenv.config({ path: '.env.local' });
 import { calculateSupervisorSalary } from '../lib/salaryService';
 import { invalidateSalaryCaches } from '../lib/cacheInvalidation';
 import { getAllSupervisors } from '../lib/adminService';
+import { getLedgerTransactions } from '../lib/payrollLedger';
 
 let passed = 0;
 let failed = 0;
@@ -51,6 +64,16 @@ async function main() {
 
   for (const sup of sample) {
     for (const period of periods) {
+      const periodLabel = period.endDate.slice(0, 7); // YYYY-MM, matches payrollLedger's period format
+      const existingLedgerRows = await getLedgerTransactions({ entityCode: sup.code, period: periodLabel });
+      const hasActiveLedgerRows = existingLedgerRows.some((t) => t.status === 'active');
+      if (hasActiveLedgerRows) {
+        console.log(
+          `⏭️  SKIP — ${sup.code} / ${period.label}: has ${existingLedgerRows.filter((t) => t.status === 'active').length} real active ledger row(s) already -- flag-off/flag-on are *expected* to differ here (feature working as intended), not a regression target.`
+        );
+        continue;
+      }
+
       await invalidateSalaryCaches();
       process.env.FEATURE_PAYROLL_LEDGER_ENABLED = 'false';
       const off = await calculateSupervisorSalary(sup.code, period.startDate, period.endDate);

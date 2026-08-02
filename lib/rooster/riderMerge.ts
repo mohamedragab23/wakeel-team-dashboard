@@ -98,7 +98,7 @@ function normalizePhoneDigits(v: unknown): string {
 }
 
 /** Loose equality for two phone-like strings, tolerant of +20/0/00 country-code prefixes. */
-export function phonesLooselyMatch(a: unknown, b: unknown): boolean {
+function phonesLooselyMatch(a: unknown, b: unknown): boolean {
   const da = normalizePhoneDigits(a);
   const db = normalizePhoneDigits(b);
   if (!da || !db) return false;

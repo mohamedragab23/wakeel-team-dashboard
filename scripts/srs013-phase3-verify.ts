@@ -359,7 +359,13 @@ async function main() {
         supervisorCode,
         startDate,
         endDate,
-        (net) => Math.abs(net - baselineNet + 300) < 0.01
+        (net) => Math.abs(net - baselineNet + 300) < 0.01,
+        // Production's full salary calc (11k+ row security-sheet scan, etc.) can
+        // take several seconds per call on a cold Lambda, so the default
+        // 15s/2000ms budget (barely 2 attempts) is too tight here -- widen to
+        // match Test 13's already-production-proven 30s budget.
+        30000,
+        3000
       );
       const delta = Number(after?.netSalary ?? 0) - baselineNet;
       check(
