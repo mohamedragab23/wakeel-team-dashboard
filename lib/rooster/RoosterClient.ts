@@ -58,38 +58,48 @@ async function resolveFreshLiveHeaders(): Promise<Record<string, string>> {
  * matches the top-level `id` field ("Worker ID"). No match -> clean `200`,
  * empty `content` (not an error). Non-numeric `search_id` -> `409` Hibernate
  * `DataException` -- mapped to `invalid_search_term`, never surfaced raw.
+ *
+ * IMPORTANT: this throws (rather than returning `{success:false,
+ * reason:'rooster_unavailable'}`) for transient failures, and only that one
+ * case. Reason: the caller wraps this in `withRoosterCache`, which caches
+ * whatever value `fn()` *returns* for a full 5 minutes -- if a transient
+ * Rooster hiccup (network blip, momentary auth failure) were returned as a
+ * normal value here, it would get cached as if it were a real "not found"
+ * result, and every identical search for the next 5 minutes would
+ * incorrectly report the rider as unsearchable even after Rooster recovers.
+ * Throwing makes `withRoosterCache` skip its `tieredCacheSet` entirely (see
+ * its catch block), so a future call retries Rooster instead of replaying a
+ * stale failure. `invalid_search_term` is still returned normally -- it's a
+ * deterministic classification of the *input* (a non-numeric-shaped ID that
+ * Rooster itself rejects), not a transient outage, so caching it is correct
+ * and harmless.
  */
 async function fetchByWorkerId(numericId: string): Promise<RoosterSearchOutcome> {
-  try {
-    const headers = await resolveFreshLiveHeaders();
-    const origin = getRoosterAppOrigin();
-    const qs = new URLSearchParams({
-      search_id: numericId,
-      with_field: 'id_number',
-      filter_status: 'active_contract',
-      with_contracts: 'true',
-      page: '0',
-      size: '5',
-    }).toString();
-    const res = await fetch(`${origin}/api/rooster/v3/employees?${qs}`, {
-      method: 'GET',
-      headers: { Accept: 'application/json', ...headers },
-      cache: 'no-store',
-    });
-    if (res.status === 409) {
-      return { success: false, reason: 'invalid_search_term' };
-    }
-    if (!res.ok) {
-      logStructured('error', 'rider_search_worker_id_failed', { status: res.status });
-      return { success: false, reason: 'rooster_unavailable' };
-    }
-    const json: any = await res.json();
-    const content: RoosterEmployeeRaw[] = Array.isArray(json?.content) ? json.content : [];
-    return { success: true, employees: content };
-  } catch (err: any) {
-    logStructured('error', 'rider_search_worker_id_threw', { message: err?.message || String(err) });
-    return { success: false, reason: 'rooster_unavailable' };
+  const headers = await resolveFreshLiveHeaders();
+  const origin = getRoosterAppOrigin();
+  const qs = new URLSearchParams({
+    search_id: numericId,
+    with_field: 'id_number',
+    filter_status: 'active_contract',
+    with_contracts: 'true',
+    page: '0',
+    size: '5',
+  }).toString();
+  const res = await fetch(`${origin}/api/rooster/v3/employees?${qs}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json', ...headers },
+    cache: 'no-store',
+  });
+  if (res.status === 409) {
+    return { success: false, reason: 'invalid_search_term' };
   }
+  if (!res.ok) {
+    logStructured('error', 'rider_search_worker_id_failed', { status: res.status });
+    throw new Error(`Rooster worker-id search failed: ${res.status}`);
+  }
+  const json: any = await res.json();
+  const content: RoosterEmployeeRaw[] = Array.isArray(json?.content) ? json.content : [];
+  return { success: true, employees: content };
 }
 
 /**
@@ -209,7 +219,13 @@ export class RoosterClient {
       const numeric = query.replace(/\D/g, '');
       if (!numeric) return { success: false, reason: 'invalid_search_term' };
       const key = `rider_search:workerId:${numeric}`;
-      return withRoosterCache<RoosterSearchOutcome>(key, () => withRoosterQueue(() => fetchByWorkerId(numeric)));
+      try {
+        return await withRoosterCache<RoosterSearchOutcome>(key, () => withRoosterQueue(() => fetchByWorkerId(numeric)));
+      } catch (err: any) {
+        // Transient failure (see fetchByWorkerId doc comment) -- never cached, always safe to retry next time.
+        logStructured('error', 'rider_search_worker_id_threw', { message: err?.message || String(err) });
+        return { success: false, reason: 'rooster_unavailable' };
+      }
     }
 
     let all: RoosterEmployeeRaw[];

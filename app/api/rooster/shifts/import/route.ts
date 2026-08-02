@@ -180,6 +180,9 @@ export async function POST(request: NextRequest) {
       actorCode: decoded.code || '',
       actorName: decoded.name || '',
       after: { zone, cityId, startDate, endDate, filename: exported.filename },
+    }).catch((err) => {
+      console.error('[api/rooster/shifts/import] appendAuditLog failed:', err);
+      void recordMetric({ feature: 'audit_log', metric: 'api_failure', tags: { action: 'shift_import' } });
     });
     void recordMetric({ feature: 'shift_import', metric: 'exec_ms', value: Date.now() - startedAt });
 

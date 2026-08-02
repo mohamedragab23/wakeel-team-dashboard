@@ -23,8 +23,28 @@ export async function tieredCacheGet<T>(key: string, memoryTtlMs?: number): Prom
   return null;
 }
 
-export async function tieredCacheSet<T>(key: string, data: T, ttlMs: number): Promise<void> {
-  cache.set(key, data, ttlMs);
+/**
+ * `l1TtlMs` (optional, additive — every existing caller that omits it keeps
+ * today's exact behavior of L1 and L2 sharing one TTL) lets a caller give L1
+ * a *shorter* lifetime than L2.
+ *
+ * Why this matters (SRS-013 Phase 3 production hardening, 2026-07-28): on
+ * Vercel's multi-instance serverless model, L1 is private per-warm-instance
+ * memory, while L2 (Redis) is the one place a `tieredCacheDelete*` call from
+ * any instance can actually reach. When a mutation invalidates a key, the
+ * instance that handled the write clears its own L1 and the shared L2 --
+ * but every *other* already-warm instance still has its own untouched,
+ * unaware-of-the-invalidation L1 copy, which keeps being served until that
+ * copy's own TTL naturally expires. With one shared long TTL (e.g. the
+ * salary cache's 10 minutes), that's up to 10 minutes of a different
+ * instance serving stale data after a legitimate write -- confirmed live
+ * during the Phase 3 rollout. Passing a short `l1TtlMs` (seconds, not
+ * minutes) while keeping a long `ttlMs` for L2 bounds that worst case to
+ * the short window instead, with no loss of L2's cross-instance
+ * cache-hit benefit for the common "many reads, rare writes" case.
+ */
+export async function tieredCacheSet<T>(key: string, data: T, ttlMs: number, l1TtlMs?: number): Promise<void> {
+  cache.set(key, data, l1TtlMs ?? ttlMs);
   void redisCacheSet(key, data, ttlMs);
 }
 

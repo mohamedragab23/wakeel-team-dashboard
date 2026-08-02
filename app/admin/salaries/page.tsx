@@ -104,6 +104,13 @@ export default function AdminSalariesPage() {
   const [editingTx, setEditingTx] = useState<LedgerTransaction | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [editReason, setEditReason] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  // Tracks the transactionId currently being voided so its own row's button
+  // can disable -- prevents a fast double-click from firing two DELETE
+  // requests for the same row before the first response comes back (the
+  // server-side per-transaction lock now rejects the second one anyway, but
+  // disabling here avoids surfacing that as a confusing UI error at all).
+  const [voidingTxId, setVoidingTxId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -171,7 +178,9 @@ export default function AdminSalariesPage() {
   }
 
   async function voidLedgerTx(transactionId: string) {
+    if (voidingTxId) return; // a void is already in flight (for this or another row) -- ignore extra clicks
     if (!confirm('هل تريد حذف (إلغاء) هذه المعاملة؟')) return;
+    setVoidingTxId(transactionId);
     try {
       const res = await authFetch(`/api/admin/payroll/transactions/${transactionId}`, { method: 'DELETE' });
       const data = await res.json();
@@ -180,6 +189,8 @@ export default function AdminSalariesPage() {
       queryClient.invalidateQueries({ queryKey: ['admin', 'salary', selectedSupervisor, startDate, endDate] });
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'خطأ');
+    } finally {
+      setVoidingTxId(null);
     }
   }
 
@@ -191,9 +202,10 @@ export default function AdminSalariesPage() {
 
   async function submitEditTx(e: React.FormEvent) {
     e.preventDefault();
-    if (!editingTx) return;
+    if (!editingTx || editSaving) return;
     const amount = parseFloat(editAmount);
     if (!Number.isFinite(amount) || amount === 0) return;
+    setEditSaving(true);
     try {
       const res = await authFetch(`/api/admin/payroll/transactions/${editingTx.transactionId}`, {
         method: 'PATCH',
@@ -207,6 +219,8 @@ export default function AdminSalariesPage() {
       queryClient.invalidateQueries({ queryKey: ['admin', 'salary', selectedSupervisor, startDate, endDate] });
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'خطأ');
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -471,11 +485,21 @@ export default function AdminSalariesPage() {
                         <td className="py-2 px-3">
                           {t.status === 'active' && t.source === 'ledger_native' && (
                             <div className="flex gap-2">
-                              <button type="button" onClick={() => startEditTx(t)} className="text-blue-600 hover:underline">
+                              <button
+                                type="button"
+                                onClick={() => startEditTx(t)}
+                                disabled={voidingTxId === t.transactionId}
+                                className="text-blue-600 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
                                 تعديل
                               </button>
-                              <button type="button" onClick={() => voidLedgerTx(t.transactionId)} className="text-red-600 hover:underline">
-                                حذف
+                              <button
+                                type="button"
+                                onClick={() => voidLedgerTx(t.transactionId)}
+                                disabled={voidingTxId === t.transactionId}
+                                className="text-red-600 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {voidingTxId === t.transactionId ? '...جاري الحذف' : 'حذف'}
                               </button>
                             </div>
                           )}
@@ -509,10 +533,19 @@ export default function AdminSalariesPage() {
                   />
                 </div>
                 <div className="flex gap-2">
-                  <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium">
-                    حفظ التعديل
+                  <button
+                    type="submit"
+                    disabled={editSaving}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {editSaving ? 'جاري الحفظ...' : 'حفظ التعديل'}
                   </button>
-                  <button type="button" onClick={() => setEditingTx(null)} className="px-4 py-2 bg-gray-200 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setEditingTx(null)}
+                    disabled={editSaving}
+                    className="px-4 py-2 bg-gray-200 rounded-lg disabled:opacity-60"
+                  >
                     إلغاء
                   </button>
                 </div>

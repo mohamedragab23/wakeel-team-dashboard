@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
-import { assertLimitedAdminSupervisorZoneAccess } from '@/lib/adminZoneScope';
+import { assertLimitedAdminSupervisorZoneAccess, assertLimitedAdminRiderZoneAccess } from '@/lib/adminZoneScope';
 import { correctLedgerTransaction, findLedgerTransactionById, voidLedgerTransaction } from '@/lib/payrollLedger';
 import { recordMetric } from '@/lib/telemetry';
 
@@ -36,6 +36,7 @@ function authenticate(request: NextRequest): { ok: true; decoded: Decoded } | { 
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+  const startedAt = Date.now();
   const auth = authenticate(request);
   if (!auth.ok) return auth.response;
   const { decoded } = auth;
@@ -62,6 +63,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (existing.transaction.entityType === 'supervisor') {
       const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded as any, existing.transaction.entityCode);
       if (zoneDeny) return zoneDeny;
+    } else if (existing.transaction.entityType === 'rider') {
+      const zoneDeny = await assertLimitedAdminRiderZoneAccess(decoded as any, existing.transaction.entityCode);
+      if (zoneDeny) return zoneDeny;
     }
 
     const result = await correctLedgerTransaction(
@@ -72,6 +76,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (!result.success) {
       return NextResponse.json({ success: false, error: result.error }, { status: 400 });
     }
+    void recordMetric({ feature: 'payroll_ledger', metric: 'exec_ms', value: Date.now() - startedAt, tags: { op: 'correct' } });
     return NextResponse.json({ success: true, original: result.original, corrected: result.corrected });
   } catch (error: any) {
     void recordMetric({ feature: 'payroll_ledger', metric: 'api_failure' });
@@ -81,6 +86,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+  const startedAt = Date.now();
   const auth = authenticate(request);
   if (!auth.ok) return auth.response;
   const { decoded } = auth;
@@ -101,12 +107,16 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     if (existing.transaction.entityType === 'supervisor') {
       const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded as any, existing.transaction.entityCode);
       if (zoneDeny) return zoneDeny;
+    } else if (existing.transaction.entityType === 'rider') {
+      const zoneDeny = await assertLimitedAdminRiderZoneAccess(decoded as any, existing.transaction.entityCode);
+      if (zoneDeny) return zoneDeny;
     }
 
     const result = await voidLedgerTransaction(transactionId, { code: decoded.code || '', name: decoded.name || '' });
     if (!result.success) {
       return NextResponse.json({ success: false, error: result.error }, { status: 400 });
     }
+    void recordMetric({ feature: 'payroll_ledger', metric: 'exec_ms', value: Date.now() - startedAt, tags: { op: 'void' } });
     return NextResponse.json({ success: true, transaction: result.transaction });
   } catch (error: any) {
     void recordMetric({ feature: 'payroll_ledger', metric: 'api_failure' });

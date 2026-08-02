@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
-import { assertLimitedAdminSupervisorZoneAccess } from '@/lib/adminZoneScope';
+import { assertLimitedAdminSupervisorZoneAccess, assertLimitedAdminRiderZoneAccess } from '@/lib/adminZoneScope';
 import { getAllSupervisors, getAllRiders } from '@/lib/adminService';
 import {
   appendLedgerTransaction,
@@ -59,6 +59,7 @@ async function resolveEntityNameSnapshot(entityType: LedgerEntityType, entityCod
 }
 
 export async function GET(request: NextRequest) {
+  const startedAt = Date.now();
   const auth = authenticate(request);
   if (!auth.ok) return auth.response;
   const { decoded } = auth;
@@ -68,6 +69,11 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const entityCode = searchParams.get('entityCode')?.trim() || undefined;
   const period = searchParams.get('period')?.trim() || undefined;
+  // Optional, additive: absent (the only value every existing caller sends
+  // today) preserves the exact prior behavior of always scope-checking
+  // `entityCode` as a supervisor code. Only used to pick the correct
+  // zone-scope check below when a future/rider-aware caller passes it.
+  const entityTypeParam = searchParams.get('entityType')?.trim();
 
   // Capability check -- no filters given, works regardless of flag state (mirrors Phase 1/2's pattern).
   if (!entityCode && !period) {
@@ -79,12 +85,16 @@ export async function GET(request: NextRequest) {
   }
 
   if (entityCode) {
-    const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded as any, entityCode);
+    const zoneDeny =
+      entityTypeParam === 'rider'
+        ? await assertLimitedAdminRiderZoneAccess(decoded as any, entityCode)
+        : await assertLimitedAdminSupervisorZoneAccess(decoded as any, entityCode);
     if (zoneDeny) return zoneDeny;
   }
 
   try {
     const transactions = await getLedgerTransactions({ entityCode, period });
+    void recordMetric({ feature: 'payroll_ledger', metric: 'exec_ms', value: Date.now() - startedAt, tags: { op: 'list' } });
     return NextResponse.json({ success: true, transactions });
   } catch (error: any) {
     void recordMetric({ feature: 'payroll_ledger', metric: 'api_failure' });
@@ -132,6 +142,9 @@ export async function POST(request: NextRequest) {
 
     if (entityType === 'supervisor') {
       const zoneDeny = await assertLimitedAdminSupervisorZoneAccess(decoded as any, entityCode);
+      if (zoneDeny) return zoneDeny;
+    } else if (entityType === 'rider') {
+      const zoneDeny = await assertLimitedAdminRiderZoneAccess(decoded as any, entityCode);
       if (zoneDeny) return zoneDeny;
     }
 

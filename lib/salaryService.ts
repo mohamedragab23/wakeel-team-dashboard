@@ -731,8 +731,16 @@ export async function calculateSupervisorSalary(
   const periodStart = startDate.toISOString().split('T')[0];
   const periodEnd = endDate.toISOString().split('T')[0];
   const salaryCacheKey = CACHE_KEYS.salaryCalculation(supervisorCode, periodStart, periodEnd);
-  const SALARY_TTL_MS = 10 * 60 * 1000;
-  const cachedSalary = await tieredCacheGet(salaryCacheKey, SALARY_TTL_MS);
+  const SALARY_TTL_MS = 10 * 60 * 1000; // L2 (Redis, shared across all instances)
+  // L1 (per-warm-instance memory) intentionally much shorter than L2 -- see
+  // `tieredCacheSet`'s `l1TtlMs` doc comment. Bounds the worst-case window
+  // where a *different* serverless instance can serve a pre-invalidation
+  // salary figure (e.g. right after a Payroll Ledger bonus/deduction/void)
+  // to ~20s instead of up to the full 10-minute L2 TTL, while still avoiding
+  // a Redis round-trip for the common case of the same instance handling
+  // several requests for the same supervisor+period within a short window.
+  const SALARY_L1_TTL_MS = 20 * 1000;
+  const cachedSalary = await tieredCacheGet(salaryCacheKey, SALARY_L1_TTL_MS);
   if (cachedSalary) {
     return cachedSalary;
   }
@@ -1029,7 +1037,7 @@ export async function calculateSupervisorSalary(
       ...(ledgerTransactionsForResult ? { ledgerTransactions: ledgerTransactionsForResult } : {}),
     };
 
-    await tieredCacheSet(salaryCacheKey, salaryResult, SALARY_TTL_MS);
+    await tieredCacheSet(salaryCacheKey, salaryResult, SALARY_TTL_MS, SALARY_L1_TTL_MS);
     return salaryResult;
   } catch (error) {
     console.error('Error calculating supervisor salary:', error);

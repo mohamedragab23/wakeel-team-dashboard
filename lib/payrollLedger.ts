@@ -15,6 +15,7 @@
 import { appendToSheet, ensureSheetExists, getSheetData, updateSheetRange } from '@/lib/googleSheets';
 import { appendAuditLog } from '@/lib/auditLog';
 import { recordMetric } from '@/lib/telemetry';
+import { redisSetNx, redisDel, isUpstashConfigured } from '@/lib/upstashRest';
 
 export const PAYROLL_LEDGER_SHEET_NAME = 'سجل_المعاملات_المالية';
 
@@ -197,6 +198,15 @@ export async function appendLedgerTransaction(params: {
       actorCode: transaction.createdBy,
       actorName: transaction.createdByName,
       after: transaction,
+    }).catch((err) => {
+      // Fire-and-forget by design (must never block/fail the caller whose
+      // financial write already succeeded), but an unhandled rejection here
+      // would otherwise (a) surface as a silent audit gap -- we'd have no
+      // record the log write failed -- and (b) on some Node/edge runtimes,
+      // an unhandled promise rejection can crash the process. Always log so
+      // the failure is at least visible in server logs.
+      console.error('[payrollLedger] appendAuditLog(create_transaction) failed:', err);
+      void recordMetric({ feature: 'audit_log', metric: 'api_failure', tags: { action: 'create_transaction' } });
     });
   }
 
@@ -245,8 +255,51 @@ async function setStatusCell(rowNumber: number, status: LedgerStatus): Promise<b
   return updateSheetRange(PAYROLL_LEDGER_SHEET_NAME, `L${rowNumber}:L${rowNumber}`, [[status]]);
 }
 
+const MUTATION_LOCK_PREFIX = 'payrollledger:lock:';
+const MUTATION_LOCK_TTL_SECONDS = 15;
+
+/**
+ * `voidLedgerTransaction`/`correctLedgerTransaction` are both read-then-write
+ * (`findLedgerTransactionById` then `setStatusCell`) with no atomic
+ * compare-and-swap in Google Sheets. Without a lock, two near-simultaneous
+ * requests for the *same* transactionId (an accidental UI double-submit, or
+ * two admins acting on the same row at once) could both read `status:
+ * 'active'` before either write lands, and both proceed -- e.g. two
+ * concurrent corrections would each append their own replacement row from
+ * the same original, double-counting the correction in the salary sum.
+ * Guards against that with a short-lived, per-transactionId Redis lock
+ * (fails open if Redis isn't configured, consistent with every other
+ * optional-Redis usage in this codebase -- correctness here is
+ * best-effort, not a hard guarantee, since this is a low-volume admin
+ * action rather than a hot path).
+ */
+async function withLedgerMutationLock<T>(transactionId: string, fn: () => Promise<T>): Promise<T> {
+  if (!isUpstashConfigured()) return fn();
+  const lockKey = MUTATION_LOCK_PREFIX + transactionId;
+  const gotLock = await redisSetNx(lockKey, '1', MUTATION_LOCK_TTL_SECONDS);
+  if (!gotLock) {
+    throw new Error('معاملة أخرى قيد التنفيذ على نفس السجل، حاول مرة أخرى بعد لحظات');
+  }
+  try {
+    return await fn();
+  } finally {
+    await redisDel(lockKey);
+  }
+}
+
 /** "Delete" — sets `status=voided` on that row only. No new row, no raw sheet-row deletion, ever. */
 export async function voidLedgerTransaction(
+  transactionId: string,
+  actor: { code: string; name: string }
+): Promise<{ success: true; transaction: LedgerTransaction } | { success: false; error: string }> {
+  try {
+    return await withLedgerMutationLock(transactionId, () => voidLedgerTransactionInner(transactionId, actor));
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'تعذر تنفيذ العملية' };
+  }
+}
+
+async function voidLedgerTransactionInner(
   transactionId: string,
   actor: { code: string; name: string }
 ): Promise<{ success: true; transaction: LedgerTransaction } | { success: false; error: string }> {
@@ -267,6 +320,9 @@ export async function voidLedgerTransaction(
     actorName: actor.name,
     before: found.transaction,
     after: { ...found.transaction, status: 'voided' },
+  }).catch((err) => {
+    console.error('[payrollLedger] appendAuditLog(void_transaction) failed:', err);
+    void recordMetric({ feature: 'audit_log', metric: 'api_failure', tags: { action: 'void_transaction' } });
   });
 
   return { success: true, transaction: { ...found.transaction, status: 'voided' } };
@@ -286,6 +342,23 @@ export async function correctLedgerTransaction(
   | { success: true; original: LedgerTransaction; corrected: LedgerTransaction }
   | { success: false; error: string }
 > {
+  try {
+    return await withLedgerMutationLock(transactionId, () =>
+      correctLedgerTransactionInner(transactionId, updates, actor)
+    );
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'تعذر تنفيذ العملية' };
+  }
+}
+
+async function correctLedgerTransactionInner(
+  transactionId: string,
+  updates: { amount: number; reason: string },
+  actor: { code: string; name: string }
+): Promise<
+  | { success: true; original: LedgerTransaction; corrected: LedgerTransaction }
+  | { success: false; error: string }
+> {
   const found = await findLedgerTransactionById(transactionId);
   if (!found) return { success: false, error: 'المعاملة غير موجودة' };
   if (found.transaction.status !== 'active') {
@@ -295,20 +368,47 @@ export async function correctLedgerTransaction(
   const ok = await setStatusCell(found.rowNumber, 'corrected');
   if (!ok) return { success: false, error: 'تعذر تحديث حالة المعاملة الأصلية' };
 
-  const corrected = await appendLedgerTransaction({
-    entityType: found.transaction.entityType,
-    entityCode: found.transaction.entityCode,
-    entityNameSnapshot: found.transaction.entityNameSnapshot,
-    type: found.transaction.type,
-    rawAmount: updates.amount,
-    reason: updates.reason || found.transaction.reason,
-    period: found.transaction.period,
-    createdBy: actor.code,
-    createdByName: actor.name,
-    source: 'ledger_native',
-    correctsTransactionId: found.transaction.transactionId,
-    skipCreateAudit: true,
-  });
+  // From here on, the original row is already flipped to `corrected` (and so
+  // excluded from every sum). If appending the replacement "active" row below
+  // throws (Sheets write failure, quota, network blip, etc.) *without* any
+  // compensation, the correction would be permanently lost mid-flight: the
+  // original amount silently disappears from the ledger with nothing to
+  // replace it -- a real orphan-data / money-vanishes bug, not just a failed
+  // request. Guard against that by rolling the original row's status back to
+  // `active` if the replacement append fails, so the two-step "flip + append"
+  // behaves atomically from the caller's point of view: either both steps
+  // land, or neither does.
+  let corrected: LedgerTransaction;
+  try {
+    corrected = await appendLedgerTransaction({
+      entityType: found.transaction.entityType,
+      entityCode: found.transaction.entityCode,
+      entityNameSnapshot: found.transaction.entityNameSnapshot,
+      type: found.transaction.type,
+      rawAmount: updates.amount,
+      reason: updates.reason || found.transaction.reason,
+      period: found.transaction.period,
+      createdBy: actor.code,
+      createdByName: actor.name,
+      source: 'ledger_native',
+      correctsTransactionId: found.transaction.transactionId,
+      skipCreateAudit: true,
+    });
+  } catch (err) {
+    const rolledBack = await setStatusCell(found.rowNumber, 'active').catch(() => false);
+    console.error(
+      `[payrollLedger] correctLedgerTransaction: replacement append failed after flipping ${found.transaction.transactionId} to 'corrected'. ` +
+        `Rollback to 'active' ${rolledBack ? 'succeeded' : 'FAILED -- manual Sheets fix required for this row'}.`,
+      err
+    );
+    void recordMetric({ feature: 'payroll_ledger', metric: 'api_failure', tags: { source: 'correct_rollback' } });
+    return {
+      success: false,
+      error: rolledBack
+        ? 'تعذر إتمام التعديل، تم التراجع تلقائيًا والمعاملة الأصلية ما زالت سارية. حاول مرة أخرى'
+        : 'تعذر إتمام التعديل وفشل التراجع التلقائي أيضًا. راجع الدعم الفني فورًا قبل أي محاولة أخرى',
+    };
+  }
 
   const original = { ...found.transaction, status: 'corrected' as LedgerStatus };
 
@@ -321,6 +421,9 @@ export async function correctLedgerTransaction(
     actorName: actor.name,
     before: original,
     after: corrected,
+  }).catch((err) => {
+    console.error('[payrollLedger] appendAuditLog(correct_transaction) failed:', err);
+    void recordMetric({ feature: 'audit_log', metric: 'api_failure', tags: { action: 'correct_transaction' } });
   });
 
   return { success: true, original, corrected };

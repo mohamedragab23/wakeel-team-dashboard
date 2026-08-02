@@ -58,9 +58,21 @@ export async function withRoosterQueue<T>(
       // Redis error mid-acquire -- fail-open, proceed without a slot.
       break;
     }
-    if (count === 1) {
-      void redisExpire(QUEUE_KEY, SAFETY_TTL_SECONDS);
-    }
+    // Refresh the safety TTL on every increment (not just when count first
+    // becomes 1). Under sustained overlapping traffic the counter can stay
+    // above 0 for longer than SAFETY_TTL_SECONDS; if the TTL were only set
+    // once at creation, Redis would expire the *entire key* out from under
+    // genuinely-active holders, and the next INCR would silently restart the
+    // counter at 1 instead of reflecting the real concurrent count. Any
+    // in-flight holder's later DECR would then drive the fresh counter
+    // negative, permanently corrupting the semaphore (future INCRs would
+    // read an artificially low count and let more than `max` callers through
+    // at once, defeating the whole point of the queue). Refreshing every
+    // time is a cheap, sliding-window TTL: the key only actually expires
+    // after SAFETY_TTL_SECONDS of complete inactivity, which is exactly the
+    // "process crashed without releasing its slot" case this is meant to
+    // guard against.
+    void redisExpire(QUEUE_KEY, SAFETY_TTL_SECONDS);
     if (count <= max) {
       holdingSlot = true;
       break;

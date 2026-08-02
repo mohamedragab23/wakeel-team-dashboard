@@ -4,7 +4,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getAllSupervisors } from '@/lib/adminService';
+import { getAllSupervisors, getAllRiders } from '@/lib/adminService';
 import { parseAdminAllowedZonesList, supervisorZonesOverlapAllowed } from '@/lib/zones';
 import {
   isLimitedAdminDataScopeActive,
@@ -117,6 +117,41 @@ export async function assertLimitedAdminSupervisorZoneAccess(
     );
   }
   return null;
+}
+
+/**
+ * Rider-scoped equivalent of `assertLimitedAdminSupervisorZoneAccess` --
+ * every existing zone/tree scope check in this file is keyed off a
+ * *supervisor* code because that's what all pre-SRS-013 admin endpoints
+ * operate on. SRS-013 Phase 3's Payroll Ledger is the first endpoint that
+ * can also target a rider directly (`entityType: 'rider'`); without this,
+ * a limited-zone admin could create/correct/void ledger transactions for
+ * *any* rider system-wide (a genuine cross-zone permission leak), even
+ * though the exact same admin is correctly blocked from doing so for
+ * supervisors. Resolves the rider's owning `supervisorCode` and reuses the
+ * existing supervisor-scope check against it -- no new scoping model
+ * needed, riders inherit their supervisor's zone for this purpose.
+ */
+export async function assertLimitedAdminRiderZoneAccess(
+  decoded: AdminDataScopeJwt,
+  riderCode: string
+): Promise<NextResponse | null> {
+  if (!isLimitedAdminDataScopeActive(decoded)) return null;
+  const code = String(riderCode ?? '').trim();
+  if (!code) {
+    return NextResponse.json({ success: false, error: 'كود المندوب مطلوب' }, { status: 400 });
+  }
+  const riders = await getAllRiders(false);
+  const rider = riders.find((r) => String(r.code ?? '').trim() === code);
+  if (!rider || !rider.supervisorCode) {
+    // Unknown rider or no supervisor link -- deny by default for a
+    // scoped admin rather than silently allowing an unscoped write.
+    return NextResponse.json(
+      { success: false, error: 'لا يمكن تحديد نطاق هذا المندوب' },
+      { status: 403 }
+    );
+  }
+  return assertLimitedAdminSupervisorZoneAccess(decoded, rider.supervisorCode);
 }
 
 export async function filterSupervisorsForAdminDataScope<T extends { code?: string; region?: string }>(
