@@ -160,7 +160,23 @@ export async function POST(request: NextRequest) {
     } catch (e: any) {
       void recordMetric({ feature: 'shift_import', metric: 'api_failure' });
       console.error('[api/rooster/shifts/import] RoosterClient.exportShiftsCsv failed:', e);
-      return NextResponse.json({ success: false, error: 'تعذر الاتصال بروستر لاستيراد الشفتات، حاول مرة أخرى' }, { status: 502 });
+      // Surfaced to the (internal, authenticated-only) dashboard on purpose: the
+      // generic Arabic message alone was hiding exactly *which* auth-recovery
+      // layer/step failed (e.g. `layer3:otp_email_timeout` vs
+      // `layer3:unexpectedly_hit_login_form` vs `mint_failed_after_full_recovery`)
+      // -- without this, diagnosing a live failure required raw Vercel function
+      // logs, which aren't reachable from here. `detail` carries the raw
+      // `Error.message` (already just a short structured reason string, no
+      // secrets -- see authRefresh.ts/engine.ts, which never put credentials or
+      // tokens into error messages).
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'تعذر الاتصال بروستر لاستيراد الشفتات، حاول مرة أخرى',
+          detail: e?.message || String(e),
+        },
+        { status: 502 }
+      );
     }
 
     const analyzed = await analyzeLegacyShifts({

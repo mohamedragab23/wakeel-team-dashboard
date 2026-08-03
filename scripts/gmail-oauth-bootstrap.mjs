@@ -105,11 +105,20 @@ async function main() {
   console.log(`GMAIL_OAUTH_CLIENT_SECRET=${clientSecret}`);
   console.log(`GMAIL_OAUTH_REFRESH_TOKEN=${tokens.refresh_token}`);
   console.log('\nAlso add the same three to your local .env.local for testing.');
-  console.log('\nThis refresh_token does not expire from mere time passing, but Google may invalidate it if:');
-  console.log('- you revoke access manually,');
-  console.log('- the OAuth consent screen stays in "Testing" mode for >7 days without any use (the recovery');
-  console.log('  engine will exercise it periodically, which resets this clock), or');
-  console.log('- you change the requested scopes later (would need a fresh consent).');
+  console.log('\n⚠️  IMPORTANT — while the OAuth consent screen is in "Testing" publishing status (Google Cloud');
+  console.log('   Console → APIs & Services → OAuth consent screen), Google HARD-EXPIRES this refresh_token');
+  console.log('   exactly 7 days after this consent, no matter how often it is used in between — periodic use');
+  console.log('   does NOT reset this clock (confirmed against Google\'s own docs: "Authorizations by a test');
+  console.log('   user will expire seven days from the time of consent"). You will need to re-run this script');
+  console.log('   every ~7 days (repeat the Vercel env var update each time) until either:');
+  console.log('   - the app\'s Publishing status is changed to "In production" (for the gmail.readonly scope,');
+  console.log('     this requires completing Google\'s OAuth verification review), or');
+  console.log('   - a different long-lived approach is used instead (e.g. a Workspace service account with');
+  console.log('     domain-wide delegation — not applicable to a personal @gmail.com inbox like this one).');
+  console.log('\nOutside Testing mode (or for the exceptions Google documents — see');
+  console.log('developers.google.com/identity/protocols/oauth2#expiration), this refresh_token also stops');
+  console.log('working if you revoke access manually, go unused for 6 months, change your Google password,');
+  console.log('or request different scopes later (needs fresh consent).');
 }
 
 main().catch((e) => {

@@ -54,6 +54,37 @@ function extractOtpCode(message: gmail_v1.Schema$Message): string | null {
 export type OtpWaitResult = { success: true; code: string } | { success: false; reason: string };
 
 /**
+ * Confirmed live (2026-08-03, exactly 7 days after the initial
+ * `gmail-oauth-bootstrap.mjs` consent on 2026-07-27): while the Google
+ * Cloud OAuth consent screen stays in "Testing" publishing status, Google
+ * hard-expires the `GMAIL_OAUTH_REFRESH_TOKEN` exactly 7 days after
+ * consent — regardless of how often it's used in between (contrary to
+ * `gmail-oauth-bootstrap.mjs`'s original, incorrect comment claiming
+ * periodic use "resets this clock"; Google's own docs say "Authorizations
+ * by a test user will expire seven days from the time of consent", full
+ * stop). This shows up as a generic `invalid_grant` from `googleapis` —
+ * detected here so the failure reason that eventually reaches the
+ * dashboard (`app/api/rooster/shifts/import`'s `detail` field) is
+ * immediately actionable instead of a cryptic Gmail API error string.
+ */
+export function describeGmailAuthError(err: any): string {
+  const raw = String(err?.message || err || '');
+  const looksLikeExpiredOrRevokedGrant =
+    /invalid_grant/i.test(raw) ||
+    /Token has been expired or revoked/i.test(raw) ||
+    /invalid_client/i.test(raw);
+  if (looksLikeExpiredOrRevokedGrant) {
+    return (
+      `gmail_oauth_token_expired_or_revoked (${raw}) — most likely Google's 7-day Testing-mode refresh-token ` +
+      'expiry (see scripts/gmail-oauth-bootstrap.mjs). Fix: re-run `node scripts/gmail-oauth-bootstrap.mjs` ' +
+      'locally and update GMAIL_OAUTH_REFRESH_TOKEN in Vercel (Production env); to stop this recurring every ' +
+      '~7 days, publish the OAuth consent screen to production in Google Cloud Console.'
+    );
+  }
+  return `gmail_api_error: ${raw}`;
+}
+
+/**
  * Polls Gmail for the OTP email that should arrive shortly after
  * `oktaAuthnClient.triggerEmailFactorSend` is called. Bounded by
  * `timeoutMs` (default 90s) with `pollIntervalMs` between checks
@@ -99,8 +130,9 @@ export async function waitForOktaOtpEmail(params: {
         logStructured('warn', 'rooster_gmail_otp_message_no_code', { messageId: m.id });
       }
     } catch (err: any) {
-      logStructured('error', 'rooster_gmail_otp_poll_error', { error: err?.message || String(err) });
-      return { success: false, reason: `gmail_api_error: ${err?.message || String(err)}` };
+      const reason = describeGmailAuthError(err);
+      logStructured('error', 'rooster_gmail_otp_poll_error', { error: err?.message || String(err), reason });
+      return { success: false, reason };
     }
 
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));

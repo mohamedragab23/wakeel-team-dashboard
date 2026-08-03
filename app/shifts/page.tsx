@@ -254,7 +254,12 @@ export default function ShiftsPage() {
       });
       const data = await res.json();
       if (!data.success) {
-        setMessage({ type: 'err', text: data.error || 'فشل الاستيراد التلقائي' });
+        // `data.detail` (when present) is the raw auth-recovery failure reason
+        // (e.g. "layer3:otp_email_timeout") -- shown alongside the friendly
+        // Arabic message so a failure can be diagnosed straight from this
+        // screen, without needing server logs.
+        const text = data.detail ? `${data.error || 'فشل الاستيراد التلقائي'} — (${data.detail})` : data.error || 'فشل الاستيراد التلقائي';
+        setMessage({ type: 'err', text });
         return;
       }
       applyAnalyzedResult(data, `تم الاستيراد التلقائي من Rooster (${autoImportZone}) بدون رفع ملفات — مطابق لنفس منطق التحليل.`);
