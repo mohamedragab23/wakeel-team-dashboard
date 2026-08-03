@@ -16,6 +16,7 @@
     "test:trust": "npx --yes tsx --test lib/strategicOps/trust/trustScoreEngine.test.ts lib/strategicOps/audit/kpiLineage.test.ts lib/strategicOps/systemHealth/healthMonitor.test.ts lib/strategicOps/trust/srs006Phase2.test.ts",
     "test:digital-twin": "npx --yes tsx --test lib/strategicOps/digitalTwin/scenarioEngine.test.ts lib/strategicOps/digitalTwin/srs007Phase2.test.ts",
     "test:ops-validation": "npx --yes tsx --test lib/strategicOps/opsValidation/opsValidation.test.ts",
+    "test:rooster-recovery-lock": "npx --yes tsx --test lib/roosterLive/authRecovery/recoveryLock.test.ts",
     "test:enterprise-cert": "npx --yes tsx --test lib/strategicOps/enterpriseCert/enterpriseCert.test.ts",
     "cert:enterprise-gate": "npx --yes tsx scripts/enterprise-cert-gate.ts",
     "migrate:simulation": "npx --yes tsx scripts/migrate-simulation-scenarios.ts",

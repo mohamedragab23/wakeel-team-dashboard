@@ -39,6 +39,14 @@ import {
   getRoosterOktaSession,
 } from '@/lib/roosterLive/tokenProvider';
 import { isFullAuthRecoveryConfigured, recoverRoosterAuthFully } from '@/lib/roosterLive/authRecovery/engine';
+import {
+  acquireFullRecoveryLock,
+  releaseFullRecoveryLock,
+  isFullRecoveryCoolingDown,
+  startFullRecoveryCooldown,
+  cacheFullRecoveryOutcome,
+  waitForCachedFullRecoveryOutcome,
+} from '@/lib/roosterLive/authRecovery/recoveryLock';
 
 export type SmartRefreshOutcome = {
   headers: Record<string, string> | null;
@@ -149,6 +157,105 @@ export async function mintDhhTokenViaOkta(
 }
 
 /**
+ * Runs Layer 3 (`recoverRoosterAuthFully` — full Okta login + Gmail-OTP)
+ * behind a cross-instance single-flight lock + post-attempt cool-down (see
+ * `recoveryLock.ts` for the full "why" — this is the fix for the live
+ * "keeps logging in over and over, codes arrive but it never logs in" bug).
+ *
+ * Only ever called after Layers 1+2 have both already failed for `layer2Reason`.
+ */
+async function runGuardedFullRecovery(
+  currentHeaders: Record<string, string>,
+  layer2Reason: string
+): Promise<SmartRefreshOutcome> {
+  const cooldown = await isFullRecoveryCoolingDown();
+  if (cooldown.cooling) {
+    logStructured('warn', 'rooster_full_recovery_cooldown_active', {
+      message: 'Skipping Layer 3 — a full recovery attempt just ran; avoiding back-to-back Okta logins.',
+      retryAfterMs: cooldown.retryAfterMs,
+    });
+    return {
+      headers: null,
+      healedViaDeepSessionRefresh: false,
+      healedViaFullRecovery: false,
+      failureReason: `layer2:${layer2Reason};layer3:cooldown_active_after_recent_attempt`,
+    };
+  }
+
+  const gotLock = await acquireFullRecoveryLock();
+  if (!gotLock) {
+    logStructured('warn', 'rooster_full_recovery_already_in_progress', {
+      message: 'Another instance/request is already running Layer 3 — waiting for its result instead of starting a second, racing Okta login.',
+    });
+    const reused = await waitForCachedFullRecoveryOutcome<SmartRefreshOutcome>();
+    if (reused) {
+      logStructured('info', 'rooster_full_recovery_reused_inflight_result', {
+        healedViaFullRecovery: !!reused.healedViaFullRecovery,
+      });
+      return reused;
+    }
+    return {
+      headers: null,
+      healedViaDeepSessionRefresh: false,
+      healedViaFullRecovery: false,
+      failureReason: `layer2:${layer2Reason};layer3:already_in_progress_elsewhere_timed_out_waiting`,
+    };
+  }
+
+  try {
+    const fullRecovery = await recoverRoosterAuthFully();
+    if (!fullRecovery.success) {
+      logStructured('error', 'rooster_live_full_recovery_failed', { reason: fullRecovery.reason });
+      const outcome: SmartRefreshOutcome = {
+        headers: null,
+        healedViaDeepSessionRefresh: false,
+        healedViaFullRecovery: false,
+        failureReason: `layer2:${layer2Reason};layer3:${fullRecovery.reason}`,
+      };
+      await startFullRecoveryCooldown();
+      await cacheFullRecoveryOutcome(outcome);
+      return outcome;
+    }
+
+    const stableFullyRecoveredCookie = extractStableRoosterCookies(fullRecovery.appCookieHeader);
+    const retryHeadersAfterFull: Record<string, string> = { ...currentHeaders, Cookie: stableFullyRecoveredCookie };
+    delete (retryHeadersAfterFull as any).cookie;
+
+    const mintedAfterFullRecovery = await mintDhhTokenViaOkta(retryHeadersAfterFull);
+    if (!mintedAfterFullRecovery) {
+      logStructured('error', 'rooster_live_full_recovery_mint_failed', {
+        message: 'Full recovery succeeded but dhh_token mint still failed afterwards — unexpected.',
+      });
+      const outcome: SmartRefreshOutcome = {
+        headers: null,
+        healedViaDeepSessionRefresh: false,
+        healedViaFullRecovery: false,
+        failureReason: 'mint_failed_after_full_recovery',
+      };
+      await startFullRecoveryCooldown();
+      await cacheFullRecoveryOutcome(outcome);
+      return outcome;
+    }
+
+    void setRoosterExportHeadersInSheet(stableFullyRecoveredCookie).catch(() => {});
+
+    logStructured('info', 'rooster_live_full_recovery_ok', {
+      message: 'Recovered from a fully-dead Okta SSO session automatically via login + Gmail OTP — zero human involvement.',
+    });
+
+    const outcome: SmartRefreshOutcome = {
+      headers: mintedAfterFullRecovery,
+      healedViaDeepSessionRefresh: false,
+      healedViaFullRecovery: true,
+    };
+    await cacheFullRecoveryOutcome(outcome);
+    return outcome;
+  } finally {
+    await releaseFullRecoveryLock();
+  }
+}
+
+/**
  * Full self-heal: try the cheap dhh_token mint first; if CF_Authorization
  * itself is dead, replay the silent Cloudflare Access session refresh, then
  * retry the mint, then persist the recovered cookie back to the Sheet so
@@ -198,41 +305,7 @@ export async function smartRefreshRoosterAuth(
       };
     }
 
-    const fullRecovery = await recoverRoosterAuthFully();
-    if (!fullRecovery.success) {
-      logStructured('error', 'rooster_live_full_recovery_failed', { reason: fullRecovery.reason });
-      return {
-        headers: null,
-        healedViaDeepSessionRefresh: false,
-        healedViaFullRecovery: false,
-        failureReason: `layer2:${sessionResult.reason};layer3:${fullRecovery.reason}`,
-      };
-    }
-
-    const stableFullyRecoveredCookie = extractStableRoosterCookies(fullRecovery.appCookieHeader);
-    const retryHeadersAfterFull: Record<string, string> = { ...currentHeaders, Cookie: stableFullyRecoveredCookie };
-    delete (retryHeadersAfterFull as any).cookie;
-
-    const mintedAfterFullRecovery = await mintDhhTokenViaOkta(retryHeadersAfterFull);
-    if (!mintedAfterFullRecovery) {
-      logStructured('error', 'rooster_live_full_recovery_mint_failed', {
-        message: 'Full recovery succeeded but dhh_token mint still failed afterwards — unexpected.',
-      });
-      return {
-        headers: null,
-        healedViaDeepSessionRefresh: false,
-        healedViaFullRecovery: false,
-        failureReason: 'mint_failed_after_full_recovery',
-      };
-    }
-
-    void setRoosterExportHeadersInSheet(stableFullyRecoveredCookie).catch(() => {});
-
-    logStructured('info', 'rooster_live_full_recovery_ok', {
-      message: 'Recovered from a fully-dead Okta SSO session automatically via login + Gmail OTP — zero human involvement.',
-    });
-
-    return { headers: mintedAfterFullRecovery, healedViaDeepSessionRefresh: false, healedViaFullRecovery: true };
+    return runGuardedFullRecovery(currentHeaders, sessionResult.reason);
   }
 
   const stableRefreshedCookie = extractStableRoosterCookies(sessionResult.appCookieHeader);
