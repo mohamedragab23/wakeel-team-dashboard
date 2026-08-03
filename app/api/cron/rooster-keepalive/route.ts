@@ -4,6 +4,7 @@ import { getRoosterLiveHeaders, getRoosterServiceTokenHeaders } from '@/lib/roos
 import { smartRefreshRoosterAuth } from '@/lib/roosterLive/authRefresh';
 import { logStructured } from '@/lib/requestTrace';
 import { sendAdminTelegramNotificationSafe } from '@/lib/adminTelegramNotifier';
+import { ROOSTER_AUTO_SYNC_PAUSED, ROOSTER_AUTO_SYNC_PAUSE_REASON } from '@/lib/roosterLive/autoSyncPause';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +33,11 @@ export async function GET(req: NextRequest) {
   if (getRoosterServiceTokenHeaders()) {
     // Service Token auth never expires — nothing to keep alive.
     return NextResponse.json({ success: true, skipped: true, reason: 'service_token_configured' });
+  }
+
+  if (ROOSTER_AUTO_SYNC_PAUSED) {
+    logStructured('info', 'rooster_keepalive_paused', { reason: ROOSTER_AUTO_SYNC_PAUSE_REASON });
+    return NextResponse.json({ success: true, skipped: true, reason: ROOSTER_AUTO_SYNC_PAUSE_REASON });
   }
 
   try {

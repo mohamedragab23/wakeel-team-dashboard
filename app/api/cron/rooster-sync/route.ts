@@ -4,6 +4,7 @@ import { exportRoosterCsv, resolveFreshRoosterExportHeaders, buildDefaultExportR
 import { notifySupervisorsShiftSummary } from '@/lib/supervisorNotifier';
 import { isCronAuthorized } from '@/lib/cronAuth';
 import { logStructured } from '@/lib/requestTrace';
+import { ROOSTER_AUTO_SYNC_PAUSED, ROOSTER_AUTO_SYNC_PAUSE_REASON } from '@/lib/roosterLive/autoSyncPause';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +13,11 @@ export async function GET(req: NextRequest) {
     if (!isCronAuthorized(req)) {
       logStructured('warn', 'cron_unauthorized', { route: 'rooster-sync' });
       return NextResponse.json({ success: false, error: 'Unauthorized cron' }, { status: 401 });
+    }
+
+    if (ROOSTER_AUTO_SYNC_PAUSED) {
+      logStructured('info', 'rooster_sync_paused', { reason: ROOSTER_AUTO_SYNC_PAUSE_REASON });
+      return NextResponse.json({ success: true, skipped: true, reason: ROOSTER_AUTO_SYNC_PAUSE_REASON });
     }
 
     const cityLabel = (process.env.ROOSTER_CITY || 'Alexandria').trim();

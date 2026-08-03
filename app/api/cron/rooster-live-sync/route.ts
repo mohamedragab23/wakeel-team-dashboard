@@ -3,6 +3,7 @@ import { isCronAuthorized } from '@/lib/cronAuth';
 import { runRoosterLiveSync } from '@/lib/roosterLive/syncService';
 import { logStructured } from '@/lib/requestTrace';
 import { sendAdminTelegramNotificationSafe } from '@/lib/adminTelegramNotifier';
+import { ROOSTER_AUTO_SYNC_PAUSED, ROOSTER_AUTO_SYNC_PAUSE_REASON } from '@/lib/roosterLive/autoSyncPause';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +33,11 @@ export async function GET(req: NextRequest) {
   if (!isCronAuthorized(req)) {
     logStructured('warn', 'cron_unauthorized', { route: 'rooster-live-sync' });
     return NextResponse.json({ success: false, error: 'Unauthorized cron' }, { status: 401 });
+  }
+
+  if (ROOSTER_AUTO_SYNC_PAUSED) {
+    logStructured('info', 'rooster_live_sync_paused', { reason: ROOSTER_AUTO_SYNC_PAUSE_REASON });
+    return NextResponse.json({ success: true, skipped: true, reason: ROOSTER_AUTO_SYNC_PAUSE_REASON });
   }
 
   const result = await runRoosterLiveSync();
