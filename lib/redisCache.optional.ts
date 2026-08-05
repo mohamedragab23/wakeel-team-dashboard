@@ -56,10 +56,13 @@ async function redisCommand(path: string, init?: RequestInit): Promise<Response 
 export async function redisCacheGet<T>(key: string): Promise<T | null> {
   const res = await redisCommand(`/get/${encodeURIComponent(key)}`);
   if (!res?.ok) return null;
-  const body = (await res.json()) as { result?: string | null };
-  if (!body.result) return null;
+  const body = (await res.json()) as { result?: string | object | null };
+  if (body.result == null || body.result === '') return null;
   try {
-    const parsed = JSON.parse(body.result) as CacheEnvelope<T>;
+    // Upstash usually returns a JSON string; some paths may already decode objects.
+    const parsed = (
+      typeof body.result === 'string' ? JSON.parse(body.result) : body.result
+    ) as CacheEnvelope<T>;
     // Raw values (e.g. redisSetNx "1") are not envelopes — ignore, never delete.
     if (
       !parsed ||
@@ -84,17 +87,13 @@ export async function redisCacheSet<T>(key: string, data: T, ttlMs: number): Pro
   const envelope: CacheEnvelope<T> = { data, expiresAt: Date.now() + ttlMs };
   const payload = JSON.stringify(envelope);
   const ttlSec = Math.max(1, Math.ceil(ttlMs / 1000));
-  // POST body for the value — path-encoding large snapshots (Live 3PL ~100+
-  // riders) overflows Upstash/KV with "400 Request Header Or Cookie Too Large".
-  // Upstash docs: POST /set/{key}?EX={ttl} with raw body as the value.
-  const res = await redisCommand(`/set/${encodeURIComponent(key)}?EX=${ttlSec}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body: payload,
-  });
-  if (res && !res.ok) {
-    const errText = await res.text().catch(() => '');
-    console.warn('[redisCache] SET failed:', res.status, errText.slice(0, 200));
+  // Prefer Upstash JSON command POST — avoids URL size limits on large values.
+  try {
+    const { redisSet } = await import('@/lib/upstashRest');
+    const ok = await redisSet(key, payload, ttlSec);
+    if (!ok) console.warn('[redisCache] SET failed via upstashRest for key', key);
+  } catch (e) {
+    console.warn('[redisCache] SET exception:', e);
   }
 }
 

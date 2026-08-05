@@ -5,22 +5,21 @@
  * state, ~60s latency," not history/timelines, so there is nothing here that
  * benefits from a relational store. One key is overwritten every sync cycle.
  *
- * Reuses the existing tiered cache (`lib/tieredCache.ts` → in-memory L1 +
- * Upstash Redis L2, `lib/redisCache.optional.ts`) rather than adding a new
- * Redis client — same env vars (`UPSTASH_REDIS_REST_URL`/`_TOKEN`, or
- * Vercel's `KV_REST_API_URL`/`_TOKEN`) already used elsewhere in the app.
- *
- * IMPORTANT: unlike the Sheets cache, this is NOT an optional speed layer.
- * If Redis isn't configured, there is no fallback (we deliberately never
- * call Talabat from the read path) — `isRoosterLiveStoreReady()` lets the
- * API/UI fail loudly and clearly instead of silently returning nothing.
+ * IMPORTANT: this path uses Upstash POST JSON commands directly
+ * (`lib/upstashRest.ts`) — NOT `redisCacheSet`/`tieredCache` envelopes.
+ * The generic cache layer silently failed large snapshot writes (URL/header
+ * limits + soft-fail SET), which made `/api/live-riders` return
+ * hasSnapshot:false while cron still logged sync_ok.
  */
-import { tieredCacheGet, tieredCacheSet } from '@/lib/tieredCache';
+import { cache } from '@/lib/cache';
 import { isRedisCacheConfigured } from '@/lib/redisCache.optional';
+import { isUpstashConfigured, redisGet, redisSet } from '@/lib/upstashRest';
+import { logStructured } from '@/lib/requestTrace';
 import type { LiveRidersSnapshot } from '@/lib/roosterLive/types';
 
 /** Snapshot outlives one sync interval so a single missed run self-heals silently. */
 const SNAPSHOT_TTL_MS = 6 * 60 * 1000; // 6 minutes
+const SNAPSHOT_TTL_SECONDS = Math.ceil(SNAPSHOT_TTL_MS / 1000);
 /** Past this age, the read API flags the data as stale in its response. */
 export const STALE_AFTER_MS = 150 * 1000; // 2.5 minutes — 2x+ the 60s cadence
 
@@ -29,7 +28,34 @@ function snapshotKey(cityId: string): string {
 }
 
 export function isRoosterLiveStoreReady(): boolean {
-  return isRedisCacheConfigured();
+  return isRedisCacheConfigured() || isUpstashConfigured();
+}
+
+function parseSnapshot(raw: string): LiveRidersSnapshot | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    // Legacy envelope from redisCacheSet: { data, expiresAt }
+    const maybeEnvelope = parsed as { data?: unknown; expiresAt?: unknown };
+    if (
+      maybeEnvelope.data &&
+      typeof maybeEnvelope.data === 'object' &&
+      typeof maybeEnvelope.expiresAt === 'number'
+    ) {
+      if (Date.now() > maybeEnvelope.expiresAt) return null;
+      return maybeEnvelope.data as LiveRidersSnapshot;
+    }
+
+    // Direct snapshot payload
+    const snap = parsed as LiveRidersSnapshot;
+    if (typeof snap.cityId === 'string' && Array.isArray(snap.riders)) {
+      return snap;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export async function saveLiveRidersSnapshot(snapshot: LiveRidersSnapshot): Promise<void> {
@@ -39,12 +65,52 @@ export async function saveLiveRidersSnapshot(snapshot: LiveRidersSnapshot): Prom
         'The Live 3PL sync requires shared storage across serverless invocations — see docs.'
     );
   }
-  // Must fully persist to Redis before the cron reports success — L1 alone
-  // is invisible to other serverless instances serving /api/live-riders.
-  await tieredCacheSet(snapshotKey(snapshot.cityId), snapshot, SNAPSHOT_TTL_MS);
+
+  const key = snapshotKey(snapshot.cityId);
+  const payload = JSON.stringify(snapshot);
+  const ok = await redisSet(key, payload, SNAPSHOT_TTL_SECONDS);
+  if (!ok) {
+    throw new Error(`Failed to persist live riders snapshot to Redis (key=${key}, bytes=${payload.length})`);
+  }
+
+  // Verify read-back so sync_ok cannot lie about durability.
+  const verify = await redisGet(key);
+  if (!verify || !parseSnapshot(verify)) {
+    throw new Error(`Live riders snapshot write verify failed (key=${key})`);
+  }
+
+  cache.set(key, snapshot, SNAPSHOT_TTL_MS);
+  logStructured('info', 'rooster_live_snapshot_saved', {
+    cityId: snapshot.cityId,
+    riderCount: snapshot.riderCount,
+    bytes: payload.length,
+  });
 }
 
 export async function getLiveRidersSnapshot(cityId: string): Promise<LiveRidersSnapshot | null> {
   if (!isRoosterLiveStoreReady()) return null;
-  return tieredCacheGet<LiveRidersSnapshot>(snapshotKey(cityId), 30 * 1000);
+
+  const key = snapshotKey(cityId);
+  const fromMemory = cache.get<LiveRidersSnapshot>(key);
+  if (fromMemory) return fromMemory;
+
+  const raw = await redisGet(key);
+  if (!raw) {
+    logStructured('warn', 'rooster_live_snapshot_miss', { cityId, key });
+    return null;
+  }
+
+  const snapshot = parseSnapshot(raw);
+  if (!snapshot) {
+    logStructured('warn', 'rooster_live_snapshot_parse_failed', {
+      cityId,
+      key,
+      rawLen: raw.length,
+      rawHead: raw.slice(0, 80),
+    });
+    return null;
+  }
+
+  cache.set(key, snapshot, 30_000);
+  return snapshot;
 }

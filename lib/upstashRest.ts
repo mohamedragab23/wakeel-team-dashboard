@@ -86,6 +86,9 @@ async function command(segments: Array<string | number>): Promise<any> {
 export async function redisGet(key: string): Promise<string | null> {
   const r = await command(['GET', key]);
   if (r == null) return null;
+  // Some REST responses already JSON-decode object values — re-stringify for callers.
+  if (typeof r === 'string') return r;
+  if (typeof r === 'object') return JSON.stringify(r);
   return String(r);
 }
 
@@ -104,6 +107,14 @@ export async function redisDecr(key: string): Promise<number | null> {
 /** Sets a TTL (seconds) on `key`. No-op on Redis error/unconfigured. */
 export async function redisExpire(key: string, seconds: number): Promise<void> {
   await command(['EXPIRE', key, Math.max(1, Math.ceil(seconds))]);
+}
+
+/**
+ * `SET key value EX ttlSeconds` — overwrites. Returns true only on Redis OK.
+ */
+export async function redisSet(key: string, value: string, ttlSeconds: number): Promise<boolean> {
+  const r = await command(['SET', key, value, 'EX', Math.max(1, Math.ceil(ttlSeconds))]);
+  return r === 'OK';
 }
 
 /**
