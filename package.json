@@ -59,6 +59,7 @@
     "bcryptjs": "^2.4.3",
     "date-fns": "^2.30.0",
     "googleapis": "^126.0.1",
+    "imapflow": "^1.6.5",
     "js-cookie": "^3.0.5",
     "jsonwebtoken": "^9.0.2",
     "next": "^14.0.4",
