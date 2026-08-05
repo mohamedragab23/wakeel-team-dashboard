@@ -15,22 +15,28 @@
  *   TELEGRAM_OTP_BOT_TOKEN                  — bot that is a member of جروب الأكواد
  *   TELEGRAM_OTP_CODES_CHAT_ID              — chat id of جروب الأكواد
  *
- * Dedup: Redis key `otp_forwarder:last_sent` stores the last OTP that was
- * successfully posted so a repeated poll of the same unread email (or a
- * re-delivery) never double-posts.
+ * Detection strategy (important):
+ *   We do NOT rely on the IMAP UNSEEN flag. Opening Gmail in a browser, or
+ *   the old Apps Script's `markRead()`, both flip emails to Seen within
+ *   seconds — faster than a 1-minute cron can catch them. Instead we search
+ *   for Okta OTP emails arrived in the last LOOKBACK_MS window and dedupe
+ *   by UID in Redis (`otp_forwarder:uid:{uid}`).
  */
 import { createImapClient, getGmailImapConfig, isGmailImapConfigured } from '@/lib/gmailImap';
 import { redisCacheGet, redisCacheSet } from '@/lib/redisCache.optional';
+import { isUpstashConfigured, redisSetNx } from '@/lib/upstashRest';
 import { logStructured } from '@/lib/requestTrace';
 
 const OKTA_SENDER = 'no-reply@okta.deliveryhero.com';
 const SUBJECT_KEYWORD = 'verification code';
-const LAST_SENT_KEY = 'otp_forwarder:last_sent';
-const LAST_SENT_TTL_MS = 10 * 60 * 1000; // 10 minutes — OTPs expire well before this
+/** How far back to look for new OTP emails each poll. */
+const LOOKBACK_MS = 10 * 60 * 1000;
+/** Redis TTL for a forwarded UID — longer than LOOKBACK so we never re-send. */
+const UID_SENT_TTL_SECONDS = 30 * 60;
 
 export type ForwardResult =
   | { forwarded: true; otp: string; uid: number }
-  | { forwarded: false; reason: string };
+  | { forwarded: false; reason: string; checked?: number };
 
 function extractOtp(text: string): string | null {
   const nearCode = text.match(/code[^\d]{0,40}(\d{6})\b/i);
@@ -90,12 +96,27 @@ async function sendOtpToTelegram(otp: string): Promise<void> {
   }
 }
 
+async function alreadyForwardedUid(uid: number): Promise<boolean> {
+  const existing = await redisCacheGet<string>(`otp_forwarder:uid:${uid}`);
+  return existing === '1';
+}
+
+async function markUidForwarded(uid: number): Promise<boolean> {
+  const key = `otp_forwarder:uid:${uid}`;
+  if (isUpstashConfigured()) {
+    // Atomic claim: only one concurrent cron instance may proceed to send.
+    const claimed = await redisSetNx(key, '1', UID_SENT_TTL_SECONDS);
+    return claimed;
+  }
+  // No Redis: best-effort local mark (single-instance / local only).
+  await redisCacheSet(key, '1', UID_SENT_TTL_SECONDS * 1000);
+  return true;
+}
+
 /**
- * Scans Gmail for the newest unread Okta OTP email, extracts the 6-digit
- * code, posts it to جروب الأكواد, and marks the email as read.
- *
- * Safe to call every minute — returns `{ forwarded: false }` when there is
- * nothing new to send (no unread mail, or the OTP was already forwarded).
+ * Scans Gmail for Okta OTP emails arrived in the last LOOKBACK_MS window
+ * (regardless of Seen/Unseen), extracts the newest un-forwarded code, and
+ * posts it to جروب الأكواد.
  */
 export async function forwardLatestOktaOtp(): Promise<ForwardResult> {
   if (!isGmailImapConfigured()) {
@@ -107,54 +128,82 @@ export async function forwardLatestOktaOtp(): Promise<ForwardResult> {
 
   const config = getGmailImapConfig();
   const client = createImapClient(config);
+  const sinceCutoff = Date.now() - LOOKBACK_MS;
 
   try {
     await client.connect();
     const lock = await client.getMailboxLock('INBOX');
     try {
-      // Only unread Okta OTP emails — once we mark them read they won't reappear.
+      // IMAP SINCE is day-granular; we re-filter by exact internalDate below.
+      const sinceDate = new Date(sinceCutoff);
+      sinceDate.setHours(0, 0, 0, 0);
+
       const searchResult = await client.search(
-        { from: OKTA_SENDER, subject: SUBJECT_KEYWORD, seen: false },
+        { from: OKTA_SENDER, subject: SUBJECT_KEYWORD, since: sinceDate },
         { uid: true }
       );
       const uids: number[] = searchResult === false ? [] : searchResult;
       if (uids.length === 0) {
-        return { forwarded: false, reason: 'no_unread_otp' };
+        return { forwarded: false, reason: 'no_recent_otp' };
       }
 
-      // Process the newest unread message only (highest UID).
-      const uid = Math.max(...uids);
-      const meta = await client.fetchOne(
-        String(uid),
-        { bodyStructure: true, envelope: true },
-        { uid: true }
-      );
-      if (!meta) {
-        return { forwarded: false, reason: 'fetch_failed' };
+      // Newest first — supervisors need the code they just requested.
+      const sorted = [...uids].sort((a, b) => b - a);
+      let checked = 0;
+
+      for (const uid of sorted) {
+        if (await alreadyForwardedUid(uid)) continue;
+
+        const meta = await client.fetchOne(
+          String(uid),
+          { bodyStructure: true, envelope: true, internalDate: true },
+          { uid: true }
+        );
+        if (!meta) continue;
+
+        const arrivedAt =
+          meta.internalDate instanceof Date
+            ? meta.internalDate.getTime()
+            : meta.internalDate
+              ? new Date(meta.internalDate).getTime()
+              : 0;
+
+        // Skip emails older than the lookback window (IMAP SINCE is day-level).
+        if (arrivedAt && arrivedAt < sinceCutoff) continue;
+
+        checked++;
+
+        const emailText = await downloadDecodedText(client, uid, meta.bodyStructure);
+        const otp = extractOtp(emailText);
+        if (!otp) {
+          // Claim the UID anyway so we don't re-process a malformed email every minute.
+          await markUidForwarded(uid);
+          logStructured('warn', 'otp_forwarder_no_code', { uid });
+          continue;
+        }
+
+        // Atomic claim before sending — prevents double-post if two cron
+        // invocations overlap on the same UID.
+        const claimed = await markUidForwarded(uid);
+        if (!claimed) {
+          return { forwarded: false, reason: 'already_claimed', checked };
+        }
+
+        try {
+          await sendOtpToTelegram(otp);
+        } catch (err) {
+          // Release the claim on send failure so the next poll can retry.
+          // (Best-effort: if Redis DEL fails the UID stays claimed for TTL.)
+          const { redisDel } = await import('@/lib/upstashRest');
+          await redisDel(`otp_forwarder:uid:${uid}`).catch(() => {});
+          throw err;
+        }
+
+        logStructured('info', 'otp_forwarder_sent', { uid, otp });
+        return { forwarded: true, otp, uid };
       }
 
-      const emailText = await downloadDecodedText(client, uid, meta.bodyStructure);
-      const otp = extractOtp(emailText);
-      if (!otp) {
-        // Mark as read anyway so we don't keep re-processing a malformed email.
-        await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
-        logStructured('warn', 'otp_forwarder_no_code', { uid });
-        return { forwarded: false, reason: 'otp_not_found_in_email' };
-      }
-
-      // Dedup: skip if we already successfully posted this exact OTP.
-      const lastSent = await redisCacheGet<string>(LAST_SENT_KEY);
-      if (lastSent === otp) {
-        await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
-        return { forwarded: false, reason: 'duplicate_otp' };
-      }
-
-      await sendOtpToTelegram(otp);
-      await redisCacheSet(LAST_SENT_KEY, otp, LAST_SENT_TTL_MS);
-      await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
-
-      logStructured('info', 'otp_forwarder_sent', { uid, otp });
-      return { forwarded: true, otp, uid };
+      return { forwarded: false, reason: checked === 0 ? 'no_new_otp' : 'all_checked_no_send', checked };
     } finally {
       lock.release();
     }
