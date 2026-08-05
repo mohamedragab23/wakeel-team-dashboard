@@ -185,6 +185,11 @@ export default function RiderSearchPage() {
                         <p className="text-sm text-[#EAF0FF] font-medium">{r.name || '—'}</p>
                         <p className="text-xs text-[rgba(234,240,255,0.55)]">
                           Worker ID: {r.workerId || '—'} · {r.city || '—'}
+                          {r.hasStartingPoints === false
+                            ? ' · موقوف'
+                            : r.hasStartingPoints
+                              ? ' · نشط (SP)'
+                              : ''}
                         </p>
                       </div>
                       <span className="text-xs text-[color:var(--v2-accent-cyan)]">عرض الملف ›</span>
@@ -239,6 +244,95 @@ export default function RiderSearchPage() {
                     value={selected.contractEndDate}
                     source={selected.fieldSources.contractEndDate}
                   />
+                </div>
+
+                {/* Starting Points — empty = suspended (Rooster Overview behaviour) */}
+                <div className="rounded-lg border border-[rgba(255,255,255,0.1)] p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <p className="text-sm text-[#EAF0FF] font-medium">
+                      Starting Points <SourceTag source="rooster" />
+                    </p>
+                    {selected.hasStartingPoints ? (
+                      <span className="rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] px-2.5 py-1">
+                        نشط — لديه Starting Points
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-rose-500/20 text-rose-300 text-[11px] px-2.5 py-1">
+                        موقوف — لا يوجد Starting Points
+                      </span>
+                    )}
+                  </div>
+                  {selected.startingPoints && selected.startingPoints.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selected.startingPoints.map((sp) => (
+                        <span
+                          key={sp.id}
+                          className="rounded-md bg-[rgba(168,85,247,0.2)] text-[color:var(--v2-accent-purple)] text-xs px-2.5 py-1"
+                        >
+                          {sp.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[rgba(234,240,255,0.55)]">
+                      الخانة فارغة في روستر — المندوب موقوف تشغيليًا.
+                    </p>
+                  )}
+                </div>
+
+                {/* Rider Documents */}
+                <div className="rounded-lg border border-[rgba(255,255,255,0.1)] p-4 space-y-3">
+                  <p className="text-sm text-[#EAF0FF] font-medium">
+                    مستندات المندوب (Rider Documents) <SourceTag source="rooster" />
+                  </p>
+                  {selected.documents && selected.documents.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-[#EAF0FF]">
+                        <thead>
+                          <tr className="text-[rgba(234,240,255,0.55)] text-right">
+                            <th className="py-1 pe-3">النوع</th>
+                            <th className="py-1 pe-3">التاريخ</th>
+                            <th className="py-1 pe-3">المصدر</th>
+                            <th className="py-1 pe-3">عرض</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selected.documents.map((doc) => (
+                            <tr key={doc.fieldName + doc.fileKey} className="border-t border-[rgba(255,255,255,0.06)]">
+                              <td className="py-1.5 pe-3">
+                                {doc.label}
+                                {doc.underReview ? (
+                                  <span className="ms-2 text-[10px] text-amber-300">قيد المراجعة</span>
+                                ) : (
+                                  <span className="ms-2 text-[10px] text-emerald-300">IN USE</span>
+                                )}
+                              </td>
+                              <td className="py-1.5 pe-3">
+                                {doc.createdAt ? new Date(doc.createdAt).toLocaleString('ar-EG') : '—'}
+                              </td>
+                              <td className="py-1.5 pe-3">{doc.source || '—'}</td>
+                              <td className="py-1.5 pe-3">
+                                {doc.viewUrl ? (
+                                  <a
+                                    href={doc.viewUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[color:var(--v2-accent-cyan)] hover:underline"
+                                  >
+                                    فتح
+                                  </a>
+                                ) : (
+                                  <span className="text-[rgba(234,240,255,0.4)]">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[rgba(234,240,255,0.55)]">لا توجد مستندات متاحة لهذا المندوب.</p>
+                  )}
                 </div>
 
                 {selected.contracts && selected.contracts.length > 0 && (

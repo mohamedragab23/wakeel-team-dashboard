@@ -86,10 +86,13 @@ export async function GET(request: NextRequest) {
 
     // Enrich with dashboard (Sheets) data -- dashboard wins on conflicts, per the frozen merge rule.
     const dashboardRiders: Rider[] = outcome.employees.length ? await getAllRiders(true) : [];
-    const results: MergedRiderProfile[] = outcome.employees.map((emp) => {
+    const merged: MergedRiderProfile[] = outcome.employees.map((emp) => {
       const dashboardMatch = dashboardRiders.find((r) => riderCodesMatch(r.code, String(emp.id))) || null;
       return mergeRiderProfile(dashboardMatch, emp);
     });
+
+    // Additive Starting Points + Documents enrichment (never fails the search).
+    const results = await RoosterClient.enrichRiderProfiles(merged, outcome.employees);
 
     void recordMetric({ feature: 'rider_search', metric: 'exec_ms', value: Date.now() - startedAt, tags: { type } });
     return NextResponse.json({ success: true, results });

@@ -28,7 +28,9 @@ import { withRoosterQueue } from '@/lib/rooster/roosterQueue';
 import { getRoosterLiveHeaders, getRoosterAppOrigin } from '@/lib/roosterLive/tokenProvider';
 import { smartRefreshRoosterAuth } from '@/lib/roosterLive/authRefresh';
 import { logStructured } from '@/lib/requestTrace';
-import type { RiderSearchType, RoosterEmployeeRaw } from '@/lib/rooster/riderMerge';
+import type { RiderSearchType, RoosterEmployeeRaw, MergedRiderProfile } from '@/lib/rooster/riderMerge';
+import { resolveStartingPoints } from '@/lib/rooster/startingPoints';
+import { fetchEmployeeDocuments } from '@/lib/rooster/employeeDocuments';
 
 type CachedExportPayload = { filename: string; bytesBase64: string };
 
@@ -40,7 +42,7 @@ export type RoosterSearchOutcome =
   | { success: true; employees: RoosterEmployeeRaw[] }
   | { success: false; reason: 'invalid_search_term' | 'rooster_unavailable' };
 
-const ALL_ACTIVE_EMPLOYEES_CACHE_KEY = 'rooster:all_active_employees';
+const ALL_ACTIVE_EMPLOYEES_CACHE_KEY = 'rooster:all_active_employees:v2';
 const PAGE_SIZE = 500;
 
 async function resolveFreshLiveHeaders(): Promise<Record<string, string>> {
@@ -82,6 +84,9 @@ async function fetchByWorkerId(numericId: string): Promise<RoosterSearchOutcome>
     with_field: 'id_number',
     filter_status: 'active_contract',
     with_contracts: 'true',
+    // Required: without this, starting_point_ids always comes back [] even
+    // when the rider has SPs assigned (confirmed live 2026-08-05).
+    with_starting_points: 'true',
     page: '0',
     size: '5',
   }).toString();
@@ -131,6 +136,8 @@ async function fetchAllActiveEmployeesUncached(): Promise<RoosterEmployeeRaw[]> 
       // a `search_id`. Without this, Paper Number search over the cached
       // roster would silently never match anything.
       with_field: 'id_number',
+      // Required for Starting Points (empty vs assigned = suspended vs active).
+      with_starting_points: 'true',
       page: String(page),
       size: String(PAGE_SIZE),
     }).toString();
@@ -218,7 +225,7 @@ export class RoosterClient {
     if (params.type === 'workerId') {
       const numeric = query.replace(/\D/g, '');
       if (!numeric) return { success: false, reason: 'invalid_search_term' };
-      const key = `rider_search:workerId:${numeric}`;
+      const key = `rider_search:workerId:v2:${numeric}`;
       try {
         return await withRoosterCache<RoosterSearchOutcome>(key, () => withRoosterQueue(() => fetchByWorkerId(numeric)));
       } catch (err: any) {
@@ -240,5 +247,86 @@ export class RoosterClient {
 
     const matches = all.filter((emp) => employeeMatchesQuery(emp, params.type, query));
     return { success: true, employees: matches };
+  }
+
+  /**
+   * Additive enrichment (2026-08-05): Starting Points + Rider Documents.
+   * Failures here are swallowed per-profile so the existing search result
+   * is never broken by a documents/Live side-channel outage.
+   */
+  static async enrichRiderProfiles(
+    profiles: MergedRiderProfile[],
+    employees: RoosterEmployeeRaw[]
+  ): Promise<MergedRiderProfile[]> {
+    if (!profiles.length) return profiles;
+
+    let headers: Record<string, string>;
+    try {
+      headers = await resolveFreshLiveHeaders();
+    } catch (err: any) {
+      logStructured('warn', 'rider_enrich_auth_failed', { message: err?.message || String(err) });
+      return profiles;
+    }
+
+    const byId = new Map(employees.map((e) => [String(e.id), e]));
+
+    return Promise.all(
+      profiles.map(async (profile) => {
+        const emp = profile.workerId ? byId.get(String(profile.workerId)) : undefined;
+        const cityId =
+          emp?.active_contract?.city_id ||
+          emp?.contracts?.find((c) => c.currently_active)?.city_id ||
+          emp?.contracts?.[0]?.city_id ||
+          0;
+
+        const spIds = Array.isArray(emp?.starting_point_ids)
+          ? emp!.starting_point_ids.filter((n) => Number.isFinite(n))
+          : [];
+
+        const next: MergedRiderProfile = { ...profile };
+
+        try {
+          if (cityId && spIds.length) {
+            next.startingPoints = await resolveStartingPoints({ cityId, ids: spIds, headers });
+          } else {
+            next.startingPoints = spIds.map((id) => ({ id, name: `Starting Point #${id}` }));
+          }
+          next.hasStartingPoints = next.startingPoints.length > 0;
+          next.fieldSources = {
+            ...next.fieldSources,
+            startingPoints: 'rooster',
+            hasStartingPoints: 'rooster',
+          };
+        } catch (err: any) {
+          logStructured('warn', 'rider_enrich_sp_failed', {
+            workerId: profile.workerId,
+            message: err?.message || String(err),
+          });
+          next.startingPoints = [];
+          next.hasStartingPoints = false;
+        }
+
+        try {
+          if (profile.workerId && cityId) {
+            next.documents = await fetchEmployeeDocuments({
+              workerId: profile.workerId,
+              cityId,
+              headers,
+            });
+            next.fieldSources = { ...next.fieldSources, documents: 'rooster' };
+          } else {
+            next.documents = [];
+          }
+        } catch (err: any) {
+          logStructured('warn', 'rider_enrich_docs_failed', {
+            workerId: profile.workerId,
+            message: err?.message || String(err),
+          });
+          next.documents = [];
+        }
+
+        return next;
+      })
+    );
   }
 }

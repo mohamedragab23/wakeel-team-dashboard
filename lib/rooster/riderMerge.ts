@@ -85,6 +85,27 @@ export type MergedRiderProfile = {
   supervisorName?: string;
   contractType?: string;
   contractEndDate?: string;
+  /**
+   * Additive (2026-08-05): Starting Points from Rooster Overview.
+   * Empty array = rider is operationally suspended (no SP assigned),
+   * matching Rooster UI behaviour confirmed by the account owner.
+   */
+  startingPoints?: { id: number; name: string }[];
+  /** True when at least one Starting Point is assigned. */
+  hasStartingPoints?: boolean;
+  /**
+   * Additive (2026-08-05): Rider Documents (file custom fields) from Rooster.
+   * Failures here never block the rest of the profile.
+   */
+  documents?: {
+    fieldName: string;
+    label: string;
+    fileKey: string;
+    createdAt?: string;
+    source?: string;
+    underReview?: boolean;
+    viewUrl?: string;
+  }[];
   /** Per-field provenance so the UI can render "Dashboard" vs "Live from Rooster" tags. */
   fieldSources: Record<string, FieldSource>;
 };
