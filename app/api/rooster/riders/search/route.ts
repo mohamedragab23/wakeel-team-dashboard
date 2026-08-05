@@ -21,7 +21,10 @@ import { mergeRiderProfile, type RiderSearchType, type MergedRiderProfile } from
 import { recordMetric } from '@/lib/telemetry';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+// 120s (not 60s): if the Rooster session is fully dead this can reach Layer
+// 3 auth recovery inline, which needs up to ~90s just for the Gmail-OTP
+// poll -- see lib/roosterLive/authRecovery/circuitBreaker.ts.
+export const maxDuration = 120;
 
 const VALID_TYPES: RiderSearchType[] = ['workerId', 'paperNumber', 'phone', 'name', 'email'];
 

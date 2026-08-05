@@ -45,8 +45,20 @@
  * is unaffected) and the cooldown is always "not active" — i.e. this module
  * is a pure safety net on top of production's existing Redis, never a new
  * hard dependency.
+ *
+ * 2026-08-05 follow-up: the lock + 90s cooldown above stop the *concurrency*
+ * race, but on their own still allow up to ~40 real Okta login attempts/hour
+ * for as long as some future, still-unknown cause keeps making every single
+ * attempt fail cleanly one after another (this incident's actual root cause
+ * turned out to be the Gmail OAuth refresh token's 7-day Testing-mode
+ * expiry — see `gmailOtpReader.ts` — but that is exactly the kind of thing
+ * that can recur or have a sibling cause later). `recordFullRecoveryFailure`
+ * adds a 3-strikes breaker on top: after 3 consecutive failures it extends
+ * the cooldown to `TRIPPED_COOLDOWN_MS` and reports `tripped: true` so the
+ * caller can fire one clearly-worded, deduplicated alert instead of staying
+ * in an unbounded 90s retry loop against a persistently broken credential.
  */
-import { redisSetNx, redisDel, isUpstashConfigured } from '@/lib/upstashRest';
+import { redisSetNx, redisDel, redisIncr, redisExpire, isUpstashConfigured } from '@/lib/upstashRest';
 import { redisCacheGet, redisCacheSet } from '@/lib/redisCache.optional';
 
 const LOCK_KEY = 'rooster:auth:full_recovery:lock';
@@ -69,6 +81,14 @@ const OUTCOME_KEY = 'rooster:auth:full_recovery:last_outcome';
  *  may contain has its own much longer real TTL, reusing it for a minute is
  *  harmless). */
 const OUTCOME_TTL_MS = 60_000;
+
+const FAILCOUNT_KEY = 'rooster:auth:full_recovery:failcount';
+const FAILCOUNT_WINDOW_SECONDS = 60 * 60; // consecutive-failure counting window
+const TRIP_THRESHOLD = 3; // consecutive failures before extending the cooldown
+const TRIPPED_COOLDOWN_MS = 2 * 60 * 60 * 1000; // extended backoff once tripped
+
+const TRIP_ALERT_DEDUPE_KEY = 'rooster:auth:full_recovery:trip_alert_sent';
+const TRIP_ALERT_DEDUPE_SECONDS = TRIPPED_COOLDOWN_MS / 1000; // one alert per trip window, not one per attempt
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -102,6 +122,35 @@ export async function isFullRecoveryCoolingDown(): Promise<{ cooling: boolean; r
 /** Opens a cool-down window starting now — call once per completed attempt. */
 export async function startFullRecoveryCooldown(durationMs: number = DEFAULT_COOLDOWN_MS): Promise<void> {
   await redisCacheSet(COOLDOWN_KEY, Date.now() + durationMs, durationMs);
+}
+
+/**
+ * Call once per genuinely failed Layer-3 attempt (not for the "cooldown
+ * already active" fast-fail — that isn't a real Okta attempt). Increments
+ * the consecutive-failure counter; once it reaches `TRIP_THRESHOLD`, extends
+ * the cooldown to `TRIPPED_COOLDOWN_MS` and returns `tripped: true`.
+ */
+export async function recordFullRecoveryFailure(): Promise<{ tripped: boolean; consecutiveFailures: number }> {
+  if (!isUpstashConfigured()) return { tripped: false, consecutiveFailures: 0 };
+  const count = await redisIncr(FAILCOUNT_KEY);
+  if (count === null) return { tripped: false, consecutiveFailures: 0 };
+  void redisExpire(FAILCOUNT_KEY, FAILCOUNT_WINDOW_SECONDS);
+  if (count >= TRIP_THRESHOLD) {
+    await startFullRecoveryCooldown(TRIPPED_COOLDOWN_MS);
+    return { tripped: true, consecutiveFailures: count };
+  }
+  return { tripped: false, consecutiveFailures: count };
+}
+
+/** Call once per successful Layer-3 attempt — clears the streak so a later, unrelated failure doesn't inherit it. */
+export async function resetFullRecoveryFailureCount(): Promise<void> {
+  await redisDel(FAILCOUNT_KEY);
+}
+
+/** True only once per trip window — caller uses this to decide whether to send the special "automation paused itself" alert. */
+export async function shouldSendFullRecoveryTripAlert(): Promise<boolean> {
+  if (!isUpstashConfigured()) return true; // no dedupe available -- better to over-alert than stay silent
+  return redisSetNx(TRIP_ALERT_DEDUPE_KEY, String(Date.now()), TRIP_ALERT_DEDUPE_SECONDS);
 }
 
 /** Publishes the just-completed attempt's outcome for any concurrent waiters. */

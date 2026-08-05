@@ -7,6 +7,11 @@ import { logStructured } from '@/lib/requestTrace';
 import { ROOSTER_AUTO_SYNC_PAUSED, ROOSTER_AUTO_SYNC_PAUSE_REASON } from '@/lib/roosterLive/autoSyncPause';
 
 export const dynamic = 'force-dynamic';
+// Can reach Layer 3 auth recovery (Okta login + up to ~90s Gmail-OTP poll)
+// via resolveFreshRoosterExportHeaders() -> smartRefreshRoosterAuth(); see
+// lib/roosterLive/authRecovery/circuitBreaker.ts for why this needs a
+// longer-than-default duration (2026-08-05 login-storm incident).
+export const maxDuration = 180;
 
 export async function GET(req: NextRequest) {
   try {

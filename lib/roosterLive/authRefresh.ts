@@ -46,7 +46,11 @@ import {
   startFullRecoveryCooldown,
   cacheFullRecoveryOutcome,
   waitForCachedFullRecoveryOutcome,
+  recordFullRecoveryFailure,
+  resetFullRecoveryFailureCount,
+  shouldSendFullRecoveryTripAlert,
 } from '@/lib/roosterLive/authRecovery/recoveryLock';
+import { sendAdminTelegramNotificationSafe } from '@/lib/adminTelegramNotifier';
 
 export type SmartRefreshOutcome = {
   headers: Record<string, string> | null;
@@ -157,6 +161,33 @@ export async function mintDhhTokenViaOkta(
 }
 
 /**
+ * 3-strikes escalation on top of the per-attempt cool-down (2026-08-05
+ * follow-up, see `recoveryLock.ts`'s doc comment): records a genuine Layer-3
+ * failure, and — only the first time within a trip window, after 3 in a
+ * row — sends one clear Telegram alert telling a human the automation has
+ * paused itself, instead of a fresh alert (or worse, a fresh Okta login)
+ * every ~90 seconds for as long as some persistent cause keeps failing.
+ */
+async function reportFailureAndMaybeEscalate(reason: string): Promise<void> {
+  const { tripped, consecutiveFailures } = await recordFullRecoveryFailure();
+  if (!tripped) return;
+  if (!(await shouldSendFullRecoveryTripAlert())) return;
+  await sendAdminTelegramNotificationSafe({
+    type: 'system_alert',
+    alertTitle: '⛔ *تم إيقاف محاولات إصلاح جلسة Rooster تلقائيًا مؤقتًا (حماية من التكرار)*',
+    alertMessage:
+      `فشلت محاولة تسجيل الدخول الكامل (Okta + Gmail OTP) ${consecutiveFailures} مرات متتالية، فأوقف النظام ` +
+      `نفسه تلقائيًا عن إعادة المحاولة لمدة ساعتين تقريبًا لمنع تكرار محاولات تسجيل دخول حقيقية بشكل مبالغ فيه ` +
+      `على حساب Okta.\n\n` +
+      `*آخر سبب فشل:* ${reason}\n\n` +
+      `*الإجراء المطلوب:* راجع docs/ROOSTER_LIVE.md قسم SRS-012 (تأكد إن باسورد Okta و Gmail OAuth لسه صحيحين)، ` +
+      `أو حدّث الكوكيز يدويًا من المتصفح زي المعتاد لو مستعجل — النظام هيرجع يحاول تلقائيًا لوحده بعد فترة التهدئة.`,
+    priority: 'high',
+    url: `${process.env.NEXT_PUBLIC_APP_URL || ''}/live-riders`,
+  });
+}
+
+/**
  * Runs Layer 3 (`recoverRoosterAuthFully` — full Okta login + Gmail-OTP)
  * behind a cross-instance single-flight lock + post-attempt cool-down (see
  * `recoveryLock.ts` for the full "why" — this is the fix for the live
@@ -214,6 +245,7 @@ async function runGuardedFullRecovery(
       };
       await startFullRecoveryCooldown();
       await cacheFullRecoveryOutcome(outcome);
+      await reportFailureAndMaybeEscalate(fullRecovery.reason);
       return outcome;
     }
 
@@ -234,6 +266,7 @@ async function runGuardedFullRecovery(
       };
       await startFullRecoveryCooldown();
       await cacheFullRecoveryOutcome(outcome);
+      await reportFailureAndMaybeEscalate('mint_failed_after_full_recovery');
       return outcome;
     }
 
@@ -242,6 +275,7 @@ async function runGuardedFullRecovery(
     logStructured('info', 'rooster_live_full_recovery_ok', {
       message: 'Recovered from a fully-dead Okta SSO session automatically via login + Gmail OTP — zero human involvement.',
     });
+    await resetFullRecoveryFailureCount();
 
     const outcome: SmartRefreshOutcome = {
       headers: mintedAfterFullRecovery,

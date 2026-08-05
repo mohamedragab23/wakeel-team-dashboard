@@ -45,6 +45,18 @@ function installFakeUpstash(): void {
       }
       return jsonResponse({ result: removed });
     }
+    if (cmd === 'incr') {
+      const key = rest[0];
+      const next = (Number(store.get(key)) || 0) + 1;
+      store.set(key, String(next));
+      return jsonResponse({ result: next });
+    }
+    if (cmd === 'expire') {
+      // TTL bookkeeping isn't needed for these fake-store assertions (only
+      // real Redis expiry matters, exercised by startFullRecoveryCooldown's
+      // TTL tests above via a real short-lived key) -- just acknowledge it.
+      return jsonResponse({ result: 1 });
+    }
     return jsonResponse({ result: null });
   };
 }
@@ -130,17 +142,62 @@ describe('recoveryLock (SRS-012 concurrency fix)', () => {
     assert.equal(afterExpiry.cooling, false, 'cooldown should have expired on its own');
   });
 
+  it('trips the breaker after 3 consecutive failures, extending the cooldown well beyond the normal window', async () => {
+    const { recordFullRecoveryFailure, isFullRecoveryCoolingDown } = await import('./recoveryLock');
+
+    const first = await recordFullRecoveryFailure();
+    const second = await recordFullRecoveryFailure();
+    const third = await recordFullRecoveryFailure();
+
+    assert.equal(first.tripped, false, '1st consecutive failure should not trip the breaker');
+    assert.equal(second.tripped, false, '2nd consecutive failure should not trip the breaker');
+    assert.equal(third.tripped, true, '3rd consecutive failure must trip the breaker');
+    assert.equal(third.consecutiveFailures, 3);
+
+    const cooldown = await isFullRecoveryCoolingDown();
+    assert.equal(cooldown.cooling, true, 'tripping must extend the cooldown');
+    // 2h trip cooldown is far longer than the normal 90s cooldown -- a loose
+    // lower bound (>5 min) is enough to distinguish it without being flaky.
+    assert.ok((cooldown.retryAfterMs ?? 0) > 5 * 60 * 1000, `expected an extended cooldown, got retryAfterMs=${cooldown.retryAfterMs}`);
+  });
+
+  it('a success resets the consecutive-failure streak so a later unrelated failure does not inherit it', async () => {
+    const { recordFullRecoveryFailure, resetFullRecoveryFailureCount } = await import('./recoveryLock');
+
+    await recordFullRecoveryFailure();
+    await recordFullRecoveryFailure();
+    await resetFullRecoveryFailureCount();
+
+    const afterReset = await recordFullRecoveryFailure();
+    assert.equal(afterReset.consecutiveFailures, 1, 'count should restart from 1 after a reset, not continue at 3');
+    assert.equal(afterReset.tripped, false);
+  });
+
+  it('sends the trip alert only once per trip window (dedupe)', async () => {
+    const { shouldSendFullRecoveryTripAlert } = await import('./recoveryLock');
+
+    const alert1 = await shouldSendFullRecoveryTripAlert();
+    const alert2 = await shouldSendFullRecoveryTripAlert();
+
+    assert.equal(alert1, true, 'first trip in a window should fire the alert');
+    assert.equal(alert2, false, 'a second trip within the same window must not spam a duplicate alert');
+  });
+
   it('fails open (no cross-instance protection, but never blocks) when Upstash is not configured', async () => {
     delete process.env.UPSTASH_REDIS_REST_URL;
     delete process.env.UPSTASH_REDIS_REST_TOKEN;
 
-    const { acquireFullRecoveryLock, isFullRecoveryCoolingDown, waitForCachedFullRecoveryOutcome } = await import(
-      './recoveryLock'
-    );
+    const {
+      acquireFullRecoveryLock,
+      isFullRecoveryCoolingDown,
+      waitForCachedFullRecoveryOutcome,
+      recordFullRecoveryFailure,
+    } = await import('./recoveryLock');
 
     assert.equal(await acquireFullRecoveryLock(), true);
     assert.equal(await acquireFullRecoveryLock(), true, 'without Redis there is no cross-instance coordination possible');
     assert.equal((await isFullRecoveryCoolingDown()).cooling, false);
     assert.equal(await waitForCachedFullRecoveryOutcome({ timeoutMs: 50, pollIntervalMs: 10 }), null);
+    assert.equal((await recordFullRecoveryFailure()).tripped, false, 'breaker must never trip with no Redis to count against');
   });
 });

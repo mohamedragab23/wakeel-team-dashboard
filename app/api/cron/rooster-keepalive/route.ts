@@ -7,6 +7,13 @@ import { sendAdminTelegramNotificationSafe } from '@/lib/adminTelegramNotifier';
 import { ROOSTER_AUTO_SYNC_PAUSED, ROOSTER_AUTO_SYNC_PAUSE_REASON } from '@/lib/roosterLive/autoSyncPause';
 
 export const dynamic = 'force-dynamic';
+// Layer 3 auth recovery (Okta login + Gmail-OTP polling, see SRS-012) can
+// take up to ~90s just for the OTP-email poll, plus several more network
+// round-trips before/after it -- the platform default duration is far too
+// short and was the root cause of the 2026-08-05 login-storm incident (see
+// lib/roosterLive/authRecovery/circuitBreaker.ts for the full writeup and
+// the independent cooldown/lock protection added alongside this fix).
+export const maxDuration = 180;
 
 /**
  * Proactive Rooster Live session keepalive.
