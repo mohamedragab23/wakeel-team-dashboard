@@ -24,7 +24,7 @@
  */
 import { createImapClient, getGmailImapConfig, isGmailImapConfigured } from '@/lib/gmailImap';
 import { redisCacheGet, redisCacheSet } from '@/lib/redisCache.optional';
-import { isUpstashConfigured, redisSetNx } from '@/lib/upstashRest';
+import { isUpstashConfigured, redisDel, redisGet, redisSetNx } from '@/lib/upstashRest';
 import { logStructured } from '@/lib/requestTrace';
 
 const OKTA_SENDER = 'no-reply@okta.deliveryhero.com';
@@ -33,6 +33,8 @@ const SUBJECT_KEYWORD = 'verification code';
 const LOOKBACK_MS = 10 * 60 * 1000;
 /** Redis TTL for a forwarded UID — longer than LOOKBACK so we never re-send. */
 const UID_SENT_TTL_SECONDS = 30 * 60;
+/** IMAP user flag — survives Redis misses / cold starts (Gmail keeps it). */
+const FORWARDED_IMAP_FLAG = '$WakeelOtpFwd';
 
 export type ForwardResult =
   | { forwarded: true; otp: string; uid: number }
@@ -97,19 +99,39 @@ async function sendOtpToTelegram(otp: string): Promise<void> {
 }
 
 async function alreadyForwardedUid(uid: number): Promise<boolean> {
-  const existing = await redisCacheGet<string>(`otp_forwarder:uid:${uid}`);
-  return existing === '1';
+  // 1) Durable envelope mark (survives SET NX quirks — root cause of the
+  //    2026-08-05 re-forward loop where raw "1" was unreadable via redisCacheGet).
+  const marked = await redisCacheGet<string>(`otp_forwarder:uid:${uid}:mark`);
+  if (marked === '1') return true;
+  // 2) Raw SET NX claim key (same store as markUidForwarded).
+  if (!isUpstashConfigured()) return false;
+  const r = await redisGet(`otp_forwarder:uid:${uid}`);
+  return r === '1';
 }
 
 async function markUidForwarded(uid: number): Promise<boolean> {
   const key = `otp_forwarder:uid:${uid}`;
-  if (isUpstashConfigured()) {
-    // Atomic claim: only one concurrent cron instance may proceed to send.
-    const claimed = await redisSetNx(key, '1', UID_SENT_TTL_SECONDS);
-    return claimed;
+  const markKey = `${key}:mark`;
+  if (!isUpstashConfigured()) {
+    // No Redis: allow send and rely on IMAP $WakeelOtpFwd flag for dedupe.
+    logStructured('warn', 'otp_forwarder_no_redis', { uid });
+    return true;
   }
-  // No Redis: best-effort local mark (single-instance / local only).
-  await redisCacheSet(key, '1', UID_SENT_TTL_SECONDS * 1000);
+  // Atomic claim — only one concurrent cron may proceed to send.
+  const claimed = await redisSetNx(key, '1', UID_SENT_TTL_SECONDS);
+  // Always write the envelope mark when we believe this UID is handled.
+  // If NX lost the race, still refresh the mark so alreadyForwardedUid skips.
+  await redisCacheSet(markKey, '1', UID_SENT_TTL_SECONDS * 1000);
+  return claimed;
+}
+
+async function claimOtpValue(otp: string): Promise<boolean> {
+  const markKey = `otp_forwarder:otp:${otp}:mark`;
+  if ((await redisCacheGet<string>(markKey)) === '1') return false;
+  if (!isUpstashConfigured()) return true;
+  const claimed = await redisSetNx(`otp_forwarder:otp:${otp}`, '1', UID_SENT_TTL_SECONDS);
+  if (!claimed) return false;
+  await redisCacheSet(markKey, '1', UID_SENT_TTL_SECONDS * 1000);
   return true;
 }
 
@@ -169,10 +191,18 @@ export async function forwardLatestOktaOtp(): Promise<ForwardResult> {
 
         const meta = await client.fetchOne(
           String(uid),
-          { bodyStructure: true, envelope: true, internalDate: true },
+          { bodyStructure: true, envelope: true, internalDate: true, flags: true },
           { uid: true }
         );
         if (!meta) continue;
+
+        const flags: Set<string> =
+          meta.flags instanceof Set ? meta.flags : new Set(meta.flags ?? []);
+        if (flags.has(FORWARDED_IMAP_FLAG)) {
+          // Heal Redis claim if IMAP already marked this mail.
+          await markUidForwarded(uid);
+          continue;
+        }
 
         const arrivedAt =
           meta.internalDate instanceof Date
@@ -191,24 +221,44 @@ export async function forwardLatestOktaOtp(): Promise<ForwardResult> {
         if (!otp) {
           // Claim the UID anyway so we don't re-process a malformed email every minute.
           await markUidForwarded(uid);
+          await client
+            .messageFlagsAdd(String(uid), [FORWARDED_IMAP_FLAG], { uid: true })
+            .catch(() => {});
           logStructured('warn', 'otp_forwarder_no_code', { uid });
           continue;
         }
 
-        // Atomic claim before sending — prevents double-post if two cron
-        // invocations overlap on the same UID.
+        // Atomic claim before sending — UID + OTP value (guards re-send if
+        // the same code lands under a new UID, or UID claim was lost).
         const claimed = await markUidForwarded(uid);
         if (!claimed) {
-          return { forwarded: false, reason: 'already_claimed', checked };
+          continue;
+        }
+        const otpClaimed = await claimOtpValue(otp);
+        if (!otpClaimed) {
+          await client
+            .messageFlagsAdd(String(uid), [FORWARDED_IMAP_FLAG], { uid: true })
+            .catch(() => {});
+          logStructured('info', 'otp_forwarder_otp_already_sent', { uid, otp });
+          continue;
         }
 
         try {
           await sendOtpToTelegram(otp);
+          await client
+            .messageFlagsAdd(String(uid), [FORWARDED_IMAP_FLAG], { uid: true })
+            .catch((e) => {
+              logStructured('warn', 'otp_forwarder_imap_flag_failed', {
+                uid,
+                error: e instanceof Error ? e.message : String(e),
+              });
+            });
         } catch (err) {
-          // Release the claim on send failure so the next poll can retry.
-          // (Best-effort: if Redis DEL fails the UID stays claimed for TTL.)
-          const { redisDel } = await import('@/lib/upstashRest');
-          await redisDel(`otp_forwarder:uid:${uid}`).catch(() => {});
+          // Release claims on send failure so the next poll can retry.
+          await Promise.all([
+            redisDel(`otp_forwarder:uid:${uid}`),
+            redisDel(`otp_forwarder:otp:${otp}`),
+          ]).catch(() => {});
           throw err;
         }
 

@@ -15,49 +15,70 @@ function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
-function installFakeUpstash(): void {
-  store.clear();
-  (globalThis as any).fetch = async (input: any): Promise<Response> => {
-    const url = new URL(String(input));
-    const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-    const [cmd, ...rest] = segments;
+function runRedisCommand(cmdRaw: string, rest: string[]): Response {
+  const cmd = cmdRaw.toLowerCase();
 
-    if (cmd === 'set') {
-      const key = rest[0];
-      const value = rest[1];
-      const flags = rest.slice(2);
-      if (flags.includes('NX')) {
-        if (store.has(key)) return jsonResponse({ result: null });
-        store.set(key, value);
-        return jsonResponse({ result: 'OK' });
-      }
+  if (cmd === 'set') {
+    const key = rest[0];
+    const value = rest[1];
+    const flags = rest.slice(2).map((f) => String(f).toUpperCase());
+    if (flags.includes('NX')) {
+      if (store.has(key)) return jsonResponse({ result: null });
       store.set(key, value);
       return jsonResponse({ result: 'OK' });
     }
-    if (cmd === 'get') {
-      const key = rest[0];
-      return jsonResponse({ result: store.has(key) ? store.get(key) : null });
+    store.set(key, value);
+    return jsonResponse({ result: 'OK' });
+  }
+  if (cmd === 'get') {
+    const key = rest[0];
+    return jsonResponse({ result: store.has(key) ? store.get(key)! : null });
+  }
+  if (cmd === 'del') {
+    let removed = 0;
+    for (const key of rest) {
+      if (store.delete(key)) removed += 1;
     }
-    if (cmd === 'del') {
-      let removed = 0;
-      for (const key of rest) {
-        if (store.delete(key)) removed += 1;
+    return jsonResponse({ result: removed });
+  }
+  if (cmd === 'incr') {
+    const key = rest[0];
+    const next = (Number(store.get(key)) || 0) + 1;
+    store.set(key, String(next));
+    return jsonResponse({ result: next });
+  }
+  if (cmd === 'expire') {
+    // TTL bookkeeping isn't needed for these fake-store assertions (only
+    // real Redis expiry matters, exercised by startFullRecoveryCooldown's
+    // TTL tests above via a real short-lived key) -- just acknowledge it.
+    return jsonResponse({ result: 1 });
+  }
+  return jsonResponse({ result: null });
+}
+
+function installFakeUpstash(): void {
+  store.clear();
+  (globalThis as any).fetch = async (input: any, init?: RequestInit): Promise<Response> => {
+    const url = new URL(String(input));
+    const method = (init?.method || 'GET').toUpperCase();
+
+    // Preferred wire form used by lib/upstashRest.ts: POST JSON ["CMD", ...args]
+    if (method === 'POST' && init?.body) {
+      try {
+        const parsed = JSON.parse(String(init.body));
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const [cmd, ...rest] = parsed.map((x) => String(x));
+          return runRedisCommand(cmd, rest);
+        }
+      } catch {
+        // fall through to path form
       }
-      return jsonResponse({ result: removed });
     }
-    if (cmd === 'incr') {
-      const key = rest[0];
-      const next = (Number(store.get(key)) || 0) + 1;
-      store.set(key, String(next));
-      return jsonResponse({ result: next });
-    }
-    if (cmd === 'expire') {
-      // TTL bookkeeping isn't needed for these fake-store assertions (only
-      // real Redis expiry matters, exercised by startFullRecoveryCooldown's
-      // TTL tests above via a real short-lived key) -- just acknowledge it.
-      return jsonResponse({ result: 1 });
-    }
-    return jsonResponse({ result: null });
+
+    const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    const [cmd, ...rest] = segments;
+    if (!cmd) return jsonResponse({ result: null });
+    return runRedisCommand(cmd, rest);
   };
 }
 

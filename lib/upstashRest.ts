@@ -24,79 +24,115 @@ function authHeaders(): HeadersInit | null {
   return token ? { Authorization: `Bearer ${token}` } : null;
 }
 
-async function command(
-  segments: Array<string | number>,
-  query?: Record<string, string | number | boolean>
-): Promise<any> {
-  if (!isRedisCacheConfigured()) return null;
+type CommandOutcome = { transportOk: true; result: any } | { transportOk: false };
+
+/**
+ * Upstash POST JSON command form — preferred for SET NX/EX so NX is honoured
+ * (path-segment form has been observed to return OK without sticky claims).
+ */
+async function commandPost(segments: Array<string | number>): Promise<CommandOutcome> {
+  if (!isRedisCacheConfigured()) return { transportOk: false };
   const base = restBase();
   const headers = authHeaders();
-  if (!base || !headers) return null;
+  if (!base || !headers) return { transportOk: false };
+
+  try {
+    // Keep numbers as numbers (EX ttl) — Upstash examples use numeric EX.
+    const body = JSON.stringify(segments.map((s) => (typeof s === 'number' ? s : String(s))));
+    const res = await fetch(base, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body,
+    });
+    if (!res.ok) return { transportOk: false };
+    const json = await res.json().catch(() => null);
+    if (!json || typeof json !== 'object' || !('result' in json)) return { transportOk: false };
+    return { transportOk: true, result: (json as { result: any }).result };
+  } catch (e) {
+    console.warn('[upstashRest] POST command failed:', e);
+    return { transportOk: false };
+  }
+}
+
+/** Legacy path-segment form — kept as fallback so Rooster locks never go dark. */
+async function commandPath(segments: Array<string | number>): Promise<CommandOutcome> {
+  if (!isRedisCacheConfigured()) return { transportOk: false };
+  const base = restBase();
+  const headers = authHeaders();
+  if (!base || !headers) return { transportOk: false };
 
   try {
     const path = segments.map((s) => encodeURIComponent(String(s))).join('/');
-    const qs = query
-      ? `?${Object.entries(query)
-          .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
-          .join('&')}`
-      : '';
-    const res = await fetch(`${base}/${path}${qs}`, { headers });
-    if (!res.ok) return null;
-    const body = await res.json().catch(() => null);
-    return body && typeof body === 'object' && 'result' in body ? body.result : null;
+    const res = await fetch(`${base}/${path}`, { headers });
+    if (!res.ok) return { transportOk: false };
+    const json = await res.json().catch(() => null);
+    if (!json || typeof json !== 'object' || !('result' in json)) return { transportOk: false };
+    return { transportOk: true, result: (json as { result: any }).result };
   } catch (e) {
-    console.warn('[upstashRest] command failed:', e);
-    return null;
+    console.warn('[upstashRest] path command failed:', e);
+    return { transportOk: false };
   }
+}
+
+async function command(segments: Array<string | number>): Promise<any> {
+  const post = await commandPost(segments);
+  if (post.transportOk) return post.result;
+  const path = await commandPath(segments);
+  if (path.transportOk) return path.result;
+  return null;
+}
+
+/** GET key as string. Returns null if missing / Redis error / unconfigured. */
+export async function redisGet(key: string): Promise<string | null> {
+  const r = await command(['GET', key]);
+  if (r == null) return null;
+  return String(r);
 }
 
 /** Atomically increments `key` (creates it at 1 if missing). Returns null on Redis error/unconfigured. */
 export async function redisIncr(key: string): Promise<number | null> {
-  const r = await command(['incr', key]);
+  const r = await command(['INCR', key]);
   return typeof r === 'number' ? r : null;
 }
 
 /** Atomically decrements `key`. Returns null on Redis error/unconfigured. */
 export async function redisDecr(key: string): Promise<number | null> {
-  const r = await command(['decr', key]);
+  const r = await command(['DECR', key]);
   return typeof r === 'number' ? r : null;
 }
 
 /** Sets a TTL (seconds) on `key`. No-op on Redis error/unconfigured. */
 export async function redisExpire(key: string, seconds: number): Promise<void> {
-  await command(['expire', key, Math.max(1, Math.ceil(seconds))]);
+  await command(['EXPIRE', key, Math.max(1, Math.ceil(seconds))]);
 }
 
 /**
  * `SET key value NX EX ttlSeconds` — true only if this call actually created
- * the key (lock acquired). NOTE: command flags (`NX`, `EX`) must be passed
- * as extra path segments, not query params — confirmed empirically against
- * this project's Upstash-backed REST endpoint: `?NX=true&EX=30` returns
- * `400 {"error":"ERR syntax error"}`, while `/NX/EX/30` returns `200 OK`.
+ * the key (lock acquired).
  */
 export async function redisSetNx(key: string, value: string, ttlSeconds: number): Promise<boolean> {
-  const r = await command(['set', key, value, 'NX', 'EX', Math.max(1, Math.ceil(ttlSeconds))]);
+  const r = await command(['SET', key, value, 'NX', 'EX', Math.max(1, Math.ceil(ttlSeconds))]);
   return r === 'OK';
 }
 
 /** Deletes `key`. No-op on Redis error/unconfigured. */
 export async function redisDel(key: string): Promise<void> {
-  await command(['del', key]);
+  await command(['DEL', key]);
 }
 
 /** Pushes `value` onto the head of the list at `key`. No-op on Redis error/unconfigured. */
 export async function redisLPush(key: string, value: string): Promise<void> {
-  await command(['lpush', key, value]);
+  await command(['LPUSH', key, value]);
 }
 
 /** Trims the list at `key` to the inclusive range [start, stop]. No-op on Redis error/unconfigured. */
 export async function redisLTrim(key: string, start: number, stop: number): Promise<void> {
-  await command(['ltrim', key, start, stop]);
+  await command(['LTRIM', key, start, stop]);
 }
 
 /** Reads the inclusive range [start, stop] of the list at `key`. Returns [] on Redis error/unconfigured. */
 export async function redisLRange(key: string, start: number, stop: number): Promise<string[]> {
-  const r = await command(['lrange', key, start, stop]);
+  const r = await command(['LRANGE', key, start, stop]);
   return Array.isArray(r) ? r : [];
 }
 

@@ -60,6 +60,16 @@ export async function redisCacheGet<T>(key: string): Promise<T | null> {
   if (!body.result) return null;
   try {
     const parsed = JSON.parse(body.result) as CacheEnvelope<T>;
+    // Raw values (e.g. redisSetNx "1") are not envelopes — ignore, never delete.
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed) ||
+      !('data' in parsed) ||
+      typeof (parsed as CacheEnvelope<T>).expiresAt !== 'number'
+    ) {
+      return null;
+    }
     if (Date.now() > parsed.expiresAt) {
       void redisCacheDelete(key);
       return null;
@@ -74,7 +84,11 @@ export async function redisCacheSet<T>(key: string, data: T, ttlMs: number): Pro
   const envelope: CacheEnvelope<T> = { data, expiresAt: Date.now() + ttlMs };
   const payload = JSON.stringify(envelope);
   const ttlSec = Math.max(1, Math.ceil(ttlMs / 1000));
-  await redisCommand(`/set/${encodeURIComponent(key)}/${encodeURIComponent(payload)}?EX=${ttlSec}`);
+  // EX must be a path segment (`/EX/30`), not `?EX=30` — query form can 400
+  // on this project's Upstash/KV REST endpoint (see lib/upstashRest.ts).
+  await redisCommand(
+    `/set/${encodeURIComponent(key)}/${encodeURIComponent(payload)}/EX/${ttlSec}`
+  );
 }
 
 export async function redisCacheDelete(key: string): Promise<void> {
