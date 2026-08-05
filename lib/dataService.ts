@@ -16,6 +16,8 @@ export interface Rider {
   phone: string;
   joinDate: string;
   status: string;
+  /** Sheet col J — ISO date when present (fallback if Rooster has no end). */
+  contractEndDate?: string;
 }
 
 export interface RiderData {
@@ -106,6 +108,7 @@ export async function getSupervisorRiders(supervisorCode: string, useCache: bool
           phone: row[5] ? row[5].toString().trim() : '',
           joinDate: row[6] ? row[6].toString().trim() : '',
           status: row[7] ? row[7].toString().trim() : 'نشط',
+          contractEndDate: row[9] ? row[9].toString().trim() : '',
         });
       }
     }
@@ -146,6 +149,7 @@ export async function getAllAssignedRiders(useCache: boolean = true): Promise<Ri
         phone: row[5] ? row[5].toString().trim() : '',
         joinDate: row[6] ? row[6].toString().trim() : '',
         status: row[7] ? row[7].toString().trim() : 'نشط',
+        contractEndDate: row[9] ? row[9].toString().trim() : '',
       });
     }
     if (useCache) await tieredCacheSet(cacheKey, riders, RIDERS_TTL_MS);

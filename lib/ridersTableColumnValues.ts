@@ -11,6 +11,14 @@ export function collectRiderColumnValues(rows: RiderRowForFilter[], col: string)
       case 'name':
         labels.push(cellToFilterLabel(r.name));
         break;
+      case 'opsStatus':
+        labels.push(
+          r.roosterSuspended === true ? 'موقوف' : r.roosterSuspended === false ? 'نشط' : '—'
+        );
+        break;
+      case 'contractEndDate':
+        labels.push(cellToFilterLabel(r.contractEndDate));
+        break;
       case 'date':
         labels.push(cellToFilterLabel(r.date));
         break;

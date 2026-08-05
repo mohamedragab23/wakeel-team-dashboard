@@ -37,6 +37,16 @@ interface RiderData {
   debt: number;
   date?: string | null;
   workDays?: number;
+  /** null = Rooster unavailable / not on active roster */
+  roosterSuspended?: boolean | null;
+  contractEndDate?: string | null;
+}
+
+function formatContractEnd(value: string | null | undefined): string {
+  if (!value) return '—';
+  const d = new Date(value.slice(0, 10) + 'T00:00:00');
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 export default function RidersPage() {
@@ -61,6 +71,8 @@ export default function RidersPage() {
   const [filters, setFilters] = useState<RiderColumnFilters>(() => ({
     code: defaultTextFilter(),
     name: defaultTextFilter(),
+    opsStatus: defaultTextFilter(),
+    contractEndDate: defaultTextFilter(),
     date: defaultTextFilter(),
     workDays: defaultNumFilter(),
     hours: defaultNumFilter(),
@@ -118,8 +130,25 @@ export default function RidersPage() {
       : riders.filter((r) => (r.code || '').toString().trim().toLowerCase().includes(normalizedSearchCode));
 
   const riderValueOptions = useMemo(() => {
-    const cols = ['code', 'name', 'date', 'workDays', 'hours', 'break', 'delay', 'orders', 'acceptance', 'debt', 'absence'] as const;
-    return Object.fromEntries(cols.map((c) => [c, collectRiderColumnValues(visibleRiders, c)])) as Record<(typeof cols)[number], string[]>;
+    const cols = [
+      'code',
+      'name',
+      'opsStatus',
+      'contractEndDate',
+      'date',
+      'workDays',
+      'hours',
+      'break',
+      'delay',
+      'orders',
+      'acceptance',
+      'debt',
+      'absence',
+    ] as const;
+    return Object.fromEntries(cols.map((c) => [c, collectRiderColumnValues(visibleRiders, c)])) as Record<
+      (typeof cols)[number],
+      string[]
+    >;
   }, [visibleRiders]);
 
   const columnFilteredRiders = useMemo(
@@ -131,6 +160,8 @@ export default function RidersPage() {
     setFilters({
       code: defaultTextFilter(),
       name: defaultTextFilter(),
+      opsStatus: defaultTextFilter(),
+      contractEndDate: defaultTextFilter(),
       date: defaultTextFilter(),
       workDays: defaultNumFilter(),
       hours: defaultNumFilter(),
@@ -183,6 +214,9 @@ export default function RidersPage() {
       const rows = columnFilteredRiders.map((r) => ({
         'كود المندوب': r.code ?? '',
         'اسم المندوب': r.name ?? '',
+        'الحالة التشغيلية':
+          r.roosterSuspended === true ? 'موقوف' : r.roosterSuspended === false ? 'نشط' : '—',
+        'انتهاء العقد': r.contractEndDate ?? '',
         'التاريخ/الفترة': r.date ?? (startDate && endDate ? (startDate === endDate ? startDate : `${startDate} - ${endDate}`) : ''),
         'عدد أيام العمل': Number.isFinite(r.workDays) ? Number(r.workDays) : 0,
         'ساعات العمل': Number.isFinite(r.hours) ? Number(r.hours) : 0,
@@ -197,6 +231,8 @@ export default function RidersPage() {
         header: [
           'كود المندوب',
           'اسم المندوب',
+          'الحالة التشغيلية',
+          'انتهاء العقد',
           'التاريخ/الفترة',
           'عدد أيام العمل',
           'ساعات العمل',
@@ -211,6 +247,8 @@ export default function RidersPage() {
       worksheet['!cols'] = [
         { wch: 14 },
         { wch: 22 },
+        { wch: 14 },
+        { wch: 14 },
         { wch: 22 },
         { wch: 12 },
         { wch: 12 },
@@ -371,7 +409,7 @@ export default function RidersPage() {
             className="p-4 sm:p-5"
           >
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1280px]">
+            <table className="w-full min-w-[1480px]">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 align-bottom">
@@ -421,6 +459,56 @@ export default function RidersPage() {
                         onClearSort={() => setSort({ col: null, dir: 'asc' })}
                         sortDirection={sortDirFor('name')}
                         ariaLabel="فلتر وفرز عمود الاسم"
+                      />
+                    </div>
+                  </th>
+                  <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 whitespace-nowrap align-bottom">
+                    <div className="flex items-center justify-end gap-1">
+                      <span>الحالة (روستر)</span>
+                      <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.opsStatus}
+                        isOpen={openMenu === 'opsStatus'}
+                        onOpen={() => setOpenMenu('opsStatus')}
+                        onClose={() => setOpenMenu(null)}
+                        variant="text"
+                        textFilter={filters.opsStatus}
+                        onTextChange={(f: TextFilterState) => setFilters((p) => ({ ...p, opsStatus: f }))}
+                        onSortAsc={() => {
+                          setSort({ col: 'opsStatus', dir: 'asc' });
+                          setOpenMenu(null);
+                        }}
+                        onSortDesc={() => {
+                          setSort({ col: 'opsStatus', dir: 'desc' });
+                          setOpenMenu(null);
+                        }}
+                        onClearSort={() => setSort({ col: null, dir: 'asc' })}
+                        sortDirection={sortDirFor('opsStatus')}
+                        ariaLabel="فلتر وفرز عمود الحالة التشغيلية"
+                      />
+                    </div>
+                  </th>
+                  <th className="text-right py-3 px-3 text-sm font-semibold text-gray-700 whitespace-nowrap align-bottom">
+                    <div className="flex items-center justify-end gap-1">
+                      <span>انتهاء العقد</span>
+                      <RidersExcelColumnMenu
+                        valueOptions={riderValueOptions.contractEndDate}
+                        isOpen={openMenu === 'contractEndDate'}
+                        onOpen={() => setOpenMenu('contractEndDate')}
+                        onClose={() => setOpenMenu(null)}
+                        variant="text"
+                        textFilter={filters.contractEndDate}
+                        onTextChange={(f: TextFilterState) => setFilters((p) => ({ ...p, contractEndDate: f }))}
+                        onSortAsc={() => {
+                          setSort({ col: 'contractEndDate', dir: 'asc' });
+                          setOpenMenu(null);
+                        }}
+                        onSortDesc={() => {
+                          setSort({ col: 'contractEndDate', dir: 'desc' });
+                          setOpenMenu(null);
+                        }}
+                        onClearSort={() => setSort({ col: null, dir: 'asc' })}
+                        sortDirection={sortDirFor('contractEndDate')}
+                        ariaLabel="فلتر وفرز عمود انتهاء العقد"
                       />
                     </div>
                   </th>
@@ -665,6 +753,22 @@ export default function RidersPage() {
                           </span>
                         ) : null}
                       </td>
+                      <td className="py-4 px-4 text-sm">
+                        {rider.roosterSuspended === true ? (
+                          <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800">
+                            موقوف
+                          </span>
+                        ) : rider.roosterSuspended === false ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+                            نشط
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="py-4 px-4 text-sm text-gray-700 tabular-nums whitespace-nowrap">
+                        {formatContractEnd(rider.contractEndDate)}
+                      </td>
                       <td className="py-4 px-4 text-sm text-gray-600">
                         {rider.date ? (() => {
                           try {
@@ -725,7 +829,7 @@ export default function RidersPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={12} className="py-12 text-center text-gray-500">
+                    <td colSpan={14} className="py-12 text-center text-gray-500">
                       {riders.length === 0
                         ? 'لا توجد بيانات متاحة'
                         : 'لا توجد نتائج مطابقة للبحث أو فلاتر الأعمدة'}

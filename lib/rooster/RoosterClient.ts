@@ -250,6 +250,63 @@ export class RoosterClient {
   }
 
   /**
+   * Lightweight operational status for the supervisor riders table.
+   * Reuses the same cached active-contract roster as Rider Search
+   * (`with_starting_points=true`) — no per-rider detail calls, fail-open.
+   */
+  static async getOperationalStatusMap(
+    codes: string[]
+  ): Promise<
+    Record<
+      string,
+      {
+        hasStartingPoints: boolean;
+        suspended: boolean;
+        contractEndDate: string | null;
+      }
+    >
+  > {
+    const wanted = new Set(
+      codes.map((c) => String(c ?? '').trim()).filter(Boolean)
+    );
+    if (!wanted.size) return {};
+
+    let all: RoosterEmployeeRaw[];
+    try {
+      all = await withRoosterCache<RoosterEmployeeRaw[]>(ALL_ACTIVE_EMPLOYEES_CACHE_KEY, () =>
+        withRoosterQueue(() => fetchAllActiveEmployeesUncached())
+      );
+    } catch (err: any) {
+      logStructured('warn', 'rooster_ops_status_roster_failed', { message: err?.message || String(err) });
+      return {};
+    }
+
+    const out: Record<
+      string,
+      { hasStartingPoints: boolean; suspended: boolean; contractEndDate: string | null }
+    > = {};
+
+    for (const emp of all) {
+      const id = String(emp.id);
+      if (!wanted.has(id)) continue;
+      const spIds = Array.isArray(emp.starting_point_ids) ? emp.starting_point_ids : [];
+      const hasStartingPoints = spIds.length > 0;
+      const contract =
+        emp.active_contract ||
+        emp.contracts?.find((c) => c.currently_active) ||
+        emp.contracts?.[0] ||
+        null;
+      const endRaw = contract?.end_at || contract?.end || null;
+      out[id] = {
+        hasStartingPoints,
+        suspended: !hasStartingPoints,
+        contractEndDate: endRaw ? String(endRaw).slice(0, 10) : null,
+      };
+    }
+    return out;
+  }
+
+  /**
    * Additive enrichment (2026-08-05): Starting Points + Rider Documents.
    * Failures here are swallowed per-profile so the existing search result
    * is never broken by a documents/Live side-channel outage.

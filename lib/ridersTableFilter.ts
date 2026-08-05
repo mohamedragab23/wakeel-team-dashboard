@@ -13,11 +13,16 @@ export type RiderRowForFilter = {
   debt: number;
   date?: string | null;
   workDays?: number;
+  /** null = Rooster unavailable / rider not on active roster */
+  roosterSuspended?: boolean | null;
+  contractEndDate?: string | null;
 };
 
 export type RiderColumnFilters = {
   code: TextFilterState;
   name: TextFilterState;
+  opsStatus: TextFilterState;
+  contractEndDate: TextFilterState;
   date: TextFilterState;
   workDays: NumFilterState;
   hours: NumFilterState;
@@ -151,6 +156,13 @@ export function compareRiderRows(a: RiderRowForFilter, b: RiderRowForFilter, col
       return m * (a.code || '').localeCompare(b.code || '', 'ar', { numeric: true });
     case 'name':
       return m * (a.name || '').localeCompare(b.name || '', 'ar', { numeric: true });
+    case 'opsStatus': {
+      const label = (r: RiderRowForFilter) =>
+        r.roosterSuspended === true ? 'موقوف' : r.roosterSuspended === false ? 'نشط' : '—';
+      return m * label(a).localeCompare(label(b), 'ar');
+    }
+    case 'contractEndDate':
+      return m * String(a.contractEndDate ?? '').localeCompare(String(b.contractEndDate ?? ''), 'ar', { numeric: true });
     case 'date':
       return m * String(a.date ?? '').localeCompare(String(b.date ?? ''), 'ar', { numeric: true });
     case 'workDays':
@@ -174,6 +186,12 @@ export function compareRiderRows(a: RiderRowForFilter, b: RiderRowForFilter, col
   }
 }
 
+function opsStatusLabel(r: RiderRowForFilter): string {
+  if (r.roosterSuspended === true) return 'موقوف';
+  if (r.roosterSuspended === false) return 'نشط';
+  return '—';
+}
+
 export function applyRiderTableFilters(
   rows: RiderRowForFilter[],
   filters: RiderColumnFilters,
@@ -182,6 +200,8 @@ export function applyRiderTableFilters(
   let out = rows.filter((r) => {
     if (!applyTextFilter((r.code ?? '').toString(), filters.code)) return false;
     if (!applyTextFilter((r.name ?? '').toString(), filters.name)) return false;
+    if (!applyTextFilter(opsStatusLabel(r), filters.opsStatus)) return false;
+    if (!applyTextFilter(String(r.contractEndDate ?? ''), filters.contractEndDate)) return false;
     if (!applyTextFilter(String(r.date ?? ''), filters.date)) return false;
     if (!applyNumScalar(Number.isFinite(r.workDays) ? Number(r.workDays) : 0, filters.workDays)) return false;
     if (!applyNumScalar(Number(r.hours) || 0, filters.hours)) return false;

@@ -23,6 +23,8 @@ export type RiderSeed = {
   region?: string;
   supervisorCode?: string;
   supervisorName?: string;
+  /** From Sheets المناديب when available. */
+  contractEndDate?: string;
 };
 
 export type AggregatedRiderRow = {
@@ -31,6 +33,7 @@ export type AggregatedRiderRow = {
   region?: string;
   supervisorCode?: string;
   supervisorName?: string;
+  contractEndDate?: string;
   hours: number;
   break: number;
   delay: number;
@@ -102,6 +105,7 @@ type RiderAggInternal = {
   region?: string;
   supervisorCode?: string;
   supervisorName?: string;
+  contractEndDate?: string;
   hours: number;
   break: number;
   delay: number;
@@ -129,6 +133,7 @@ export function aggregateRidersInDateRange(
       region: rider.region,
       supervisorCode: rider.supervisorCode,
       supervisorName: rider.supervisorName,
+      contractEndDate: rider.contractEndDate,
       hours: 0,
       break: 0,
       delay: 0,
@@ -175,6 +180,7 @@ export function aggregateRidersInDateRange(
       region: r.region,
       supervisorCode: r.supervisorCode,
       supervisorName: r.supervisorName,
+      contractEndDate: r.contractEndDate,
       hours: r.hours,
       break: r.break,
       delay: r.delay,

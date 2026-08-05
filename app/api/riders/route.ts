@@ -11,8 +11,41 @@ import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { aggregateRidersInDateRange } from '@/lib/riderPerformanceAggregate';
 import { parseAdminAllowedZonesList } from '@/lib/zones';
 import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
+import { RoosterClient } from '@/lib/rooster/RoosterClient';
 
 export const dynamic = 'force-dynamic';
+
+type RiderOpsFields = {
+  roosterSuspended: boolean | null;
+  hasStartingPoints: boolean | null;
+  contractEndDate: string | null;
+};
+
+/** Fail-open: Rooster outage must never blank the riders table. */
+async function enrichWithRoosterOps<T extends { code: string; contractEndDate?: string | null }>(
+  rows: T[]
+): Promise<(T & RiderOpsFields)[]> {
+  try {
+    const map = await RoosterClient.getOperationalStatusMap(rows.map((r) => r.code));
+    return rows.map((r) => {
+      const ops = map[String(r.code).trim()];
+      const sheetEnd = r.contractEndDate ? String(r.contractEndDate).trim().slice(0, 10) : null;
+      return {
+        ...r,
+        roosterSuspended: ops ? ops.suspended : null,
+        hasStartingPoints: ops ? ops.hasStartingPoints : null,
+        contractEndDate: ops?.contractEndDate || sheetEnd || null,
+      };
+    });
+  } catch {
+    return rows.map((r) => ({
+      ...r,
+      roosterSuspended: null as boolean | null,
+      hasStartingPoints: null as boolean | null,
+      contractEndDate: r.contractEndDate ? String(r.contractEndDate).trim().slice(0, 10) : null,
+    }));
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -90,8 +123,13 @@ export async function GET(request: NextRequest) {
         code: r.code,
         name: r.name,
         region: r.region,
+        supervisorCode: r.supervisorCode,
+        supervisorName: r.supervisorName,
+        contractEndDate: r.contractEndDate || '',
       }));
-      const ridersWithData = aggregateRidersInDateRange(seeds, performanceData, dateLabel);
+      const ridersWithData = await enrichWithRoosterOps(
+        aggregateRidersInDateRange(seeds, performanceData, dateLabel)
+      );
 
       const assignedCodes = new Set(riders.map((r) => (r.code ?? '').toString().trim()));
       const recordsProcessed = performanceData.filter((record) =>
@@ -125,8 +163,13 @@ export async function GET(request: NextRequest) {
         code: r.code,
         name: r.name,
         region: r.region,
+        supervisorCode: r.supervisorCode,
+        supervisorName: r.supervisorName,
+        contractEndDate: r.contractEndDate || '',
       }));
-      const ridersWithData = aggregateRidersInDateRange(seeds, performanceData, dateParam);
+      const ridersWithData = await enrichWithRoosterOps(
+        aggregateRidersInDateRange(seeds, performanceData, dateParam)
+      );
       return NextResponse.json({
         success: true,
         data: ridersWithData,
@@ -149,24 +192,27 @@ export async function GET(request: NextRequest) {
     }
 
     // Get latest performance data for each rider (no date filter)
-    const ridersWithData = await Promise.all(
-      riders.map(async (rider) => {
-        const latestData = await getLatestRiderData(rider.code);
-        return {
-          code: rider.code,
-          name: rider.name,
-          region: rider.region,
-          hours: latestData?.hours || 0,
-          break: latestData?.break || 0,
-          delay: latestData?.delay || 0,
-          absence: latestData?.absence || 'لا',
-          orders: latestData?.orders || 0,
-          acceptance: latestData?.acceptance || 0,
-          debt: latestData?.debt || 0,
-          date: latestData?.date || null, // Include date for display
-          workDays: 0,
-        };
-      })
+    const ridersWithData = await enrichWithRoosterOps(
+      await Promise.all(
+        riders.map(async (rider) => {
+          const latestData = await getLatestRiderData(rider.code);
+          return {
+            code: rider.code,
+            name: rider.name,
+            region: rider.region,
+            contractEndDate: rider.contractEndDate || '',
+            hours: latestData?.hours || 0,
+            break: latestData?.break || 0,
+            delay: latestData?.delay || 0,
+            absence: latestData?.absence || 'لا',
+            orders: latestData?.orders || 0,
+            acceptance: latestData?.acceptance || 0,
+            debt: latestData?.debt || 0,
+            date: latestData?.date || null, // Include date for display
+            workDays: 0,
+          };
+        })
+      )
     );
 
     return NextResponse.json({
