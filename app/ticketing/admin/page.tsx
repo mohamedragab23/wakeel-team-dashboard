@@ -21,6 +21,7 @@ export default function AdminTicketQueuePage() {
   const [type, setType] = useState('');
   const [priority, setPriority] = useState('');
   const [zone, setZone] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
 
@@ -32,6 +33,15 @@ export default function AdminTicketQueuePage() {
       router.replace('/ticketing/my');
     }
   }, [router]);
+
+  // Debounce search so typing doesn't hammer the API
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['ticketing', 'admin', status, type, priority, zone, search, page],
@@ -51,17 +61,17 @@ export default function AdminTicketQueuePage() {
   return (
     <div className="space-y-4">
       <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        <Select label="الحالة" value={status} onChange={setStatus} options={[{ v: '', l: 'الكل' }, ...TICKET_STATUSES.map((s) => ({ v: s, l: TICKET_STATUS_LABELS_AR[s] }))]} />
-        <Select label="النوع" value={type} onChange={setType} options={[{ v: '', l: 'الكل' }, ...TICKET_TYPES.map((t) => ({ v: t, l: TICKET_TYPE_LABELS_AR[t] }))]} />
-        <Select label="الأولوية" value={priority} onChange={setPriority} options={[{ v: '', l: 'الكل' }, ...TICKET_PRIORITIES.map((p) => ({ v: p, l: TICKET_PRIORITY_LABELS_AR[p] }))]} />
-        <Select label="المنطقة" value={zone} onChange={setZone} options={[{ v: '', l: 'الكل' }, ...ZONE_OPTIONS.map((z) => ({ v: z, l: z }))]} />
+        <Select label="الحالة" value={status} onChange={(v) => { setStatus(v); setPage(1); }} options={[{ v: '', l: 'الكل' }, ...TICKET_STATUSES.map((s) => ({ v: s, l: TICKET_STATUS_LABELS_AR[s] }))]} />
+        <Select label="النوع" value={type} onChange={(v) => { setType(v); setPage(1); }} options={[{ v: '', l: 'الكل' }, ...TICKET_TYPES.map((t) => ({ v: t, l: TICKET_TYPE_LABELS_AR[t] }))]} />
+        <Select label="الأولوية" value={priority} onChange={(v) => { setPriority(v); setPage(1); }} options={[{ v: '', l: 'الكل' }, ...TICKET_PRIORITIES.map((p) => ({ v: p, l: TICKET_PRIORITY_LABELS_AR[p] }))]} />
+        <Select label="المنطقة" value={zone} onChange={(v) => { setZone(v); setPage(1); }} options={[{ v: '', l: 'الكل' }, ...ZONE_OPTIONS.map((z) => ({ v: z, l: z }))]} />
         <label className="text-sm">
-          بحث
+          بحث ذكي
           <input
             className="mt-1 w-full rounded-lg bg-white/5 border border-white/10 p-2"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="رقم، موضوع، مشرف…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="أي كلمة أو رقم داخل التذكرة أو التعليقات…"
           />
         </label>
       </div>

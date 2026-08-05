@@ -336,12 +336,18 @@ export default function AdminSalariesPage() {
           </div>
         </div>
 
+        {!ledgerEnabled && (
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <h2 className="text-lg font-semibold text-gray-800 mb-3">خصم إداري على مشرف</h2>
           <p className="text-sm text-gray-600 mb-4">
             يُسجَّل في تبويب «خصومات_الإدارة» ويُخصم من راتب المشرف ويظهر له مع التفاصيل. أنشئ التبويب في ملف
             Google Sheets إن لم يكن موجوداً (أعمدة: كود المشرف، التاريخ، السبب، المبلغ، المسجل).
           </p>
+          {!selectedSupervisor && (
+            <p className="mb-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              اختر المشرف من الأعلى أولاً قبل تسجيل أي خصم.
+            </p>
+          )}
           <form onSubmit={submitAdminDeduction} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">تاريخ الخصم</label>
@@ -389,22 +395,37 @@ export default function AdminSalariesPage() {
             </p>
           )}
         </div>
+        )}
 
-        {/* SRS-013 Phase 3: Payroll Ledger -- additive, alongside (not replacing) the form above. */}
+        {/* SRS-013 Phase 3: Payroll Ledger — single place for bonus / deduction / advance / adjustment */}
         {ledgerEnabled && (
           <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
             <h2 className="text-lg font-semibold text-gray-800 mb-3">سجل المعاملات المالية (مكافأة / خصم / سلفة / تعديل)</h2>
-            <p className="text-sm text-gray-600 mb-4">
-              يُسجَّل في تبويب «سجل_المعاملات_المالية» الجديد (append-only) ويُضاف مباشرةً لحساب الراتب الصافي لهذا
-              المشرف عن هذا الشهر. لا يستبدل خصم الإدارة الحالي أعلاه.
+            <p className="text-sm text-gray-600 mb-2">
+              المكان الوحيد لتسجيل خصم أو مكافأة أو سلفة. اختر المشرف أولاً من أعلى الصفحة، ثم نوع المعاملة
+              (مثلاً «خصم») والمبلغ.
             </p>
+            {!selectedSupervisor ? (
+              <p className="mb-4 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                اختر المشرف من الأعلى أولاً — لا يمكن تسجيل خصم أو مكافأة بدون مشرف محدد.
+              </p>
+            ) : (
+              <p className="mb-4 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                المشرف المحدد:{' '}
+                <strong>
+                  {supervisors.find((s: Supervisor) => s.code === selectedSupervisor)?.name || selectedSupervisor}
+                </strong>{' '}
+                ({selectedSupervisor})
+              </p>
+            )}
             <form onSubmit={submitLedgerTransaction} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">النوع</label>
                 <select
                   value={ledgerType}
                   onChange={(e) => setLedgerType(e.target.value as LedgerTxType)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  disabled={!selectedSupervisor}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100"
                 >
                   {Object.entries(LEDGER_TYPE_LABELS_AR).map(([k, v]) => (
                     <option key={k} value={k}>
@@ -419,7 +440,8 @@ export default function AdminSalariesPage() {
                   type="month"
                   value={ledgerPeriod}
                   onChange={(e) => setLedgerPeriod(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  disabled={!selectedSupervisor}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100"
                 />
               </div>
               <div className="md:col-span-2">
@@ -428,8 +450,9 @@ export default function AdminSalariesPage() {
                   type="text"
                   value={ledgerReason}
                   onChange={(e) => setLedgerReason(e.target.value)}
-                  placeholder="مثال: مكافأة أداء شهر ..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  disabled={!selectedSupervisor}
+                  placeholder="مثال: خصم إداري / مكافأة أداء ..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100"
                 />
               </div>
               <div>
@@ -441,15 +464,22 @@ export default function AdminSalariesPage() {
                   step="0.01"
                   value={ledgerAmount}
                   onChange={(e) => setLedgerAmount(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  disabled={!selectedSupervisor}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100"
                 />
               </div>
               <button
                 type="submit"
                 disabled={ledgerSaving || !selectedSupervisor}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium disabled:opacity-50"
+                className={`px-4 py-2 text-white rounded-lg font-medium disabled:opacity-50 ${
+                  ledgerType === 'deduction' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
-                {ledgerSaving ? 'جاري الحفظ...' : 'تسجيل المعاملة'}
+                {ledgerSaving
+                  ? 'جاري الحفظ...'
+                  : ledgerType === 'deduction'
+                    ? 'تسجيل الخصم'
+                    : 'تسجيل المعاملة'}
               </button>
             </form>
             {ledgerMsg && (

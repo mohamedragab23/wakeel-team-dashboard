@@ -594,6 +594,19 @@ export async function PUT(request: NextRequest) {
         await invalidateRiderWorkflowCaches({ extraSheets: ['طلبات_الإقالة'], notify: false });
       }
 
+      const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
+      sendAdminTelegramNotificationSafe({
+        type: 'request_decision',
+        requestKind: 'termination',
+        decision: status === 'approved' ? 'approved' : 'rejected',
+        supervisorCode,
+        supervisorName: freshRow[1]?.toString().trim() || '',
+        riderCode,
+        riderName: freshRow[3]?.toString().trim() || '',
+        decidedBy: String(approvedBy),
+        requestDate: approvalDate,
+      }).catch(() => {});
+
       return NextResponse.json({
         success: true,
         message:

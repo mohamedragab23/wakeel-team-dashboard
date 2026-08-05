@@ -2,6 +2,7 @@ import { getSupervisorContacts } from '@/lib/supervisorContacts';
 import { renderSupervisorSummaryPng } from '@/lib/supervisorSummaryImage';
 import { Buffer } from 'buffer';
 import type { SupervisorJoinDateAlert } from '@/lib/riderMetadataNotifications';
+import { resolveDashboardNotificationsChatId } from '@/lib/adminTelegramNotifier';
 
 export type SupervisorShiftSummary = {
   supervisor: string;
@@ -110,7 +111,8 @@ export async function notifySupervisorsShiftSummary(params: {
 
   const title = `ملخص الشفتات — ${date} — ${cityLabel || '—'}`;
   const imageTitle = `Shifts summary — ${cityLabel || '—'} — ${date}`;
-  const defaultTelegramChatId = process.env.TELEGRAM_DEFAULT_CHAT_ID?.trim();
+  // جروب الإشعارات (not جروب الأكواد)
+  const defaultTelegramChatId = resolveDashboardNotificationsChatId();
   const linesFor = (r: SupervisorShiftSummary) => {
     const pct = `${Number(r.pct || 0).toFixed(1)}%`;
     const hrs = Number(r.totalBookedHours || 0).toFixed(2);
@@ -268,7 +270,7 @@ export async function notifySupervisorsMissingJoinDate(alerts: SupervisorJoinDat
   const preferWhatsApp = !!(process.env.WHATSAPP_TOKEN?.trim() && process.env.WHATSAPP_PHONE_NUMBER_ID?.trim());
   const preferTelegram = !!(process.env.TELEGRAM_BOT_TOKEN?.trim());
   const preferEmail = !!(process.env.RESEND_API_KEY?.trim() && process.env.RESEND_FROM_EMAIL?.trim());
-  const defaultTelegramChatId = process.env.TELEGRAM_DEFAULT_CHAT_ID?.trim();
+  const defaultTelegramChatId = resolveDashboardNotificationsChatId();
 
   let sent = 0;
   const skipped: Array<{ supervisor: string; reason: string }> = [];

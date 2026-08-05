@@ -393,6 +393,19 @@ export async function PUT(request: NextRequest) {
       });
     }
 
+    const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
+    sendAdminTelegramNotificationSafe({
+      type: 'request_decision',
+      requestKind: 'reactivation',
+      decision: status === 'approved' ? 'approved' : 'rejected',
+      supervisorCode: parsed.supervisorCode,
+      supervisorName: parsed.supervisorName || '',
+      riderCode: parsed.riderCode,
+      riderName: parsed.riderName || '',
+      decidedBy: approvedBy,
+      requestDate: approvalDate,
+    }).catch(() => {});
+
     return NextResponse.json({
       success: true,
       message: action === 'approve' ? 'تمت الموافقة على إعادة التفعيل' : 'تم رفض الطلب',

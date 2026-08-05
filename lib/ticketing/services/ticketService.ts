@@ -184,8 +184,35 @@ export async function listTickets(
   const type = filters.type ?? null;
   const priority = filters.priority ?? null;
   const zone = filters.zone ?? null;
-  const search = filters.search?.trim() ? `%${filters.search.trim()}%` : null;
+  // Smart search: any token substring across ticket fields + comments + payload JSON.
+  // Spaces become wildcards so "كود 123" matches text containing both fragments.
+  const rawSearch = filters.search?.trim() || '';
+  const search = rawSearch
+    ? `%${rawSearch.replace(/\s+/g, '%')}%`
+    : null;
   const supervisorCode = scopeSupervisorCode ?? filters.supervisorCode ?? null;
+
+  const searchClause = sql`
+    (
+      ${search}::text IS NULL OR
+      t.subject ILIKE ${search} OR
+      t.description ILIKE ${search} OR
+      t.supervisor_name ILIKE ${search} OR
+      t.supervisor_code ILIKE ${search} OR
+      t.zone ILIKE ${search} OR
+      t.type ILIKE ${search} OR
+      t.status ILIKE ${search} OR
+      t.priority ILIKE ${search} OR
+      COALESCE(t.assigned_admin_code, '') ILIKE ${search} OR
+      CAST(t.ticket_number AS TEXT) ILIKE ${search} OR
+      COALESCE(t.payload::text, '') ILIKE ${search} OR
+      EXISTS (
+        SELECT 1 FROM ticket_comments c
+        WHERE c.ticket_id = t.id
+          AND (c.body ILIKE ${search} OR c.author_name ILIKE ${search} OR c.author_code ILIKE ${search})
+      )
+    )
+  `;
 
   const [countRow] = await sql<{ count: string }[]>`
     SELECT COUNT(*)::text AS count FROM tickets t
@@ -194,13 +221,7 @@ export async function listTickets(
       AND (${type}::text IS NULL OR t.type = ${type})
       AND (${priority}::text IS NULL OR t.priority = ${priority})
       AND (${zone}::text IS NULL OR t.zone = ${zone})
-      AND (
-        ${search}::text IS NULL OR
-        t.subject ILIKE ${search} OR
-        t.description ILIKE ${search} OR
-        t.supervisor_name ILIKE ${search} OR
-        CAST(t.ticket_number AS TEXT) ILIKE ${search}
-      )
+      AND ${searchClause}
   `;
 
   const rows = await sql`
@@ -222,13 +243,7 @@ export async function listTickets(
       AND (${type}::text IS NULL OR t.type = ${type})
       AND (${priority}::text IS NULL OR t.priority = ${priority})
       AND (${zone}::text IS NULL OR t.zone = ${zone})
-      AND (
-        ${search}::text IS NULL OR
-        t.subject ILIKE ${search} OR
-        t.description ILIKE ${search} OR
-        t.supervisor_name ILIKE ${search} OR
-        CAST(t.ticket_number AS TEXT) ILIKE ${search}
-      )
+      AND ${searchClause}
     ORDER BY
       CASE t.priority
         WHEN 'urgent' THEN 1

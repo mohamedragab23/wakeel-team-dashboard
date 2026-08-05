@@ -35,7 +35,9 @@ export type NotificationType =
   | 'equipment_return'
   | 'new_ticket'
   | 'incomplete_rider_data'
-  | 'system_alert';
+  | 'system_alert'
+  /** Decision on a supervisor workflow request — posted to جروب الإشعارات for supervisors to see. */
+  | 'request_decision';
 
 export type NotificationPayload = {
   type: NotificationType;
@@ -56,6 +58,10 @@ export type NotificationPayload = {
   requestDate?: string;
   alertTitle?: string;
   alertMessage?: string;
+  /** For request_decision */
+  decision?: 'approved' | 'rejected';
+  requestKind?: 'termination' | 'assignment' | 'reactivation' | 'equipment_delivery' | 'equipment_return';
+  decidedBy?: string;
 };
 
 /**
@@ -191,6 +197,45 @@ function formatNotificationMessage(payload: NotificationPayload): string {
         lines.push(payload.alertMessage);
       }
       break;
+
+    case 'request_decision': {
+      const kindLabel =
+        payload.requestKind === 'termination'
+          ? 'طلب إقالة'
+          : payload.requestKind === 'assignment'
+            ? 'طلب تعيين'
+            : payload.requestKind === 'reactivation'
+              ? 'طلب إعادة تفعيل'
+              : payload.requestKind === 'equipment_delivery'
+                ? 'طلب تسليم معدات'
+                : payload.requestKind === 'equipment_return'
+                  ? 'طلب إرجاع معدات'
+                  : 'طلب';
+      const approved = payload.decision === 'approved';
+      lines[0] = approved ? '✅ *تم قبول الطلب*' : '❌ *تم رفض الطلب*';
+      lines.push('');
+      lines.push(`📋 *النوع:* ${kindLabel}`);
+      if (payload.supervisorName || payload.supervisorCode) {
+        lines.push(
+          `👤 *المشرف:* ${payload.supervisorName || '—'}${
+            payload.supervisorCode ? ` (${payload.supervisorCode})` : ''
+          }`
+        );
+      }
+      if (payload.riderName || payload.riderCode) {
+        lines.push(
+          `🆔 *المندوب:* ${payload.riderName || '—'}${payload.riderCode ? ` (${payload.riderCode})` : ''}`
+        );
+      }
+      if (payload.decidedBy) {
+        lines.push(`✍️ *بواسطة:* ${payload.decidedBy}`);
+      }
+      lines.push(`📅 *التاريخ:* ${date}`);
+      if (payload.reason) {
+        lines.push(`📝 *ملاحظة:* ${payload.reason}`);
+      }
+      break;
+    }
   }
 
   // Add URL if provided
@@ -200,6 +245,18 @@ function formatNotificationMessage(payload: NotificationPayload): string {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Chat ID for dashboard notifications ("جروب الإشعارات").
+ * Never use TELEGRAM_OTP_CODES_CHAT_ID here — that group is OTP-only.
+ */
+export function resolveDashboardNotificationsChatId(): string | undefined {
+  return (
+    process.env.TELEGRAM_ADMIN_GROUP_CHAT_ID?.trim() ||
+    process.env.TELEGRAM_DEFAULT_CHAT_ID?.trim() ||
+    undefined
+  );
 }
 
 /**
@@ -249,12 +306,12 @@ export async function sendAdminTelegramNotification(
 
   const message = formatNotificationMessage(payload);
 
-  // Check if there's a default admin group chat
-  const adminGroupChatId = process.env.TELEGRAM_ADMIN_GROUP_CHAT_ID?.trim();
+  // Prefer جروب الإشعارات (never OTP codes group)
+  const adminGroupChatId = resolveDashboardNotificationsChatId();
   if (adminGroupChatId) {
     try {
       await sendToTelegram(adminGroupChatId, message);
-      console.log('[AdminTelegramNotifier] Sent to admin group chat:', adminGroupChatId);
+      console.log('[AdminTelegramNotifier] Sent to notifications group chat');
       return { sent: 1, skipped: 0, failed: [] };
     } catch (error: any) {
       console.error('[AdminTelegramNotifier] Failed to send to admin group:', error?.message || error);

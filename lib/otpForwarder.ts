@@ -126,6 +126,19 @@ export async function forwardLatestOktaOtp(): Promise<ForwardResult> {
     return { forwarded: false, reason: 'telegram_otp_not_configured' };
   }
 
+  // Safety: never post OTP codes into جروب الإشعارات by misconfiguration.
+  const codesChat = process.env.TELEGRAM_OTP_CODES_CHAT_ID.trim();
+  const notifChat =
+    process.env.TELEGRAM_ADMIN_GROUP_CHAT_ID?.trim() ||
+    process.env.TELEGRAM_DEFAULT_CHAT_ID?.trim() ||
+    '';
+  if (notifChat && codesChat === notifChat) {
+    logStructured('error', 'otp_forwarder_chat_collision', {
+      message: 'TELEGRAM_OTP_CODES_CHAT_ID equals notifications group — refusing to send',
+    });
+    return { forwarded: false, reason: 'chat_collision' };
+  }
+
   const config = getGmailImapConfig();
   const client = createImapClient(config);
   const sinceCutoff = Date.now() - LOOKBACK_MS;
