@@ -13,6 +13,7 @@ import {
   getSupervisorCodesInAdminDataScope,
 } from '@/lib/adminZoneScope';
 import { getAllRiders, addRider, updateRider, deleteRider } from '@/lib/adminService';
+import { enrichWithRoosterOps } from '@/lib/rooster/enrichRiderOps';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,9 +54,16 @@ export async function GET(request: NextRequest) {
       riders = riders.slice(offset, offset + limit);
     }
 
+    const data = await enrichWithRoosterOps(
+      riders.map((r) => ({
+        ...r,
+        contractEndDate: r.contractEndDate || '',
+      }))
+    );
+
     return NextResponse.json({
       success: true,
-      data: riders,
+      data,
       meta: limit > 0 ? { total, limit, offset } : undefined,
     });
   } catch (error: any) {

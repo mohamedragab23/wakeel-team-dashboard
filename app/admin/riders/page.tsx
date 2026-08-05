@@ -30,6 +30,15 @@ interface Rider {
   phone?: string;
   joinDate?: string;
   status?: string;
+  contractEndDate?: string | null;
+  roosterSuspended?: boolean | null;
+}
+
+function formatContractEnd(value: string | null | undefined): string {
+  if (!value) return '—';
+  const d = new Date(value.slice(0, 10) + 'T00:00:00');
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 interface RiderPerformanceRow {
@@ -111,6 +120,7 @@ export default function AdminRidersPage() {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingRider, setEditingRider] = useState<Rider | null>(null);
+  const [rosterSearch, setRosterSearch] = useState('');
   const [formData, setFormData] = useState<Partial<Rider>>({
     code: '',
     name: '',
@@ -226,6 +236,17 @@ export default function AdminRidersPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'riders'] });
     } });
+
+  const filteredRosterRiders = useMemo(() => {
+    const q = rosterSearch.trim().toLowerCase();
+    return (riders as Rider[]).filter((rider) => {
+      if (!rider.code || rider.code.trim() === '') return false;
+      if (!q) return true;
+      const code = (rider.code || '').toLowerCase();
+      const name = (rider.name || '').toLowerCase();
+      return code.includes(q) || name.includes(q);
+    });
+  }, [riders, rosterSearch]);
 
   const handleEdit = (rider: Rider) => {
     setEditingRider(rider);
@@ -799,39 +820,71 @@ export default function AdminRidersPage() {
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden text-[#1e1e2f]">
+          <div className="p-4 sm:p-5 border-b border-gray-100 flex flex-wrap items-end justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-gray-800">قائمة المناديب</h3>
+              <p className="text-sm text-gray-500 mt-0.5">
+                بحث بالكود أو الاسم — الحالة وانتهاء العقد من روستر (نفس منطق صفحة المشرفين)
+              </p>
+            </div>
+            <div className="w-full sm:w-80">
+              <label htmlFor="admin-roster-search" className="block text-sm font-medium text-gray-700 mb-1">
+                بحث بكود المندوب أو الاسم
+              </label>
+              <input
+                id="admin-roster-search"
+                type="search"
+                value={rosterSearch}
+                onChange={(e) => setRosterSearch(e.target.value)}
+                placeholder="اكتب الكود أو الاسم..."
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+              />
+            </div>
+          </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px]">
+            <table className="w-full min-w-[1100px]">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الكود</th>
-                  <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700 min-w-[240px]">الاسم</th>
-                  <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">المنطقة</th>
-                  <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">المشرف</th>
-                  <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الحالة</th>
-                  <th className="text-right py-4 px-6 text-sm font-semibold text-gray-700">الإجراءات</th>
+                  <th className="text-right py-4 px-4 text-sm font-semibold text-gray-700">الكود</th>
+                  <th className="text-right py-4 px-4 text-sm font-semibold text-gray-700 min-w-[200px]">الاسم</th>
+                  <th className="text-right py-4 px-4 text-sm font-semibold text-gray-700 whitespace-nowrap">الحالة (روستر)</th>
+                  <th className="text-right py-4 px-4 text-sm font-semibold text-gray-700 whitespace-nowrap">انتهاء العقد</th>
+                  <th className="text-right py-4 px-4 text-sm font-semibold text-gray-700">المنطقة</th>
+                  <th className="text-right py-4 px-4 text-sm font-semibold text-gray-700">المشرف</th>
+                  <th className="text-right py-4 px-4 text-sm font-semibold text-gray-700">حالة الشيت</th>
+                  <th className="text-right py-4 px-4 text-sm font-semibold text-gray-700">الإجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {riders.length === 0 ? (
+                {filteredRosterRiders.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-gray-500">
-                      لا توجد مناديب
+                    <td colSpan={8} className="py-12 text-center text-gray-500">
+                      {riders.length === 0 ? 'لا توجد مناديب' : 'لا توجد نتائج مطابقة للبحث'}
                     </td>
                   </tr>
                 ) : (
-                  riders
-                    .filter((rider: Rider) => {
-                      // Filter out deleted riders (those with empty code or marked as deleted)
-                      if (!rider.code || rider.code.trim() === '') return false;
-                      // Show all riders for admin (including unassigned ones)
-                      return true;
-                    })
-                    .map((rider: Rider, index: number) => (
+                  filteredRosterRiders.map((rider: Rider, index: number) => (
                     <tr key={`rider-${rider.code}-${index}`} className="hover:bg-gray-50">
-                      <td className="py-4 px-6 text-sm text-gray-800">{rider.code}</td>
-                      <td className="py-4 px-6 text-sm text-gray-800 font-medium whitespace-normal break-words">{rider.name}</td>
-                      <td className="py-4 px-6 text-sm text-gray-600">{rider.region}</td>
-                      <td className="py-4 px-6 text-sm text-gray-600">
+                      <td className="py-4 px-4 text-sm text-gray-800">{rider.code}</td>
+                      <td className="py-4 px-4 text-sm text-gray-800 font-medium whitespace-normal break-words">{rider.name}</td>
+                      <td className="py-4 px-4 text-sm">
+                        {rider.roosterSuspended === true ? (
+                          <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800">
+                            موقوف
+                          </span>
+                        ) : rider.roosterSuspended === false ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+                            نشط
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="py-4 px-4 text-sm text-gray-700 tabular-nums whitespace-nowrap">
+                        {formatContractEnd(rider.contractEndDate)}
+                      </td>
+                      <td className="py-4 px-4 text-sm text-gray-600">{rider.region}</td>
+                      <td className="py-4 px-4 text-sm text-gray-600">
                         {rider.supervisorCode && rider.supervisorCode.trim() !== '' && 
                          !['لم يتم التعيين', 'غير معروف', 'غير معين'].some(text => 
                            rider.supervisorCode?.toLowerCase().includes(text.toLowerCase())) ? (
@@ -842,7 +895,7 @@ export default function AdminRidersPage() {
                           <span className="text-gray-400 italic">لم يتم التعيين</span>
                         )}
                       </td>
-                      <td className="py-4 px-6 text-sm">
+                      <td className="py-4 px-4 text-sm">
                         <span
                           className={`px-2 py-1 rounded-full text-xs ${
                             rider.status === 'نشط'
@@ -853,7 +906,7 @@ export default function AdminRidersPage() {
                           {rider.status || 'نشط'}
                         </span>
                       </td>
-                      <td className="py-4 px-6 text-sm">
+                      <td className="py-4 px-4 text-sm">
                         <div className="flex gap-2 justify-end">
                           <button
                             onClick={() => handleEdit(rider)}

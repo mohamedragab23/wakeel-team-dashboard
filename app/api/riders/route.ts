@@ -11,41 +11,9 @@ import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { aggregateRidersInDateRange } from '@/lib/riderPerformanceAggregate';
 import { parseAdminAllowedZonesList } from '@/lib/zones';
 import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
-import { RoosterClient } from '@/lib/rooster/RoosterClient';
+import { enrichWithRoosterOps } from '@/lib/rooster/enrichRiderOps';
 
 export const dynamic = 'force-dynamic';
-
-type RiderOpsFields = {
-  roosterSuspended: boolean | null;
-  hasStartingPoints: boolean | null;
-  contractEndDate: string | null;
-};
-
-/** Fail-open: Rooster outage must never blank the riders table. */
-async function enrichWithRoosterOps<T extends { code: string; contractEndDate?: string | null }>(
-  rows: T[]
-): Promise<(T & RiderOpsFields)[]> {
-  try {
-    const map = await RoosterClient.getOperationalStatusMap(rows.map((r) => r.code));
-    return rows.map((r) => {
-      const ops = map[String(r.code).trim()];
-      const sheetEnd = r.contractEndDate ? String(r.contractEndDate).trim().slice(0, 10) : null;
-      return {
-        ...r,
-        roosterSuspended: ops ? ops.suspended : null,
-        hasStartingPoints: ops ? ops.hasStartingPoints : null,
-        contractEndDate: ops?.contractEndDate || sheetEnd || null,
-      };
-    });
-  } catch {
-    return rows.map((r) => ({
-      ...r,
-      roosterSuspended: null as boolean | null,
-      hasStartingPoints: null as boolean | null,
-      contractEndDate: r.contractEndDate ? String(r.contractEndDate).trim().slice(0, 10) : null,
-    }));
-  }
-}
 
 export async function GET(request: NextRequest) {
   try {
