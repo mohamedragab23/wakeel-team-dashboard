@@ -45,7 +45,9 @@ export async function tieredCacheGet<T>(key: string, memoryTtlMs?: number): Prom
  */
 export async function tieredCacheSet<T>(key: string, data: T, ttlMs: number, l1TtlMs?: number): Promise<void> {
   cache.set(key, data, l1TtlMs ?? ttlMs);
-  void redisCacheSet(key, data, ttlMs);
+  // Await L2 — Live 3PL (and any cross-instance reader) depends on Redis
+  // actually persisting; fire-and-forget hid SET failures behind sync_ok.
+  await redisCacheSet(key, data, ttlMs);
 }
 
 export async function tieredCacheDelete(key: string): Promise<void> {

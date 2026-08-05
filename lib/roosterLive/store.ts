@@ -39,6 +39,8 @@ export async function saveLiveRidersSnapshot(snapshot: LiveRidersSnapshot): Prom
         'The Live 3PL sync requires shared storage across serverless invocations — see docs.'
     );
   }
+  // Must fully persist to Redis before the cron reports success — L1 alone
+  // is invisible to other serverless instances serving /api/live-riders.
   await tieredCacheSet(snapshotKey(snapshot.cityId), snapshot, SNAPSHOT_TTL_MS);
 }
 

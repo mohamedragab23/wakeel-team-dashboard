@@ -84,11 +84,18 @@ export async function redisCacheSet<T>(key: string, data: T, ttlMs: number): Pro
   const envelope: CacheEnvelope<T> = { data, expiresAt: Date.now() + ttlMs };
   const payload = JSON.stringify(envelope);
   const ttlSec = Math.max(1, Math.ceil(ttlMs / 1000));
-  // EX must be a path segment (`/EX/30`), not `?EX=30` — query form can 400
-  // on this project's Upstash/KV REST endpoint (see lib/upstashRest.ts).
-  await redisCommand(
-    `/set/${encodeURIComponent(key)}/${encodeURIComponent(payload)}/EX/${ttlSec}`
-  );
+  // POST body for the value — path-encoding large snapshots (Live 3PL ~100+
+  // riders) overflows Upstash/KV with "400 Request Header Or Cookie Too Large".
+  // Upstash docs: POST /set/{key}?EX={ttl} with raw body as the value.
+  const res = await redisCommand(`/set/${encodeURIComponent(key)}?EX=${ttlSec}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: payload,
+  });
+  if (res && !res.ok) {
+    const errText = await res.text().catch(() => '');
+    console.warn('[redisCache] SET failed:', res.status, errText.slice(0, 200));
+  }
 }
 
 export async function redisCacheDelete(key: string): Promise<void> {
