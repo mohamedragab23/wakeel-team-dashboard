@@ -26,6 +26,48 @@ function extractOtpFromText(text: string): string | null {
   return anyCode ? anyCode[1] : null;
 }
 
+/**
+ * Finds the MIME part path of the first text/plain leaf in a body structure
+ * tree. imapflow.download(uid, part) will then return the DECODED bytes for
+ * that part (handling base64 / quoted-printable transparently).
+ */
+function findTextPlainPart(node: any): string | null {
+  if (!node) return null;
+  // imapflow reports the full MIME type in node.type, e.g. "text/plain"
+  if ((node.type || '').toLowerCase() === 'text/plain') return node.part || null;
+  for (const child of node.childNodes ?? []) {
+    const found = findTextPlainPart(child);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Downloads and decodes the readable text body of a message.
+ * Priority: text/plain part → parts "1" / "1.1" (common paths) → empty.
+ * imapflow.download() always decodes Content-Transfer-Encoding (base64,
+ * quoted-printable) automatically, so the returned string is plain UTF-8.
+ */
+async function downloadDecodedText(client: any, uid: number, bodyStructure: any): Promise<string> {
+  const textPath = findTextPlainPart(bodyStructure);
+  const candidates = textPath ? [textPath, '1', '1.1'] : ['1', '1.1'];
+
+  for (const part of candidates) {
+    try {
+      const dl = await client.download(String(uid), part, { uid: true });
+      const chunks: Buffer[] = [];
+      for await (const chunk of dl.content as AsyncIterable<Buffer>) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as any));
+      }
+      const text = Buffer.concat(chunks).toString('utf8');
+      if (text.trim()) return text;
+    } catch {
+      // try next candidate
+    }
+  }
+  return '';
+}
+
 export type OtpWaitResult = { success: true; code: string } | { success: false; reason: string };
 
 /**
@@ -66,8 +108,16 @@ async function pollImapOnce(sinceEpochMs: number, seenUids: Set<number>): Promis
       for (const uid of uids) {
         if (seenUids.has(uid)) continue;
 
-        // Fetch metadata first to filter by exact arrival time cheaply.
-        const meta = await client.fetchOne(String(uid), { internalDate: true, envelope: true }, { uid: true });
+        // Fetch metadata + body structure in one round trip.
+        // bodyStructure lets us pinpoint the text/plain MIME part so the
+        // subsequent download() call gets the DECODED content (imapflow
+        // transparently handles base64 / quoted-printable) — not raw bytes
+        // where searching for a 6-digit OTP would yield false positives.
+        const meta = await client.fetchOne(
+          String(uid),
+          { internalDate: true, envelope: true, bodyStructure: true },
+          { uid: true }
+        );
         if (!meta) { seenUids.add(uid); continue; }
 
         // internalDate can be Date or string — normalise to ms.
@@ -87,16 +137,15 @@ async function pollImapOnce(sinceEpochMs: number, seenUids: Set<number>): Promis
 
         seenUids.add(uid);
 
-        // Fetch full message source for OTP extraction.
-        const full = await client.fetchOne(String(uid), { source: true }, { uid: true });
-        if (!full || !full.source) continue;
+        // Download decoded body text (handles base64-encoded MIME parts).
+        const emailText = await downloadDecodedText(client, uid, meta.bodyStructure);
 
-        const code = extractOtpFromText(full.source.toString());
+        const code = extractOtpFromText(emailText);
         if (code) {
           logStructured('info', 'rooster_gmail_otp_found', { uid });
           return code;
         }
-        logStructured('warn', 'rooster_gmail_otp_message_no_code', { uid });
+        logStructured('warn', 'rooster_gmail_otp_message_no_code', { uid, emailTextLength: emailText.length });
       }
 
       return null;
