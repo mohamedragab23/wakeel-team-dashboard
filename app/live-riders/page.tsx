@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Layout from '@/components/Layout';
 import Card from '@/components/ui-v2/Card';
@@ -52,17 +52,16 @@ export default function LiveRidersPage() {
   const [viewMode, setViewMode] = useState<'riders' | 'supervisors'>('riders');
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Check if user is admin
-  useState(() => {
+  useEffect(() => {
     try {
       const user = getStoredUser();
       setIsAdmin(user?.role === 'admin');
     } catch {
       setIsAdmin(false);
     }
-  });
+  }, []);
 
-  const { data, isLoading, isError, error, dataUpdatedAt, isFetching } = useQuery({
+  const { data, isLoading, isError, error, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ['live-riders'],
     queryFn: fetchLiveRiders,
     refetchInterval: REFRESH_INTERVAL_MS,

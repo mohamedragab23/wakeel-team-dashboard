@@ -118,10 +118,12 @@ export async function GET(request: NextRequest) {
     // Only riders assigned to this viewer are ever returned — riders present
     // in the Talabat snapshot but not in this viewer's scope are dropped here.
     const scoped: LiveRiderWithAssignment[] = [];
+    let matchedLive = 0;
     for (const normCode of allowedNormalizedCodes) {
       const internal = byNormalizedCode.get(normCode)!;
       const live = liveByNormalizedId.get(normCode);
       if (!live) continue; // rider assigned but not currently present in the live feed (e.g. not logged into Rooster today)
+      matchedLive += 1;
       scoped.push({
         ...live,
         supervisorCode: internal.supervisorCode || null,
@@ -129,6 +131,25 @@ export async function GET(request: NextRequest) {
         unmapped: false,
       });
     }
+
+    const lastSyncAtEarly = snapshot?.lastSyncAt ?? null;
+    const ageMsEarly = lastSyncAtEarly ? Date.now() - new Date(lastSyncAtEarly).getTime() : null;
+    console.log(
+      JSON.stringify({
+        tag: 'live_riders_read',
+        cityId,
+        role: decoded.role,
+        hasSnapshot: Boolean(snapshot),
+        snapshotRiders: snapshot?.riders?.length ?? 0,
+        snapshotRiderCount: snapshot?.riderCount ?? 0,
+        lastSyncAt: lastSyncAtEarly,
+        ageMs: ageMsEarly,
+        assignedInternal: allowedNormalizedCodes.size,
+        liveIndexSize: liveByNormalizedId.size,
+        matchedLive,
+        scoped: scoped.length,
+      })
+    );
 
     const kpis = computeKpis(scoped);
     const distributions = {
@@ -161,6 +182,21 @@ export async function GET(request: NextRequest) {
       ageMs,
       stale,
     };
+    // Temporary diagnostics for empty/stale Live 3PL UI (remove after confirmed fixed).
+    if (request.nextUrl.searchParams.get('debug') === '1' && decoded.role === 'admin') {
+      return NextResponse.json({
+        ...response,
+        debug: {
+          cityId,
+          hasSnapshot: Boolean(snapshot),
+          snapshotRiders: snapshot?.riders?.length ?? 0,
+          assignedInternal: allowedNormalizedCodes.size,
+          matchedLive,
+          sampleLiveIds: (snapshot?.riders ?? []).slice(0, 5).map((r) => r.riderId),
+          sampleAssigned: [...allowedNormalizedCodes].slice(0, 5),
+        },
+      });
+    }
     return NextResponse.json(response);
   } catch (error: any) {
     console.error('Get live riders error:', error);
