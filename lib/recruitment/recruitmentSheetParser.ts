@@ -23,6 +23,7 @@ import {
   LECTURE_ATTENDANCE_VALUES,
   PIPELINE_STATUS_VALUES,
   SECURITY_INQUIRY_PAYMENT_VALUES,
+  STUDENT_STATUS_VALUES,
   VEHICLE_TYPE_VALUES,
 } from './types';
 
@@ -88,6 +89,14 @@ export function rowToCandidate(row: unknown[], sheetRow1Based: number): Candidat
     contactsExceptionApproved: cell(row, 41).toLowerCase() === 'true' || cell(row, 41) === '1',
     contactsExceptionBy: cell(row, 42),
     contactsExceptionReason: cell(row, 43),
+    phoneSecondary: cell(row, 44),
+    nationalId: cell(row, 45),
+    detailedAddress: cell(row, 46),
+    age: cell(row, 47),
+    studentStatus: asEnum(cell(row, 48), STUDENT_STATUS_VALUES, ''),
+    lectureAbsenceReason: cell(row, 49),
+    activationNotActivatedReason: cell(row, 50),
+    contactsExceptionAt: cell(row, 51),
   };
 }
 
@@ -138,6 +147,14 @@ export function candidateToRow(c: Candidate): string[] {
     c.contactsExceptionApproved ? 'true' : 'false',
     c.contactsExceptionBy,
     c.contactsExceptionReason,
+    c.phoneSecondary,
+    c.nationalId,
+    c.detailedAddress,
+    c.age,
+    c.studentStatus,
+    c.lectureAbsenceReason,
+    c.activationNotActivatedReason,
+    c.contactsExceptionAt,
   ];
 }
 

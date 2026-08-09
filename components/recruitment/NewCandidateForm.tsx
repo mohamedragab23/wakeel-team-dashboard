@@ -9,6 +9,7 @@ import { ZONE_OPTIONS } from '@/lib/zones';
 import {
   HIRING_DECISION_VALUES,
   OFFICE_MANAGER_ASSIGNMENT_OPTION,
+  STUDENT_STATUS_VALUES,
   VEHICLE_TYPE_VALUES } from '@/lib/recruitment/types';
 
 type Props = {
@@ -17,6 +18,27 @@ type Props = {
 
 const inputClass =
   'w-full rounded-lg bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.12)] px-3 py-2 text-sm text-[#EAF0FF]';
+
+const emptyForm = {
+  fullName: '',
+  phone: '',
+  phoneSecondary: '',
+  nationalId: '',
+  detailedAddress: '',
+  age: '',
+  studentStatus: '' as '' | 'طالب' | 'غير طالب',
+  vehicleType: 'موتوسيكل' as 'موتوسيكل' | 'عجلة',
+  workedBefore: 'لا' as 'نعم' | 'لا',
+  governorate: '',
+  zone: ZONE_OPTIONS[0] as string,
+  jobAd: 'عرض تعيين جديد',
+  assignedSupervisorCode: '',
+  hiringDecision: 'قيد المراجعة' as 'قيد المراجعة' | 'هيشتغل' | 'لن يشتغل',
+  notHiredReason: '',
+  lecturePlannedDate: '',
+  securityInquiryPayment: 'NOT_PAID' as 'PAID' | 'NOT_PAID',
+  notes: '',
+};
 
 export default function NewCandidateForm({ onCreated }: Props) {
   const { data: supervisors = [] } = useQuery({
@@ -27,29 +49,31 @@ export default function NewCandidateForm({ onCreated }: Props) {
       return json.success ? (json.data as Array<{ code: string; name: string }>) : [];
     } });
 
+  const capability = useQuery({
+    queryKey: ['recruitment', 'capability'],
+    queryFn: async () => {
+      const res = await authFetch('/api/recruitment/capability');
+      return res.json();
+    },
+  });
+  const v2Enabled = Boolean(capability.data?.recruitmentV2Enabled);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
-  const [form, setForm] = useState({
-    fullName: '',
-    phone: '',
-    vehicleType: 'موتوسيكل' as 'موتوسيكل' | 'عجلة',
-    workedBefore: 'لا' as 'نعم' | 'لا',
-    governorate: '',
-    zone: ZONE_OPTIONS[0] as string,
-    jobAd: 'عرض تعيين جديد',
-    assignedSupervisorCode: '',
-    hiringDecision: 'قيد المراجعة' as 'قيد المراجعة' | 'هيشتغل' | 'لن يشتغل',
-    notHiredReason: '',
-    lecturePlannedDate: '',
-    notes: '' });
+  const [form, setForm] = useState(emptyForm);
 
   const canSubmit = useMemo(() => {
     if (!form.fullName.trim() || !form.phone.trim() || !form.governorate.trim()) return false;
     if (form.hiringDecision === 'لن يشتغل' && !form.notHiredReason.trim()) return false;
     if (form.hiringDecision === 'هيشتغل' && !form.lecturePlannedDate) return false;
+    if (v2Enabled) {
+      if (!form.nationalId.trim() || !form.detailedAddress.trim() || !form.age.trim() || !form.studentStatus) {
+        return false;
+      }
+    }
     return true;
-  }, [form]);
+  }, [form, v2Enabled]);
 
   const submit = async () => {
     setLoading(true);
@@ -64,19 +88,7 @@ export default function NewCandidateForm({ onCreated }: Props) {
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل الإضافة');
       setOk('تم إضافة بيانات التعيين الجديدة بنجاح');
-      setForm({
-        fullName: '',
-        phone: '',
-        vehicleType: 'موتوسيكل',
-        workedBefore: 'لا',
-        governorate: '',
-        zone: ZONE_OPTIONS[0] as string,
-        jobAd: 'عرض تعيين جديد',
-        assignedSupervisorCode: '',
-        hiringDecision: 'قيد المراجعة',
-        notHiredReason: '',
-        lecturePlannedDate: '',
-        notes: '' });
+      setForm({ ...emptyForm, zone: ZONE_OPTIONS[0] as string });
       onCreated();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'خطأ');
@@ -92,9 +104,75 @@ export default function NewCandidateForm({ onCreated }: Props) {
         <Field label="الاسم">
           <input className={inputClass} value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
         </Field>
-        <Field label="رقم التليفون">
+        <Field label="رقم التليفون (أساسي)">
           <input className={inputClass} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
         </Field>
+        {v2Enabled && (
+          <>
+            <Field label="رقم هاتف ثانوي (اختياري)">
+              <input
+                className={inputClass}
+                value={form.phoneSecondary}
+                onChange={(e) => setForm({ ...form, phoneSecondary: e.target.value })}
+              />
+            </Field>
+            <Field label="الرقم القومي">
+              <input
+                className={inputClass}
+                value={form.nationalId}
+                onChange={(e) => setForm({ ...form, nationalId: e.target.value })}
+              />
+            </Field>
+            <Field label="العمر">
+              <input
+                type="number"
+                min={1}
+                max={100}
+                className={inputClass}
+                value={form.age}
+                onChange={(e) => setForm({ ...form, age: e.target.value })}
+              />
+            </Field>
+            <Field label="طالب / غير طالب">
+              <select
+                className={inputClass}
+                value={form.studentStatus}
+                onChange={(e) =>
+                  setForm({ ...form, studentStatus: e.target.value as typeof form.studentStatus })
+                }
+              >
+                <option value="">— اختر —</option>
+                {STUDENT_STATUS_VALUES.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="العنوان التفصيلي" className="md:col-span-2">
+              <textarea
+                className={inputClass + ' min-h-[72px]'}
+                value={form.detailedAddress}
+                onChange={(e) => setForm({ ...form, detailedAddress: e.target.value })}
+              />
+            </Field>
+            <Field label="رسوم الاستعلام الأمني (100 ج)">
+              <select
+                className={inputClass}
+                value={form.securityInquiryPayment}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    securityInquiryPayment: e.target.value as 'PAID' | 'NOT_PAID',
+                  })
+                }
+              >
+                <option value="NOT_PAID">غير مدفوع (UNPAID)</option>
+                <option value="PAID">مدفوع (PAID)</option>
+              </select>
+            </Field>
+          </>
+        )}
         <Field label="وسيلة العمل">
           <select className={inputClass} value={form.vehicleType} onChange={(e) => setForm({ ...form, vehicleType: e.target.value as 'موتوسيكل' | 'عجلة' })}>
             {VEHICLE_TYPE_VALUES.map((v) => (

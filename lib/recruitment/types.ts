@@ -15,6 +15,35 @@ export type ContactStatus = (typeof CONTACT_STATUS_VALUES)[number];
 export const LECTURE_ATTENDANCE_VALUES = ['لم يحضر', 'حضر', 'غائب'] as const;
 export type LectureAttendance = (typeof LECTURE_ATTENDANCE_VALUES)[number];
 
+/** علاقة جهة الاتصال (Phase B) */
+export const CONTACT_RELATIONSHIP_VALUES = [
+  'أب',
+  'أم',
+  'عم',
+  'خال',
+  'أخ',
+  'أخت',
+  'أخرى',
+] as const;
+export type ContactRelationship = (typeof CONTACT_RELATIONSHIP_VALUES)[number];
+
+/** طالب / غير طالب */
+export const STUDENT_STATUS_VALUES = ['', 'طالب', 'غير طالب'] as const;
+export type StudentStatus = (typeof STUDENT_STATUS_VALUES)[number];
+
+/** مراحل لوحة التعيين (محسوبة — ليست عمود شيت) */
+export const RECRUITMENT_PIPELINE_STAGE_VALUES = [
+  'awaiting_lecture',
+  'absent',
+  'rescheduled',
+  'attended_awaiting_activation',
+  'activated',
+  'not_activated',
+  'activated_awaiting_ops_assignment',
+  'other',
+] as const;
+export type RecruitmentPipelineStage = (typeof RECRUITMENT_PIPELINE_STAGE_VALUES)[number];
+
 /** حالة التفعيل / القبول */
 export const ACTIVATION_STATUS_VALUES = ['غير مفعل', 'مفعل - تم القبول', 'مرفوض'] as const;
 export type ActivationStatus = (typeof ACTIVATION_STATUS_VALUES)[number];
@@ -100,8 +129,21 @@ export const CANDIDATE_HEADERS = [
   'contactsExceptionApproved',
   'contactsExceptionBy',
   'contactsExceptionReason',
+  // Phase B additive columns (append-only — never insert mid-row)
+  'phoneSecondary',
+  'nationalId',
+  'detailedAddress',
+  'age',
+  'studentStatus',
+  'lectureAbsenceReason',
+  'activationNotActivatedReason',
+  'contactsExceptionAt',
 ] as const;
 
+/**
+ * Canonical storage: PAID | NOT_PAID (design freeze + equipment liability).
+ * API also accepts UNPAID as an alias for NOT_PAID (never stored as UNPAID).
+ */
 export const SECURITY_INQUIRY_PAYMENT_VALUES = ['', 'PAID', 'NOT_PAID'] as const;
 export type SecurityInquiryPayment = (typeof SECURITY_INQUIRY_PAYMENT_VALUES)[number];
 
@@ -217,6 +259,14 @@ export interface Candidate {
   contactsExceptionApproved: boolean;
   contactsExceptionBy: string;
   contactsExceptionReason: string;
+  phoneSecondary: string;
+  nationalId: string;
+  detailedAddress: string;
+  age: string;
+  studentStatus: StudentStatus;
+  lectureAbsenceReason: string;
+  activationNotActivatedReason: string;
+  contactsExceptionAt: string;
 }
 
 export interface OutreachLead {
@@ -354,5 +404,13 @@ export function defaultCandidateFields(
     contactsExceptionApproved: partial.contactsExceptionApproved ?? false,
     contactsExceptionBy: partial.contactsExceptionBy?.trim() ?? '',
     contactsExceptionReason: partial.contactsExceptionReason?.trim() ?? '',
+    phoneSecondary: partial.phoneSecondary?.trim() ?? '',
+    nationalId: partial.nationalId?.trim() ?? '',
+    detailedAddress: partial.detailedAddress?.trim() ?? '',
+    age: partial.age != null ? String(partial.age).trim() : '',
+    studentStatus: (partial.studentStatus as StudentStatus) ?? '',
+    lectureAbsenceReason: partial.lectureAbsenceReason?.trim() ?? '',
+    activationNotActivatedReason: partial.activationNotActivatedReason?.trim() ?? '',
+    contactsExceptionAt: partial.contactsExceptionAt?.trim() ?? '',
   };
 }

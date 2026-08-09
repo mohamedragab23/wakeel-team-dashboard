@@ -17,6 +17,7 @@ import type {
   OutreachLeadInput,
   RecruitmentStats,
 } from './types';
+import { isRecruitmentV2Enabled } from '@/lib/srs014Flags';
 import {
   CANDIDATE_HEADERS,
   OFFICE_MANAGER_ASSIGNMENT_OPTION,
@@ -128,6 +129,19 @@ function computeAssignmentState(
   }
 
   if (chosen) {
+    // Phase B (V2 ON): never auto-promote preferred supervisor → Ops assignment.
+    // Only explicit Admin `finalAssignedSupervisorCode` completes assignment.
+    if (isRecruitmentV2Enabled()) {
+      if (result.finalAssignedSupervisorCode) {
+        result.assignmentStatus = 'تم التعيين';
+        if (!result.assignedAt) result.assignedAt = today;
+      } else if (activationDone) {
+        result.assignmentStatus = 'جاهز للتعيين';
+      } else {
+        result.assignmentStatus = 'غير محدد';
+      }
+      return result;
+    }
     if (fullyDone) {
       result.finalAssignedSupervisorCode = chosen;
       result.assignmentStatus = 'تم التعيين';
@@ -393,6 +407,29 @@ export async function createCandidate(
 
   await appendToSheet(SHEET_CANDIDATES, [candidateToRow(candidate)], false);
 
+  if (isRecruitmentV2Enabled()) {
+    try {
+      const { appendAuditLog } = await import('@/lib/auditLog');
+      void appendAuditLog({
+        domain: 'recruitment',
+        action: 'candidate_created',
+        entityType: 'candidate',
+        entityCode: id,
+        actorCode: createdBy,
+        actorName: createdByName,
+        after: {
+          fullName: candidate.fullName,
+          phone: candidate.phone,
+          zone: candidate.zone,
+          vehicleType: candidate.vehicleType,
+          workedBefore: candidate.workedBefore,
+        },
+      });
+    } catch (e) {
+      console.warn('[recruitment] create audit failed', e);
+    }
+  }
+
   if (!options?.skipNotification) {
     try {
       await notifyNewCandidate(candidate.fullName, candidate.jobAd);
@@ -442,6 +479,113 @@ export async function updateCandidate(
       await logCandidateChanges(existing, updated, actor.code, actor.name);
     } catch (e) {
       console.warn('[recruitment] activity log failed', e);
+    }
+  }
+
+  if (isRecruitmentV2Enabled()) {
+    try {
+      const { appendAuditLog } = await import('@/lib/auditLog');
+      if (
+        existing.finalAssignedSupervisorCode.trim() !==
+        updated.finalAssignedSupervisorCode.trim()
+      ) {
+        void appendAuditLog({
+          domain: 'recruitment',
+          action: existing.finalAssignedSupervisorCode
+            ? 'ops_supervisor_reassigned'
+            : 'ops_supervisor_assigned',
+          entityType: 'candidate',
+          entityCode: id,
+          actorCode: actor.code,
+          actorName: actor.name,
+          before: { finalAssignedSupervisorCode: existing.finalAssignedSupervisorCode },
+          after: { finalAssignedSupervisorCode: updated.finalAssignedSupervisorCode },
+        });
+      }
+      if (existing.activationStatus !== updated.activationStatus) {
+        void appendAuditLog({
+          domain: 'recruitment',
+          action:
+            updated.activationStatus === 'مفعل - تم القبول'
+              ? 'activation_confirmed'
+              : updated.activationStatus === 'مرفوض'
+                ? 'activation_rejected'
+                : 'candidate_updated',
+          entityType: 'candidate',
+          entityCode: id,
+          actorCode: actor.code,
+          actorName: actor.name,
+          before: {
+            activationStatus: existing.activationStatus,
+            riderCode: existing.riderCode ? '[set]' : '',
+          },
+          after: {
+            activationStatus: updated.activationStatus,
+            riderCode: updated.riderCode ? '[set]' : '',
+            activationNotActivatedReason: updated.activationNotActivatedReason
+              ? '[set]'
+              : '',
+          },
+        });
+      }
+      if (
+        existing.lectureAttendance !== updated.lectureAttendance ||
+        existing.lecturePlannedDate !== updated.lecturePlannedDate
+      ) {
+        let action = 'candidate_updated';
+        if (updated.lectureAttendance === 'حضر' && existing.lectureAttendance !== 'حضر') {
+          action = 'attendance_confirmed';
+        } else if (
+          (updated.lectureAttendance === 'لم يحضر' || updated.lectureAttendance === 'غائب') &&
+          existing.lectureAttendance === 'حضر'
+        ) {
+          action = 'absence_recorded';
+        } else if (
+          (updated.lectureAttendance === 'لم يحضر' || updated.lectureAttendance === 'غائب') &&
+          existing.lectureAttendance !== updated.lectureAttendance
+        ) {
+          action = 'absence_recorded';
+        } else if (
+          updated.lecturePlannedDate &&
+          updated.lecturePlannedDate !== existing.lecturePlannedDate
+        ) {
+          action =
+            existing.lecturePlannedDate && existing.lectureAttendance !== 'حضر'
+              ? 'lecture_rescheduled'
+              : 'lecture_scheduled';
+        }
+        void appendAuditLog({
+          domain: 'recruitment',
+          action,
+          entityType: 'candidate',
+          entityCode: id,
+          actorCode: actor.code,
+          actorName: actor.name,
+          before: {
+            lecturePlannedDate: existing.lecturePlannedDate,
+            lectureAttendance: existing.lectureAttendance,
+          },
+          after: {
+            lecturePlannedDate: updated.lecturePlannedDate,
+            lectureAttendance: updated.lectureAttendance,
+            lectureAbsenceReason: updated.lectureAbsenceReason ? '[set]' : '',
+          },
+        });
+      }
+      if (existing.riderCode !== updated.riderCode && updated.riderCode) {
+        void appendAuditLog({
+          domain: 'recruitment',
+          action: 'rider_code_assigned',
+          entityType: 'candidate',
+          entityCode: id,
+          actorCode: actor.code,
+          actorName: actor.name,
+          before: { riderCode: existing.riderCode ? '[set]' : '' },
+          after: { riderCode: '[set]' },
+        });
+      }
+    } catch (e) {
+      console.warn('[recruitment] update audit failed', e);
     }
   }
 
@@ -687,9 +831,17 @@ export async function resetRecruitmentManagerData(options: {
 export async function ensureAllRecruitmentSheets(): Promise<string[]> {
   const { ensureActivityLogSheet } = await import('./recruitmentActivityLog');
   const { ensureNotificationsSheet } = await import('./recruitmentNotifications');
+  const { ensureContactsSheet } = await import('./contactsStore');
   await ensureCandidatesSheet();
   await ensureOutreachLeadsSheet();
   await ensureActivityLogSheet();
   await ensureNotificationsSheet();
-  return [SHEET_CANDIDATES, SHEET_OUTREACH_LEADS, 'سجل_نشاط_المرشحين', 'إشعارات_التعيين'];
+  await ensureContactsSheet();
+  return [
+    SHEET_CANDIDATES,
+    SHEET_OUTREACH_LEADS,
+    'سجل_نشاط_المرشحين',
+    'إشعارات_التعيين',
+    'جهات_اتصال_المرشحين',
+  ];
 }

@@ -7,13 +7,17 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Button from '@/components/ui-v2/Button';
 import Card from '@/components/ui-v2/Card';
 import Toast, { type ToastMessage } from '@/components/ui-v2/Toast';
-import type { Candidate } from '@/lib/recruitment/types';
+import type { Candidate, RecruitmentPipelineStage } from '@/lib/recruitment/types';
 import {
   ACTIVATION_STATUS_VALUES,
   ASSIGNMENT_STATUS_VALUES,
   CONTACT_STATUS_VALUES,
   EQUIPMENT_STATUS_VALUES,
-  LECTURE_ATTENDANCE_VALUES } from '@/lib/recruitment/types';
+  LECTURE_ATTENDANCE_VALUES,
+  RECRUITMENT_PIPELINE_STAGE_VALUES } from '@/lib/recruitment/types';
+import {
+  deriveRecruitmentPipelineStage,
+  PIPELINE_STAGE_LABELS_AR } from '@/lib/recruitment/phaseB';
 import CandidateEditModal from './CandidateEditModal';
 import ContactLogModal from './ContactLogModal';
 import ActivityLogModal from './ActivityLogModal';
@@ -36,6 +40,7 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
   const [equipmentStatus, setEquipmentStatus] = useState('');
   const [assignmentStatus, setAssignmentStatus] = useState('');
   const [finalAssignedSupervisorCode, setFinalAssignedSupervisorCode] = useState('');
+  const [pipelineStage, setPipelineStage] = useState('');
   const [appliedDateFrom, setAppliedDateFrom] = useState('');
   const [appliedDateTo, setAppliedDateTo] = useState('');
 
@@ -109,9 +114,15 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
     } });
 
   const candidates = useMemo(() => {
-    if (mode !== 'archive') return candidatesRaw;
-    return candidatesRaw.filter((c) => c.pipelineStatus === 'archived' || c.isLegacy);
-  }, [candidatesRaw, mode]);
+    let list =
+      mode !== 'archive'
+        ? candidatesRaw
+        : candidatesRaw.filter((c) => c.pipelineStatus === 'archived' || c.isLegacy);
+    if (pipelineStage) {
+      list = list.filter((c) => deriveRecruitmentPipelineStage(c) === pipelineStage);
+    }
+    return list;
+  }, [candidatesRaw, mode, pipelineStage]);
 
   const activeFiltersCount = useMemo(() => {
     const filters = [
@@ -122,6 +133,7 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
       equipmentStatus,
       assignmentStatus,
       finalAssignedSupervisorCode,
+      pipelineStage,
       appliedDateFrom,
       appliedDateTo,
     ];
@@ -134,6 +146,7 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
     equipmentStatus,
     assignmentStatus,
     finalAssignedSupervisorCode,
+    pipelineStage,
     appliedDateFrom,
     appliedDateTo,
   ]);
@@ -273,6 +286,7 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
     setEquipmentStatus('');
     setAssignmentStatus('');
     setFinalAssignedSupervisorCode('');
+    setPipelineStage('');
     setAppliedDateFrom('');
     setAppliedDateTo('');
   };
@@ -377,6 +391,20 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
               ))}
             </select>
           </FilterField>
+          <FilterField label="مرحلة المتابعة (V2)">
+            <select
+              className={selectClass + ' min-w-[200px]'}
+              value={pipelineStage}
+              onChange={(e) => setPipelineStage(e.target.value)}
+            >
+              <option value="">الكل</option>
+              {RECRUITMENT_PIPELINE_STAGE_VALUES.filter((s) => s !== 'other').map((s) => (
+                <option key={s} value={s}>
+                  {PIPELINE_STAGE_LABELS_AR[s as RecruitmentPipelineStage]}
+                </option>
+              ))}
+            </select>
+          </FilterField>
           <FilterField label="من تاريخ">
             <input
               type="date"
@@ -432,6 +460,7 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
                 <th className="p-3 text-start">قرار التعيين</th>
                 <th className="p-3 text-start">التواصل</th>
                 <th className="p-3 text-start">المحاضرة</th>
+                <th className="p-3 text-start">مرحلة V2</th>
                 <th className="p-3 text-start">التفعيل</th>
                 <th className="p-3 text-start">المعدات</th>
                 <th className="p-3 text-start">حالة الإسناد</th>
@@ -460,6 +489,11 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
                   </td>
                   <td className="p-3">
                     <StatusBadge value={c.lectureAttendance} kind="lecture" hint={statusHint(c, 'lecture')} />
+                  </td>
+                  <td className="p-3">
+                    <span className="inline-flex rounded-md border border-sky-500/35 bg-sky-500/15 px-2 py-0.5 text-xs text-sky-200">
+                      {PIPELINE_STAGE_LABELS_AR[deriveRecruitmentPipelineStage(c)]}
+                    </span>
                   </td>
                   <td className="p-3">
                     <StatusBadge value={c.activationStatus} kind="activation" hint={statusHint(c, 'activation')} />

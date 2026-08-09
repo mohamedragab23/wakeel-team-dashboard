@@ -7,6 +7,8 @@ import { verifyToken } from '@/lib/auth';
 import { assertRecruitmentApiAccess, actorFromJwt } from '@/lib/recruitment/recruitmentAuth';
 import { createCandidate, listCandidates } from '@/lib/recruitment/recruitmentService';
 import type { CandidateFilters, PipelineStatus } from '@/lib/recruitment/types';
+import { isRecruitmentV2Enabled } from '@/lib/srs014Flags';
+import { normalizeSecurityFeeInput } from '@/lib/recruitment/phaseB';
 
 export const dynamic = 'force-dynamic';
 
@@ -79,6 +81,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let securityFee: 'PAID' | 'NOT_PAID' | '' = '';
+    if (isRecruitmentV2Enabled()) {
+      if (
+        !String(body.nationalId ?? '').trim() ||
+        !String(body.detailedAddress ?? '').trim() ||
+        !String(body.age ?? '').trim() ||
+        !String(body.studentStatus ?? '').trim()
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'الرقم القومي والعنوان التفصيلي والعمر وحالة الطالب مطلوبة (Recruitment V2)',
+          },
+          { status: 400 }
+        );
+      }
+      if (body.securityInquiryPayment !== undefined && body.securityInquiryPayment !== '') {
+        const normalized = normalizeSecurityFeeInput(body.securityInquiryPayment);
+        if (!normalized) {
+          return NextResponse.json(
+            { success: false, error: 'حالة رسوم الاستعلام يجب أن تكون PAID أو UNPAID/NOT_PAID' },
+            { status: 400 }
+          );
+        }
+        securityFee = normalized;
+      } else {
+        securityFee = 'NOT_PAID';
+      }
+    }
+
     const candidate = await createCandidate(
       {
         fullName: body.fullName,
@@ -100,6 +132,13 @@ export async function POST(request: NextRequest) {
         contactStatus: body.contactStatus,
         notes: body.notes,
         isLegacy: body.isLegacy,
+        // Phase B additive fields (ignored/empty when unused)
+        phoneSecondary: body.phoneSecondary,
+        nationalId: body.nationalId,
+        detailedAddress: body.detailedAddress,
+        age: body.age,
+        studentStatus: body.studentStatus,
+        securityInquiryPayment: securityFee || body.securityInquiryPayment,
       },
       actor.code,
       actor.name

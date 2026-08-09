@@ -14,8 +14,6 @@ export const dynamic = 'force-dynamic';
 
 type RouteCtx = { params: Promise<{ id: string }> | { id: string } };
 
-const ALLOWED = new Set(['PAID', 'NOT_PAID']);
-
 export async function PATCH(request: NextRequest, ctx: RouteCtx) {
   if (!isRecruitmentV2Enabled()) {
     return NextResponse.json(SRS014_FLAG_OFF_BODY, { status: 503 });
@@ -45,25 +43,21 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
     }
 
     const body = await request.json();
-    const value = String(body.securityInquiryPayment ?? '').trim();
-    if (!ALLOWED.has(value)) {
-      return NextResponse.json(
-        { success: false, error: 'قيمة رسوم الاستعلام الأمني يجب أن تكون PAID أو NOT_PAID' },
-        { status: 400 }
-      );
-    }
-
     const actor = actorFromJwt(decoded);
-    const updated = await updateSecurityInquiryPayment(
-      id,
-      value as 'PAID' | 'NOT_PAID',
-      { ...actor, role }
-    );
+    // Accepts PAID | NOT_PAID | UNPAID (UNPAID normalized to NOT_PAID in storage).
+    const updated = await updateSecurityInquiryPayment(id, body.securityInquiryPayment, {
+      ...actor,
+      role,
+    });
     return NextResponse.json({ success: true, data: updated });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'حدث خطأ';
     const status =
-      msg.includes('لا يمكن') || msg.includes('غير موجود') ? 400 : 500;
+      msg.includes('لا يمكن') ||
+      msg.includes('غير موجود') ||
+      msg.includes('يجب أن تكون')
+        ? 400
+        : 500;
     return NextResponse.json({ success: false, error: msg }, { status });
   }
 }

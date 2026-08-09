@@ -508,3 +508,87 @@ Still OFF:
 - `FEATURE_EQUIPMENT_INVENTORY_V2_ENABLED`
 
 Await explicit approval for the next single flag.
+
+---
+
+## PHASE B — RECRUITMENT V2 (code ship, flag OFF)
+
+**Date:** 2026-08-09  
+**Scope:** Additive Recruitment V2 only. No Phase C–H. No equipment/payroll liability. No salary / Rooster changes.
+
+### Design decisions (non-destructive)
+
+| Topic | Decision |
+|---|---|
+| Security fee storage | Keep sheet value `PAID` / `NOT_PAID` (design freeze + liability). API accepts `UNPAID` as alias → stored as `NOT_PAID`. |
+| Fee money side-effects | **None** in Phase B (status record only). |
+| Ops supervisor assignment | When V2 ON: Admin only; RM cannot set/change `finalAssignedSupervisorCode`. Auto-promote preferred→final disabled when V2 ON. |
+| Sheet columns | Append-only after `contactsExceptionReason`: `phoneSecondary`, `nationalId`, `detailedAddress`, `age`, `studentStatus`, `lectureAbsenceReason`, `activationNotActivatedReason`, `contactsExceptionAt`. |
+| Contacts sheet | `جهات_اتصال_المرشحين` (lazy ensure). Max 3 active; min 2 unless Admin exception + audit timestamp. |
+| Existing recruitment | Continues when flag OFF; V2-only routes return 503. |
+
+### Files changed / added
+
+**Core**
+- `lib/recruitment/phaseB.ts` (+ `phaseB.test.ts`)
+- `lib/recruitment/types.ts`, `recruitmentSheetParser.ts`, `contactsStore.ts`, `recruitmentV2.ts`, `recruitmentService.ts`, `recruitmentActivityLog.ts`
+
+**APIs**
+- `app/api/recruitment/capability/route.ts` (new)
+- `app/api/recruitment/candidates/route.ts` (V2 create fields)
+- `app/api/recruitment/candidates/[id]/route.ts` (RM strip Ops fields; exception Admin-only)
+- `app/api/recruitment/candidates/[id]/contacts/route.ts` + `[contactId]/route.ts`
+- `app/api/recruitment/candidates/[id]/security-fee/route.ts`
+
+**UI**
+- `CandidateContactsPanel.tsx` (new)
+- `CandidateEditModal.tsx`, `NewCandidateForm.tsx`, `CandidatesTable.tsx` (pipeline stage), `CandidateFollowupWizardModal.tsx` (Admin-only Ops when V2)
+
+**Tests**
+- `package.json` → `test:srs014` includes `lib/recruitment/phaseB.test.ts`
+
+### Sheets
+
+| Sheet | Change |
+|---|---|
+| `مرشحين_التعيين` | Append columns only (via `ensureHeaderRow`); no rename/delete |
+| `جهات_اتصال_المرشحين` | Created lazily if missing |
+| Existing recruitment tabs | Untouched destructively |
+
+### Permissions matrix (V2 ON, server-enforced)
+
+| Action | Unauth | Supervisor | Recruitment Manager | Limited Admin* | Full Admin |
+|---|---|---|---|---|---|
+| Legacy list/create/update (non-Ops) | 401 | denied† | allowed | per capability | allowed |
+| Family contacts CRUD | 401 | denied† | allowed | per capability | allowed |
+| Security fee set/change | 401 | denied | set (freeze after); change only Admin | per capability | full |
+| Lecture / attendance / activation | 401 | denied† | allowed | per capability | allowed |
+| Contacts exception (&lt;2) | 401 | denied | **403** | per capability | allowed + audit |
+| Ops supervisor assign/reassign | 401 | denied | **403** | per capability | allowed + audit |
+| V2 routes when flag OFF | — | — | **503** | **503** | **503** |
+
+\*Limited Admin follows existing `assertRecruitmentApiAccess` / capability model.  
+†Supervisors are rejected by recruitment API access where they lack recruitment scope.
+
+### Test results (pre-deploy)
+
+| Suite | Result |
+|---|---|
+| `tsc --noEmit` | PASS |
+| `next build` | PASS |
+| `npm run test:srs014` | **61/61 PASS** (includes Phase B suite) |
+| `scripts/srs013-phase3-regression-check.ts` | **5 PASS / 0 FAIL / 1 SKIP** (WA-002 ledger_native intentional) |
+
+### Production deployment / flag state
+
+- Deploy Phase B code with **`FEATURE_RECRUITMENT_V2_ENABLED` absent/OFF** (do **not** enable).
+- Keep `FEATURE_PAYOUT_CYCLES_ENABLED=true` (Phase A).
+- Keep all equipment / auto-deduction / returns / inventory / manual-deduction V2 flags OFF.
+- No synthetic production candidate writes in this ship (flag OFF ⇒ V2 APIs 503).
+
+### Phase B STOP
+
+**Do NOT enable `FEATURE_RECRUITMENT_V2_ENABLED`.**  
+**Do NOT start Phase C.**
+
+Await explicit human approval before enabling Recruitment V2.

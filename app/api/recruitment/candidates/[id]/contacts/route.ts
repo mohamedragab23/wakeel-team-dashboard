@@ -9,6 +9,7 @@ import { addContact, listByCandidate } from '@/lib/recruitment/contactsStore';
 import { getCandidateById } from '@/lib/recruitment/recruitmentService';
 import { resolveRouteId } from '@/lib/recruitment/routeParams';
 import { isRecruitmentV2Enabled, SRS014_FLAG_OFF_BODY } from '@/lib/srs014Flags';
+import { appendAuditLog } from '@/lib/auditLog';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,10 +75,25 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
       },
       actor
     );
+
+    void appendAuditLog({
+      domain: 'recruitment',
+      action: 'family_contact_added',
+      entityType: 'candidate_contact',
+      entityCode: contact.contactId,
+      actorCode: actor.code,
+      actorName: actor.name,
+      after: {
+        candidateId: id,
+        relationship: contact.relationship,
+        // phone omitted from audit payload (sensitive)
+      },
+    }).catch(() => undefined);
+
     return NextResponse.json({ success: true, data: contact }, { status: 201 });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'حدث خطأ';
-    const status = msg.includes('مطلوب') ? 400 : 500;
+    const status = msg.includes('مطلوب') || msg.includes('صالحة') || msg.includes('أكثر') ? 400 : 500;
     return NextResponse.json({ success: false, error: msg }, { status });
   }
 }

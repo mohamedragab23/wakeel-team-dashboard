@@ -2,11 +2,15 @@
  * SRS-014 Phase B — candidate emergency/family contacts (append-only + active flag).
  */
 import { appendToSheet, ensureSheetExists, getSheetData, updateSheetRow } from '@/lib/googleSheets';
+import { validateContactInput } from './phaseB';
 import {
   CANDIDATE_CONTACT_HEADERS,
   SHEET_CANDIDATE_CONTACTS,
   type CandidateContact,
 } from './types';
+
+export const MAX_ACTIVE_CONTACTS = 3;
+export const MIN_ACTIVE_CONTACTS_DEFAULT = 2;
 
 let ensuredOnce = false;
 
@@ -86,18 +90,22 @@ export async function addContact(
   actor: { code: string; name: string }
 ): Promise<CandidateContact> {
   await ensureContactsSheet();
-  const name = input.name.trim();
-  const phone = input.phone.trim();
-  if (!name || !phone) {
-    throw new Error('الاسم ورقم الهاتف مطلوبان');
+  const validationError = validateContactInput(input);
+  if (validationError) throw new Error(validationError);
+
+  const existing = await listByCandidate(candidateId);
+  if (existing.length >= MAX_ACTIVE_CONTACTS) {
+    throw new Error(`لا يمكن إضافة أكثر من ${MAX_ACTIVE_CONTACTS} جهات اتصال`);
   }
+
   const contact: CandidateContact = {
     contactId: newContactId(),
     candidateId,
-    name,
+    name: input.name.trim(),
     relationship: input.relationship.trim(),
-    relationshipOther: String(input.relationshipOther ?? '').trim(),
-    phone,
+    relationshipOther:
+      input.relationship.trim() === 'أخرى' ? String(input.relationshipOther ?? '').trim() : '',
+    phone: input.phone.trim(),
     active: true,
     createdAt: new Date().toISOString(),
     createdBy: actor.code,
@@ -106,13 +114,50 @@ export async function addContact(
   return contact;
 }
 
+export async function updateContact(
+  candidateId: string,
+  contactId: string,
+  patch: { name?: string; relationship?: string; relationshipOther?: string; phone?: string }
+): Promise<CandidateContact | null> {
+  const all = await loadAllContacts(false);
+  const existing = all.find(
+    (c) => c.candidateId === candidateId && c.contactId === contactId && c.active
+  );
+  if (!existing?.sheetRow) return null;
+
+  const next = {
+    name: patch.name != null ? String(patch.name) : existing.name,
+    relationship: patch.relationship != null ? String(patch.relationship) : existing.relationship,
+    relationshipOther:
+      patch.relationshipOther != null
+        ? String(patch.relationshipOther)
+        : existing.relationshipOther,
+    phone: patch.phone != null ? String(patch.phone) : existing.phone,
+  };
+  const validationError = validateContactInput(next);
+  if (validationError) throw new Error(validationError);
+
+  const updated: CandidateContact = {
+    ...existing,
+    name: next.name.trim(),
+    relationship: next.relationship.trim(),
+    relationshipOther:
+      next.relationship.trim() === 'أخرى' ? next.relationshipOther.trim() : '',
+    phone: next.phone.trim(),
+  };
+  await updateSheetRow(SHEET_CANDIDATE_CONTACTS, existing.sheetRow, contactToRow(updated));
+  return updated;
+}
+
 /** Soft-delete: marks contact inactive (append-only sheet, row updated in place). */
 export async function deleteContact(
   candidateId: string,
   contactId: string
 ): Promise<boolean> {
   const all = await loadAllContacts(false);
-  const existing = all.find((c) => c.candidateId === candidateId && c.contactId === contactId && c.active);
+  const existing = all.find(
+    (c) => c.candidateId === candidateId && c.contactId === contactId && c.active
+  );
   if (!existing?.sheetRow) return false;
   const updated: CandidateContact = { ...existing, active: false };
   await updateSheetRow(SHEET_CANDIDATE_CONTACTS, existing.sheetRow, contactToRow(updated));
@@ -126,7 +171,7 @@ export async function assertMinContacts(
 ): Promise<void> {
   if (exceptionApproved) return;
   const contacts = await listByCandidate(candidateId);
-  if (contacts.length < 2) {
+  if (contacts.length < MIN_ACTIVE_CONTACTS_DEFAULT) {
     throw new Error('يجب إضافة جهتي اتصال على الأقل قبل التفعيل (أو اعتماد استثناء من الأدمن)');
   }
 }

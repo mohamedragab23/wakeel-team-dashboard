@@ -53,7 +53,18 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
     joinDate: '',
     contractType: '',
   });
-  const canManageFinalAssignment = userRole === 'admin' || userRole === 'recruitment_manager';
+  const capability = useQuery({
+    queryKey: ['recruitment', 'capability'],
+    enabled: open,
+    queryFn: async () => {
+      const res = await authFetch('/api/recruitment/capability');
+      return res.json();
+    },
+  });
+  const v2Enabled = Boolean(capability.data?.recruitmentV2Enabled);
+  // Phase B: only Admin assigns Ops supervisor when V2 is ON.
+  const canManageFinalAssignment =
+    userRole === 'admin' || (!v2Enabled && userRole === 'recruitment_manager');
 
   const { data: supervisors = [] } = useQuery({
     queryKey: ['recruitment', 'operational-supervisors'],
@@ -163,6 +174,7 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
     try {
       const payload: Partial<Candidate> = { ...form };
       if (form.activationStatus === 'مرفوض' && activationRejectReason.trim()) {
+        payload.activationNotActivatedReason = activationRejectReason.trim();
         const reasonText = `سبب عدم التفعيل: ${activationRejectReason.trim()}`;
         payload.notes = [form.notes?.trim(), reasonText].filter(Boolean).join(' | ');
       }

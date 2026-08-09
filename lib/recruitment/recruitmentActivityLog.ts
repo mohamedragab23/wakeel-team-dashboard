@@ -38,6 +38,18 @@ const TRACKED_FIELDS: (keyof Candidate)[] = [
   'equipmentExpectedDate',
   'dataSource',
   'assignedSupervisorCode',
+  'securityInquiryPayment',
+  'riderCode',
+  'finalAssignedSupervisorCode',
+  'assignmentStatus',
+  'phoneSecondary',
+  'nationalId',
+  'detailedAddress',
+  'age',
+  'studentStatus',
+  'lectureAbsenceReason',
+  'activationNotActivatedReason',
+  'contactsExceptionApproved',
 ];
 
 /** تسجيل الفروقات بين المرشح القديم والجديد */
