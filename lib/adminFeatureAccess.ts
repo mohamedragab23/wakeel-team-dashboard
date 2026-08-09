@@ -31,7 +31,12 @@ export type AdminFeatureKey =
   | 'rider_comments'
   | 'rider_comments_dashboard'
   | 'missing_data_audit'
-  | 'payroll_ledger';
+  | 'payroll_ledger'
+  | 'payout_cycles'
+  | 'equipment_liability'
+  | 'auto_equipment_deductions'
+  | 'manual_deductions_v2'
+  | 'equipment_finance';
 
 const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   main_inventory: 'main_inventory',
@@ -60,6 +65,11 @@ const API_ACCESS_MAP: Record<string, AdminFeatureKey> = {
   rider_comments_dashboard: 'rider_comments_dashboard',
   missing_data_audit: 'missing_data_audit',
   payroll_ledger: 'payroll_ledger',
+  payout_cycles: 'payout_cycles',
+  equipment_liability: 'equipment_liability',
+  auto_equipment_deductions: 'auto_equipment_deductions',
+  manual_deductions_v2: 'manual_deductions_v2',
+  equipment_finance: 'equipment_finance',
 };
 
 export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
@@ -90,6 +100,11 @@ export const ADMIN_FEATURE_LABELS_AR: Record<AdminFeatureKey, string> = {
   rider_comments_dashboard: 'لوحة التعليقات اليومية',
   missing_data_audit: 'تدقيق البيانات الناقصة',
   payroll_ledger: 'سجل المعاملات المالية (Payroll Ledger)',
+  payout_cycles: 'دورات القبض',
+  equipment_liability: 'عهدة المعدات / الالتزام المالي',
+  auto_equipment_deductions: 'استقطاعات المعدات التلقائية',
+  manual_deductions_v2: 'خصومات يدوية (V2)',
+  equipment_finance: 'تقارير مالية المعدات',
 };
 
 export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
@@ -120,6 +135,11 @@ export const ALL_ADMIN_FEATURE_KEYS: AdminFeatureKey[] = [
   'rider_comments_dashboard',
   'missing_data_audit',
   'payroll_ledger',
+  'payout_cycles',
+  'equipment_liability',
+  'auto_equipment_deductions',
+  'manual_deductions_v2',
+  'equipment_finance',
 ];
 
 export type AdminMenuDef = { href: string; label: string; icon: string; feature: AdminFeatureKey };
@@ -156,6 +176,8 @@ export function getAdminMenuDefs(): AdminMenuDef[] {
     { href: '/admin/equipment-requests', label: 'طلبات المعدات', icon: '📋', feature: 'equipment_requests' },
     { href: '/admin/salaries', label: 'حساب الرواتب', icon: '💰', feature: 'salaries' },
     { href: '/admin/deductions-reconcile', label: 'استقطاعات المدير (مقارنة)', icon: '🔎', feature: 'deductions_reconcile' },
+    { href: '/admin/payout-cycles', label: 'دورات القبض', icon: '📅', feature: 'payout_cycles' },
+    { href: '/admin/equipment-finance', label: 'مالية المعدات', icon: '🧾', feature: 'equipment_finance' },
     { href: '/admin/debug', label: 'تهيئة النظام والتحقق', icon: '🧹', feature: 'debug' },
     { href: '/shifts', label: 'الشفتات', icon: '🕒', feature: 'shifts' },
     { href: '/recruitment', label: 'التعيينات', icon: '📋', feature: 'recruitment' },

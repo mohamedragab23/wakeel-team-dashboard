@@ -140,6 +140,7 @@ export default function Layout({ children }: LayoutProps) {
         { href: '/equipment-delivery', label: 'تسليم معدات', icon: '📤' },
         { href: '/equipment-return', label: 'استرجاع معدات', icon: '📥' },
         { href: '/deductions-upload', label: 'الاستقطاعات (Excel)', icon: '📑' },
+        { href: '/manual-deductions', label: 'خصومات يدوية (V2)', icon: '✍️' },
         { href: '/termination-requests', label: 'الإقالات', icon: '🚫' },
         { href: '/reactivation-requests', label: 'إعادة التفعيل', icon: '🔄' },
         { href: '/rider-metadata-audit', label: 'تدقيق بيانات المناديب', icon: '📝' },

@@ -95,7 +95,42 @@ export const CANDIDATE_HEADERS = [
   'finalAssignedSupervisorCode',
   'assignedAt',
   'assignmentNote',
+  'securityInquiryPayment',
+  'riderCode',
+  'contactsExceptionApproved',
+  'contactsExceptionBy',
+  'contactsExceptionReason',
 ] as const;
+
+export const SECURITY_INQUIRY_PAYMENT_VALUES = ['', 'PAID', 'NOT_PAID'] as const;
+export type SecurityInquiryPayment = (typeof SECURITY_INQUIRY_PAYMENT_VALUES)[number];
+
+export const SHEET_CANDIDATE_CONTACTS = 'جهات_اتصال_المرشحين';
+
+export const CANDIDATE_CONTACT_HEADERS = [
+  'contactId',
+  'candidateId',
+  'name',
+  'relationship',
+  'relationshipOther',
+  'phone',
+  'active',
+  'createdAt',
+  'createdBy',
+] as const;
+
+export interface CandidateContact {
+  contactId: string;
+  candidateId: string;
+  name: string;
+  relationship: string;
+  relationshipOther: string;
+  phone: string;
+  active: boolean;
+  createdAt: string;
+  createdBy: string;
+  sheetRow?: number;
+}
 
 export const OUTREACH_LEAD_HEADERS = [
   'id',
@@ -177,6 +212,11 @@ export interface Candidate {
   finalAssignedSupervisorCode: string;
   assignedAt: string;
   assignmentNote: string;
+  securityInquiryPayment: '' | 'PAID' | 'NOT_PAID';
+  riderCode: string;
+  contactsExceptionApproved: boolean;
+  contactsExceptionBy: string;
+  contactsExceptionReason: string;
 }
 
 export interface OutreachLead {
@@ -309,5 +349,10 @@ export function defaultCandidateFields(
     finalAssignedSupervisorCode: partial.finalAssignedSupervisorCode?.trim() ?? '',
     assignedAt: partial.assignedAt?.trim() ?? '',
     assignmentNote: partial.assignmentNote?.trim() ?? '',
+    securityInquiryPayment: partial.securityInquiryPayment ?? '',
+    riderCode: partial.riderCode?.trim() ?? '',
+    contactsExceptionApproved: partial.contactsExceptionApproved ?? false,
+    contactsExceptionBy: partial.contactsExceptionBy?.trim() ?? '',
+    contactsExceptionReason: partial.contactsExceptionReason?.trim() ?? '',
   };
 }

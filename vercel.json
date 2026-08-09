@@ -40,6 +40,10 @@
     {
       "path": "/api/cron/forward-okta-otp",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/equipment-auto-deductions",
+      "schedule": "15 5 * * *"
     }
   ]
 }

@@ -289,18 +289,59 @@ export async function PUT(request: NextRequest) {
     }
 
     const status = action === 'approve' ? 'approved' : 'rejected';
-    const updated = padRow([...row], 15);
+    const updated = padRow([...row], 16);
     updated[10] = status;
     updated[11] = updated[11] || row[11] || '';
     updated[12] = approvalDate;
     updated[13] = approvedBy;
     updated[14] = action === 'reject' ? (rejectReason || '').toString() : '';
 
+    let settlementId = '';
+    if (action === 'approve') {
+      try {
+        const { isEquipmentReturnsV2Enabled } = await import('@/lib/srs014Flags');
+        if (isEquipmentReturnsV2Enabled()) {
+          const riderCode = row[2]?.toString().trim() || '';
+          const { listOpenIssues, hasActiveEquipmentIssue } = await import('@/lib/equipmentLiability/store');
+          if (await hasActiveEquipmentIssue(riderCode)) {
+            const open = (await listOpenIssues()).find((i) => i.riderCode === riderCode);
+            if (open) {
+              const { createSettlement } = await import('@/lib/equipmentReturns/settlement');
+              const settlement = await createSettlement(
+                {
+                  equipmentIssueId: open.equipmentIssueId,
+                  riderCode,
+                  returnedMotorcyclePouch: Math.max(0, Number(row[5]) || 0) > 0,
+                  returnedBicyclePouch: Math.max(0, Number(row[6]) || 0) > 0,
+                  returnedTshirt: Math.max(0, Number(row[7]) || 0) > 0,
+                  returnedJacket: Math.max(0, Number(row[8]) || 0) > 0,
+                  returnedHelmet: Math.max(0, Number(row[9]) || 0) > 0,
+                  // Admin decides payment vs waiver on approve — do not pre-waive.
+                  settlementPaidMilli: 0,
+                  waivedMilli: 0,
+                  waiverReason: '',
+                  notes: `return_row:${rowIndex};outstandingMilli:${open.outstandingMilli}`,
+                },
+                { code: decoded.code || 'admin', name: approvedBy }
+              );
+              if (settlement.ok) {
+                settlementId = settlement.settlement.settlementId;
+                updated[15] = settlementId;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[equipment-returns] settlement create failed (non-blocking):', err);
+      }
+    }
+
     await updateSheetRow(SHEET_EQUIPMENT_RETURN, rowIndex + 1, updated);
 
     return NextResponse.json({
       success: true,
       message: action === 'approve' ? 'تمت الموافقة وإرجاع الكميات للمخزون الرئيسي' : 'تم رفض الطلب',
+      settlementId: settlementId || undefined,
     });
   } catch (error: any) {
     console.error('[equipment-returns PUT]', error);

@@ -28,7 +28,14 @@ export const AUDIT_LOG_HEADERS = [
   'timestamp',
 ];
 
-export type AuditLogDomain = 'payroll' | 'rent' | 'rooster_import' | 'rider_data';
+export type AuditLogDomain =
+  | 'payroll'
+  | 'rent'
+  | 'rooster_import'
+  | 'rider_data'
+  | 'equipment'
+  | 'recruitment'
+  | 'payout_cycles';
 
 // `ensureSheetExists` is already idempotent server-side (checks metadata
 // before creating), but this in-process guard avoids one extra Sheets API

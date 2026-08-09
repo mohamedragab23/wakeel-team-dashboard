@@ -915,7 +915,27 @@ export async function calculateSupervisorSalary(
     const deductionsSheetTotal = deductionsDetails.total;
 
     const advances = advancesDetails.total;
-    const equipmentCost = equipmentDetails.totalCost;
+    // SRS-014 Phase E — when auto equipment deductions are ON and this
+    // supervisor has riders on the new liability path, legacy المعدات ×
+    // أسعار_المعدات would double-count against ledger_native installments.
+    // Additive filter only: zero the legacy sheet contribution for that case.
+    let equipmentCost = equipmentDetails.totalCost;
+    let equipmentDetailsForResult = equipmentDetails;
+    if (String(process.env.FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED || '').trim().toLowerCase() === 'true') {
+      try {
+        const { listOpenLiabilityRiderCodesForSupervisor } = await import('@/lib/equipmentLiability/store');
+        const liabilityRiders = await listOpenLiabilityRiderCodesForSupervisor(supervisorCode);
+        if (liabilityRiders.length > 0) {
+          console.log(
+            `[Salary] SRS-014 double-count guard: excluding legacy equipmentCost for ${supervisorCode} (${liabilityRiders.length} open liability riders)`
+          );
+          equipmentCost = 0;
+          equipmentDetailsForResult = { ...equipmentDetails, totalCost: 0, items: [] };
+        }
+      } catch (err) {
+        console.error('[Salary] SRS-014 equipment double-count guard failed (keeping legacy cost):', err);
+      }
+    }
     const adminDeductionTotal = adminDeductions.total;
 
     // SRS-013 Phase 3 — additive Payroll Ledger step (frozen design,
@@ -1021,7 +1041,7 @@ export async function calculateSupervisorSalary(
         performance: performanceDeductions,
         performanceDetails: performanceItems,
         equipment: equipmentCost,
-        equipmentDetails: equipmentDetails.items,
+        equipmentDetails: equipmentDetailsForResult.items,
         security: securityCost,
         admin: adminDeductionTotal,
         adminDetails: adminDeductions.items,

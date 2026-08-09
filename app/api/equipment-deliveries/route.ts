@@ -308,18 +308,69 @@ export async function PUT(request: NextRequest) {
     }
 
     const status = action === 'approve' ? 'approved' : 'rejected';
-    const updated = padRow([...row], 17);
+    const updated = padRow([...row], 18);
     updated[12] = status;
     updated[13] = updated[13] || row[13] || '';
     updated[14] = approvalDate;
     updated[15] = approvedBy;
     updated[16] = action === 'reject' ? (rejectReason || '').toString() : '';
 
+    let equipmentIssueId = '';
+    if (action === 'approve') {
+      try {
+        const { isEquipmentLedgerEnabled } = await import('@/lib/srs014Flags');
+        if (isEquipmentLedgerEnabled()) {
+          const { createLiabilityFromDelivery } = await import('@/lib/equipmentLiability/store');
+          const motorcyclePouch = Math.max(0, Number(row[6]) || 0);
+          const bicyclePouch = Math.max(0, Number(row[7]) || 0);
+          const bagType = motorcyclePouch > 0 ? 'motorcycle' : 'bicycle';
+          const riderCode = row[2]?.toString().trim() || '';
+          let securityPaidUpfront = false;
+          let activationDate = approvalDate;
+          try {
+            const { listCandidates } = await import('@/lib/recruitment/recruitmentService');
+            const candidates = await listCandidates({ pipelineStatus: 'active' });
+            const match = candidates.find((c) => String(c.riderCode || '').trim() === riderCode);
+            if (match) {
+              securityPaidUpfront = String(match.securityInquiryPayment || '') === 'PAID';
+              if (match.activationDate) activationDate = match.activationDate;
+            }
+          } catch (err) {
+            console.warn('[equipment-deliveries] recruitment lookup for liability skipped:', err);
+          }
+          const liability = await createLiabilityFromDelivery(
+            {
+              deliveryRowRef: String(rowIndex),
+              riderCode,
+              riderNameSnapshot: row[3]?.toString().trim() || '',
+              zoneSnapshot: row[4]?.toString().trim() || '',
+              supervisorCodeSnapshot: row[0]?.toString().trim() || '',
+              supervisorNameSnapshot: row[1]?.toString().trim() || '',
+              issueDate: approvalDate,
+              activationDate,
+              bagType,
+              securityPaidUpfront,
+              jacketHeld: Math.max(0, Number(row[9]) || 0) > 0,
+              helmetHeld: Math.max(0, Number(row[10]) || 0) > 0,
+            },
+            { code: decoded.code || 'admin', name: approvedBy }
+          );
+          if (liability.ok) {
+            equipmentIssueId = liability.issue.equipmentIssueId;
+            updated[17] = equipmentIssueId;
+          }
+        }
+      } catch (err) {
+        console.error('[equipment-deliveries] liability create failed (non-blocking):', err);
+      }
+    }
+
     await updateSheetRow(SHEET_EQUIPMENT_DELIVERY, rowIndex + 1, updated);
 
     return NextResponse.json({
       success: true,
       message: action === 'approve' ? 'تمت الموافقة وخصم الكميات من المخزون الرئيسي' : 'تم رفض الطلب',
+      equipmentIssueId: equipmentIssueId || undefined,
     });
   } catch (error: any) {
     console.error('[equipment-deliveries PUT]', error);

@@ -22,6 +22,7 @@ import {
   HIRING_DECISION_VALUES,
   LECTURE_ATTENDANCE_VALUES,
   PIPELINE_STATUS_VALUES,
+  SECURITY_INQUIRY_PAYMENT_VALUES,
   VEHICLE_TYPE_VALUES,
 } from './types';
 
@@ -82,6 +83,11 @@ export function rowToCandidate(row: unknown[], sheetRow1Based: number): Candidat
     finalAssignedSupervisorCode: cell(row, 36),
     assignedAt: cell(row, 37),
     assignmentNote: cell(row, 38),
+    securityInquiryPayment: asEnum(cell(row, 39), SECURITY_INQUIRY_PAYMENT_VALUES, ''),
+    riderCode: cell(row, 40),
+    contactsExceptionApproved: cell(row, 41).toLowerCase() === 'true' || cell(row, 41) === '1',
+    contactsExceptionBy: cell(row, 42),
+    contactsExceptionReason: cell(row, 43),
   };
 }
 
@@ -127,6 +133,11 @@ export function candidateToRow(c: Candidate): string[] {
     c.finalAssignedSupervisorCode,
     c.assignedAt,
     c.assignmentNote,
+    c.securityInquiryPayment,
+    c.riderCode,
+    c.contactsExceptionApproved ? 'true' : 'false',
+    c.contactsExceptionBy,
+    c.contactsExceptionReason,
   ];
 }
 

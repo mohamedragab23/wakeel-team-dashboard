@@ -12,7 +12,7 @@
  * `الأهداف`, `إعدادات_الرواتب` keep their exact current schema/behavior.
  * This module only ever reads/writes the new tab.
  */
-import { appendToSheet, ensureSheetExists, getSheetData, updateSheetRange } from '@/lib/googleSheets';
+import { appendToSheet, ensureHeaderRow, ensureSheetExists, getSheetData, updateSheetRange } from '@/lib/googleSheets';
 import { appendAuditLog } from '@/lib/auditLog';
 import { recordMetric } from '@/lib/telemetry';
 import { redisSetNx, redisDel, isUpstashConfigured } from '@/lib/upstashRest';
@@ -34,6 +34,10 @@ export const PAYROLL_LEDGER_HEADERS = [
   'status',
   'correctsTransactionId',
   'source',
+  'category',
+  'idempotencyKey',
+  'cycleId',
+  'equipmentIssueId',
 ];
 
 export type LedgerEntityType = 'rider' | 'supervisor';
@@ -57,6 +61,10 @@ export type LedgerTransaction = {
   status: LedgerStatus;
   correctsTransactionId: string;
   source: LedgerSource;
+  category: string;
+  idempotencyKey: string;
+  cycleId: string;
+  equipmentIssueId: string;
 };
 
 let ensuredOnce = false;
@@ -64,6 +72,7 @@ let ensuredOnce = false;
 async function ensureLedgerSheet(): Promise<void> {
   if (ensuredOnce) return;
   await ensureSheetExists(PAYROLL_LEDGER_SHEET_NAME, PAYROLL_LEDGER_HEADERS);
+  await ensureHeaderRow(PAYROLL_LEDGER_SHEET_NAME, PAYROLL_LEDGER_HEADERS);
   ensuredOnce = true;
 }
 
@@ -113,6 +122,10 @@ function rowToTransaction(row: unknown[]): LedgerTransaction | null {
     status: (String(row[11] ?? '').trim() as LedgerStatus) || 'active',
     correctsTransactionId: String(row[12] ?? '').trim(),
     source: (String(row[13] ?? '').trim() as LedgerSource) || 'ledger_native',
+    category: String(row[14] ?? '').trim(),
+    idempotencyKey: String(row[15] ?? '').trim(),
+    cycleId: String(row[16] ?? '').trim(),
+    equipmentIssueId: String(row[17] ?? '').trim(),
   };
 }
 
@@ -132,6 +145,10 @@ function transactionToRow(t: LedgerTransaction): unknown[] {
     t.status,
     t.correctsTransactionId,
     t.source,
+    t.category,
+    t.idempotencyKey,
+    t.cycleId,
+    t.equipmentIssueId,
   ];
 }
 
@@ -148,6 +165,10 @@ export async function appendLedgerTransaction(params: {
   createdByName: string;
   source: LedgerSource;
   correctsTransactionId?: string;
+  category?: string;
+  idempotencyKey?: string;
+  cycleId?: string;
+  equipmentIssueId?: string;
   /**
    * Internal use only: `correctLedgerTransaction()` calls this function to
    * append the new "active" replacement row and already writes its own
@@ -174,6 +195,10 @@ export async function appendLedgerTransaction(params: {
     status: 'active',
     correctsTransactionId: params.correctsTransactionId ?? '',
     source: params.source,
+    category: params.category?.trim() ?? '',
+    idempotencyKey: params.idempotencyKey?.trim() ?? '',
+    cycleId: params.cycleId?.trim() ?? '',
+    equipmentIssueId: params.equipmentIssueId?.trim() ?? '',
   };
 
   await appendToSheet(PAYROLL_LEDGER_SHEET_NAME, [transactionToRow(transaction)]);
@@ -248,6 +273,15 @@ export async function findLedgerTransactionById(
 ): Promise<{ rowNumber: number; transaction: LedgerTransaction } | null> {
   const rows = await readAllLedgerRows();
   return rows.find((r) => r.transaction.transactionId === transactionId) ?? null;
+}
+
+export async function getLedgerTransactionByIdempotencyKey(
+  idempotencyKey: string
+): Promise<LedgerTransaction | null> {
+  const key = idempotencyKey.trim();
+  if (!key) return null;
+  const rows = await readAllLedgerRows();
+  return rows.find((r) => r.transaction.idempotencyKey === key)?.transaction ?? null;
 }
 
 /** Mutates only the `status` cell (col L) — never touches any other column, per the frozen append-only design. */

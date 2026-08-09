@@ -22,7 +22,17 @@ export async function GET(request: NextRequest) {
     if (m0) return m0;
 
     const data = await readMainInventory();
-    return NextResponse.json({ success: true, data });
+    let anomalies: unknown[] | undefined;
+    try {
+      const { isEquipmentInventoryV2Enabled } = await import('@/lib/srs014Flags');
+      if (isEquipmentInventoryV2Enabled()) {
+        const { detectInventoryAnomalies } = await import('@/lib/equipmentInventory/anomalies');
+        anomalies = detectInventoryAnomalies(data);
+      }
+    } catch {
+      /* non-blocking */
+    }
+    return NextResponse.json({ success: true, data, anomalies });
   } catch (error: any) {
     console.error('[main-inventory GET]', error);
     return NextResponse.json({ success: false, error: error.message || 'حدث خطأ' }, { status: 500 });

@@ -248,6 +248,14 @@ export default function CandidateEditModal({ candidate, open, onClose, onSaved }
               onChange={(e) => setForm({ ...form, activationDate: e.target.value })}
             />
           </Field>
+          <Field label="كود المندوب">
+            <input
+              className={inputClass}
+              value={form.riderCode ?? ''}
+              onChange={(e) => setForm({ ...form, riderCode: e.target.value })}
+              placeholder="مطلوب عند التفعيل (V2)"
+            />
+          </Field>
           <Field label="تأكيد التفعيل">
             <select
               className={inputClass}

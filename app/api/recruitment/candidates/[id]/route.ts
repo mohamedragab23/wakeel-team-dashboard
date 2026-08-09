@@ -12,6 +12,9 @@ import {
 } from '@/lib/recruitment/recruitmentService';
 import type { Candidate } from '@/lib/recruitment/types';
 import { resolveRouteId } from '@/lib/recruitment/routeParams';
+import { validateRecruitmentV2Activation } from '@/lib/recruitment/recruitmentV2';
+import { isRecruitmentV2Enabled } from '@/lib/srs014Flags';
+import { appendAuditLog } from '@/lib/auditLog';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +30,7 @@ const RECRUITMENT_MANAGER_ALLOWED_FIELDS: (keyof Candidate)[] = [
   'activationConfirmed',
   'activationStatus',
   'activationDate',
+  'riderCode',
   'equipmentStatus',
   'equipmentDate',
   'equipmentNotReceivedReason',
@@ -114,6 +118,10 @@ export async function PUT(request: NextRequest, ctx: RouteCtx) {
     const body = (await request.json()) as Record<string, unknown>;
     const isAdmin = decoded.role === 'admin';
     const patch = isAdmin ? (body as Partial<Candidate>) : sanitizeRecruitmentManagerPatch(body);
+
+    // Security fee is managed via PATCH .../security-fee (freeze logic).
+    delete (patch as Record<string, unknown>).securityInquiryPayment;
+
     if (!isAdmin && Object.keys(patch).length === 0) {
       return NextResponse.json(
         { success: false, error: 'هذه العملية تتطلب صلاحية تعديل الأدمن' },
@@ -126,11 +134,45 @@ export async function PUT(request: NextRequest, ctx: RouteCtx) {
       return NextResponse.json({ success: false, error: sequentialError }, { status: 400 });
     }
 
+    if (isRecruitmentV2Enabled()) {
+      const v2Error = await validateRecruitmentV2Activation(id, existing, patch);
+      if (v2Error) {
+        return NextResponse.json({ success: false, error: v2Error }, { status: 400 });
+      }
+    }
+
     const actor = actorFromJwt(decoded);
     const updated = await updateCandidate(id, patch, actor);
     if (!updated) {
       return NextResponse.json({ success: false, error: 'المرشح غير موجود' }, { status: 404 });
     }
+
+    if (
+      isRecruitmentV2Enabled() &&
+      isAdmin &&
+      patch.contactsExceptionApproved === true &&
+      !existing.contactsExceptionApproved
+    ) {
+      void appendAuditLog({
+        domain: 'recruitment',
+        action: 'contacts_exception_approved',
+        entityType: 'candidate',
+        entityCode: id,
+        actorCode: actor.code,
+        actorName: actor.name,
+        before: {
+          contactsExceptionApproved: false,
+          contactsExceptionBy: existing.contactsExceptionBy,
+          contactsExceptionReason: existing.contactsExceptionReason,
+        },
+        after: {
+          contactsExceptionApproved: updated.contactsExceptionApproved,
+          contactsExceptionBy: updated.contactsExceptionBy,
+          contactsExceptionReason: updated.contactsExceptionReason,
+        },
+      }).catch((err) => console.error('[recruitment] exception audit failed', err));
+    }
+
     return NextResponse.json({ success: true, data: updated });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'حدث خطأ';

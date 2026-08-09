@@ -7,6 +7,7 @@ import {
   updateSheetRow,
   deleteSheetRow,
   ensureSheetExists,
+  ensureHeaderRow,
 } from '@/lib/googleSheets';
 import type {
   Candidate,
@@ -265,6 +266,7 @@ export async function getCandidateById(id: string): Promise<Candidate | null> {
 
 export async function ensureCandidatesSheet(): Promise<void> {
   await ensureSheetExists(SHEET_CANDIDATES, [...CANDIDATE_HEADERS]);
+  await ensureHeaderRow(SHEET_CANDIDATES, [...CANDIDATE_HEADERS]);
 }
 
 export async function ensureOutreachLeadsSheet(): Promise<void> {

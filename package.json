@@ -18,6 +18,8 @@
     "test:ops-validation": "npx --yes tsx --test lib/strategicOps/opsValidation/opsValidation.test.ts",
     "test:rooster-recovery-lock": "npx --yes tsx --test lib/roosterLive/authRecovery/recoveryLock.test.ts",
     "test:rooster-gmail-otp-reader": "npx --yes tsx --test lib/roosterLive/authRecovery/gmailOtpReader.test.ts",
+    "test:srs014": "npx --yes tsx --test lib/money.test.ts lib/payoutCycles/validation.test.ts lib/payoutCycles/eligibility.test.ts lib/equipmentDeductions/engine.test.ts lib/equipmentLiability/liability.test.ts lib/equipmentInventory/anomalies.test.ts lib/srs014SafetyGate.test.ts",
+    "test:srs014:gate": "npx --yes tsx --test lib/srs014SafetyGate.test.ts",
     "test:enterprise-cert": "npx --yes tsx --test lib/strategicOps/enterpriseCert/enterpriseCert.test.ts",
     "cert:enterprise-gate": "npx --yes tsx scripts/enterprise-cert-gate.ts",
     "migrate:simulation": "npx --yes tsx scripts/migrate-simulation-scenarios.ts",
