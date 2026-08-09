@@ -73,6 +73,8 @@ export function computeAutoDeductionDecision(params: {
   equipmentIssueId: string;
   availablePayoutMilli?: number;
   existingIdempotencyKeys: Set<string>;
+  /** When set, blocks a second installment in the same cycle (cron re-run safety). */
+  existingIssueCycleKeys?: Set<string>;
 }): AutoDeductionDecision {
   const remaining = Math.max(0, Math.trunc(params.remainingMilli));
   if (remaining <= 0) {
@@ -86,6 +88,11 @@ export function computeAutoDeductionDecision(params: {
   );
   if (!eligibility.eligible) {
     return { action: 'skip', reason: eligibility.reason || 'cycle_ineligible' };
+  }
+
+  const issueCycleKey = `${params.equipmentIssueId.trim()}:${params.cycle.cycleId.trim()}`;
+  if (params.existingIssueCycleKeys?.has(issueCycleKey)) {
+    return { action: 'skip', reason: 'already_posted_for_cycle' };
   }
 
   const installmentNumber = params.installmentsCompleted + 1;
@@ -147,15 +154,26 @@ async function ensureAutoDeductionsSheet(): Promise<void> {
   autoSheetEnsured = true;
 }
 
-async function loadExistingIdempotencyKeys(): Promise<Set<string>> {
+async function loadExistingAutoDeductionGuards(): Promise<{
+  idempotencyKeys: Set<string>;
+  /** One equipment installment per cycle — `${equipmentIssueId}:${cycleId}` */
+  issueCycleKeys: Set<string>;
+}> {
   await ensureAutoDeductionsSheet();
   const data = await getSheetData(SHEET_EQUIPMENT_AUTO_DEDUCTIONS, false);
-  const keys = new Set<string>();
+  const idempotencyKeys = new Set<string>();
+  const issueCycleKeys = new Set<string>();
   for (let i = 1; i < data.length; i++) {
     const key = cell(data[i], 1);
-    if (key) keys.add(key);
+    const equipmentIssueId = cell(data[i], 2);
+    const cycleId = cell(data[i], 5);
+    const status = cell(data[i], 11);
+    if (key) idempotencyKeys.add(key);
+    if (equipmentIssueId && cycleId && status !== 'skipped') {
+      issueCycleKeys.add(`${equipmentIssueId}:${cycleId}`);
+    }
   }
-  return keys;
+  return { idempotencyKeys, issueCycleKeys };
 }
 
 function scheduleForIssue(issue: EquipmentLiabilityIssue): number[] {
@@ -244,7 +262,9 @@ export async function runEquipmentAutoDeductionsForDate(
   result.cycleId = cycle.cycleId;
 
   const openIssues = await listOpenIssues();
-  const existingKeys = await loadExistingIdempotencyKeys();
+  const guards = await loadExistingAutoDeductionGuards();
+  const existingKeys = guards.idempotencyKeys;
+  const issueCycleKeys = guards.issueCycleKeys;
   const period = cyclePeriod(cycle);
 
   for (const issue of openIssues) {
@@ -264,6 +284,7 @@ export async function runEquipmentAutoDeductionsForDate(
       equipmentIssueId: issue.equipmentIssueId,
       availablePayoutMilli,
       existingIdempotencyKeys: existingKeys,
+      existingIssueCycleKeys: issueCycleKeys,
     });
 
     if (decision.action === 'skip') {
@@ -277,6 +298,7 @@ export async function runEquipmentAutoDeductionsForDate(
       cycle.cycleId,
       decision.installmentNumber
     );
+    const issueCycleKey = `${issue.equipmentIssueId}:${cycle.cycleId}`;
 
     const gotLock = await tryAcquireIdempotencyLock(idempotencyKey);
     if (!gotLock) {
@@ -287,6 +309,7 @@ export async function runEquipmentAutoDeductionsForDate(
     const ledgerDup = await getLedgerTransactionByIdempotencyKey(idempotencyKey);
     if (ledgerDup) {
       existingKeys.add(idempotencyKey);
+      issueCycleKeys.add(issueCycleKey);
       result.skipped += 1;
       continue;
     }
@@ -331,6 +354,7 @@ export async function runEquipmentAutoDeductionsForDate(
       }
 
       existingKeys.add(idempotencyKey);
+      issueCycleKeys.add(issueCycleKey);
       result.deducted += 1;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

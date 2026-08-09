@@ -118,6 +118,26 @@ describe('equipment auto deduction engine', () => {
     assert.equal(decision.amountMilli, 15000);
   });
 
+  it('skips second deduct in same cycle even if installment advanced', () => {
+    const cycles = [c({ cycleId: '2', cycleNumber: 2, startDate: '2026-08-08', endDate: '2026-08-14' })];
+    const schedule = liabilityInstallmentSchedule('NOT_PAID').schedule;
+    const decision = computeAutoDeductionDecision({
+      remainingMilli: 60000,
+      schedule,
+      installmentsCompleted: 1,
+      amountDeductedMilli: 30000,
+      cycle: cycles[0],
+      allCycles: cycles,
+      activationDate: '2026-08-01',
+      riderCode: 'R1',
+      equipmentIssueId: 'E1',
+      existingIdempotencyKeys: new Set(),
+      existingIssueCycleKeys: new Set(['E1:2']),
+    });
+    assert.equal(decision.action, 'skip');
+    assert.equal(decision.reason, 'already_posted_for_cycle');
+  });
+
   it('skips duplicate idempotency key', () => {
     const cycles = [c({ cycleId: '2', cycleNumber: 2, startDate: '2026-08-08', endDate: '2026-08-14' })];
     const schedule = liabilityInstallmentSchedule('NOT_PAID').schedule;

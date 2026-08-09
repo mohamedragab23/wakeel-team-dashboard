@@ -1,225 +1,54 @@
 # SRS-014 Production Safety Gate Report
 
 **Date:** 2026-08-09  
-**Operator:** Cursor agent (local workspace)  
-**Rule:** No SRS-014 feature flag was enabled in Production during this gate.
+**Operator:** Cursor agent  
+**Hard rule:** No SRS-014 feature flag was enabled in Production. Do not enable until human review of this report.
 
 ---
 
 ## Executive verdict
 
-| Area | Status |
+| Gate | Result |
 |---|---|
-| Offline financial / eligibility / idempotency / reconciliation suite | **PASS** (40/40 incl. safety gate) |
-| `tsc --noEmit` | **PASS** |
-| `next build` | **PASS** |
-| SRS-013 Phase 0 verify | **PASS** (5/5) |
-| SRS-013 Phase 3 OFF/ON regression | **FAIL 1 case** (WA-003 last month) — see §J |
-| Live Production QA sheet mutations (liability/cron/settlement) | **BLOCKED** — see below |
-| Production SRS-014 flags | **ALL ABSENT / OFF** |
+| Commit SRS-014 work | **DONE** (`fac888c` + follow-up idempotency commit) |
+| Deploy Production with all SRS-014 flags OFF | **PASS** |
+| Vercel flag confirmation (absent / false) | **PASS** — all 7 SRS-014 flags **absent** |
+| SRS-013 Phase 3 regression | **PASS** — 5 passed, 0 failed, 1 intentional skip |
+| WA-003 root cause | **Resolved / explained** — false FAIL from Sheets quota; salaries identical when reads succeed |
+| Offline SRS-014 suite | **PASS** — 41/41 |
+| Production HTTP (flags OFF) | **PASS** — cron skipped; new routes present (401 unauth) |
+| Isolated Production Sheets QA (A–K) | **PASS** — 19/19 |
+| Cleanup / no orphan `SRS014QA_` financial rows | **PASS** — leftover=0 after cleanup |
+| Enable any SRS-014 flag | **NOT DONE — STOPPED** |
 
-**Do not enable any SRS-014 Production flag yet.**
-
-### Why live Production QA writes were blocked
-
-1. **SRS-014 code is not deployed.** `HEAD` = `d7aca2bf4837ee808a4e8591ae52ab321b4ee3ba` (Live 3PL Redis fix). All SRS-014 work is **uncommitted local changes** on `main`. Production cannot execute the new liability/engine/settlement paths.
-2. Creating “QA liability rows” against the live spreadsheet from local code would either no-op (old deploy) or write into Production Sheets from a non-deployed binary — unsafe without a controlled deploy-with-flags-OFF window.
-3. Per instruction: no flag enable; no real rider financial mutation. Offline millieme-accurate simulation covers §2–§12 / §14 fully.
-
-**Required next step before live QA:** commit → deploy with **all SRS-014 flags unset/OFF** → re-run this gate’s live section on Production, then discuss which flag to enable first.
+**Verdict for enablement:** Safety gate evidence is complete for review. **Do not enable flags automatically.** Await explicit human approval.
 
 ---
 
-## A–D. Tests performed
+## Deployed commit & Vercel deployment
 
-### 1. Production data safety audit (static + env)
-
-| Test | Expected | Actual | Pass/Fail |
-|---|---|---|---|
-| No sheet delete/rename in SRS-014 modules | Only `ensureSheetExists` / additive headers | Confirmed: new tabs only; no `deleteSheet` / rename of existing tabs | **PASS** |
-| Payroll ledger columns | Additive after `source` | Added `category`, `idempotencyKey`, `cycleId`, `equipmentIssueId` via `ensureHeaderRow` | **PASS** (additive) |
-| Flags OFF ⇒ legacy paths | No auto liability / cron / V2 APIs | Flags absent in Prod Vercel; helpers return false; APIs 503 / cron `{skipped:true}` | **PASS** |
-| Production FEATURE_* vars | No SRS-014 flags | Prod has only `FEATURE_PAYROLL_LEDGER_ENABLED`, `FEATURE_RIDER_SEARCH_ENABLED`, `FEATURE_SHIFT_IMPORT_ENABLED` | **PASS** |
-| Local `.env.local` | No SRS-014 flags ON | Only `FEATURE_PAYROLL_LEDGER_ENABLED=true` | **PASS** |
-
-### 2. Real 900 / 800 liability (offline milliemes)
-
-| Test | Expected | Actual | Pass/Fail |
-|---|---|---|---|
-| NOT_PAID | 530+270+100 = **900.00**; installments 300×3 | `90000` milli; `[30000,30000,30000]` | **PASS** |
-| PAID | 530+270 = **800.00**; 266.67 / 266.67 / 266.66 | `80000` milli; `[26667,26667,26666]`; sum=80000; display never 799.99/800.01 | **PASS** |
-| Integer-only math | No floats in split | All parts `Number.isInteger` | **PASS** |
-
-### 3. Mid-cycle activation (cycle 17→23 Aug, activation 20 Aug)
-
-| Activation | Expected first eligible | C1 (17–23) eligible? | Actual | Pass/Fail |
-|---|---|---|---|---|
-| 20 Aug (middle) | C2 (24–30) | No (`activation_in_current_cycle`) | As expected | **PASS** |
-| 17 Aug (first day) | C2 | No | As expected | **PASS** |
-| 23 Aug (last day) | C2 | No | As expected | **PASS** |
-| 16 Aug (day before) | C1 | Yes | As expected | **PASS** |
-
-### 4. Closing cycle
-
-| Test | Expected | Actual | Pass/Fail |
-|---|---|---|---|
-| `isClosing=true` | skip; reason `closing_cycle`; no deduct | `action:'skip'`, `reason:'closing_cycle'` | **PASS** |
-
-### 5. Partial payout (300 expected, 150 available)
-
-| Test | Expected | Actual | Pass/Fail |
-|---|---|---|---|
-| First cycle | Deduct 150; installment incomplete | `amountMilli=15000`, `installmentComplete=false` | **PASS** |
-| Next cycle | Carry remaining **150** of same installment (not 300+150) | `amountMilli=15000`, `installmentNumber=1`, complete | **PASS** |
-
-**Fix applied during gate:** engine now tracks `amountDeductedMilli` vs schedule so partials do not advance installment index or skip the 150 remainder.
-
-### 6. Double-deduction guard (contract)
-
-| Test | Expected | Actual | Pass/Fail |
-|---|---|---|---|
-| Guard contract | When auto flag ON + open liability riders for supervisor → legacy `equipmentCost=0` | Code path present in `lib/salaryService.ts` (additive) | **PASS** (contract) |
-| Live salary OFF/ON matrix with real liability rider | Exact EGP numbers | **NOT RUN live** — code undeployed; would require flag ON (forbidden here) | **BLOCKED** |
-
-**Known design note:** legacy `المعدات` is supervisor-aggregated (no rider codes). Guard zeros **entire** supervisor legacy equipmentCost when **any** open liability rider exists for that supervisor. Documented risk if mixed legacy+V2 riders share one supervisor.
-
-### 7. Idempotency
-
-| Test | Expected | Actual | Pass/Fail |
-|---|---|---|---|
-| Same key ×3 (sheet uniqueness set) | Exactly 1 deduct decision | `deductCount=1`; others `duplicate_idempotency` | **PASS** |
-| Redis NX | Used in engine when Upstash configured | Code path `redisSetNx` present | **PASS** (code review) |
-| Live Redis+Sheet triple-run on Prod | One ledger row | **BLOCKED** (undeployed) | **BLOCKED** |
-
-### 8. Manual vs equipment separation
-
-| Test | Expected | Actual | Pass/Fail |
-|---|---|---|---|
-| Categories distinct | `manual_advance` / `manual_operational_deduction` ≠ `equipment_installment` | Confirmed | **PASS** |
-
-### 9–10. Settlement / waiver / reconciliation
-
-| Test | Expected | Actual | Pass/Fail |
-|---|---|---|---|
-| 900 − 300 auto − 200 paid | Remaining **400.00** | `40000` milli; equation balances | **PASS** |
-| Waiver after 300 auto | Remaining 0; status waived | Equation balances; `approveSettlement` + `markIssueWaived` | **PASS** (logic) |
-| Gap found then fixed | Payment path must not always waive | Added `applySettlementPayment` + `approveSettlement` modes | **PASS** (fix) |
-
-### 11. Cycle configuration
-
-| Test | Expected | Actual | Pass/Fail |
-|---|---|---|---|
-| Feb / 30-day / 31-day | Valid when non-overlapping | Validation accepts | **PASS** |
-| Overlap | Rejected | Rejected | **PASS** |
-| Finalized silent edit | Blocked without correction flag | Blocked | **PASS** |
-
-### 12. deductionGenerationDate (not hard-coded Sunday)
-
-| Test | Expected | Actual | Pass/Fail |
-|---|---|---|---|
-| Resolve by configured date | Sunday vs Wednesday configs map correctly | `resolveCycleForDeductionDate` matches exact generation dates | **PASS** |
-
-### 13. Legacy backward compatibility
-
-| Test | Expected | Actual | Pass/Fail |
-|---|---|---|---|
-| Flags OFF in Prod | No SRS-014 behavior | Flags absent | **PASS** |
-| SRS-013 Phase 0 | Pass | 5/5 PASS | **PASS** |
-| SRS-013 Phase 3 OFF vs ON (payroll ledger) | Byte-identical when no ledger_native | 4 PASS, **1 FAIL** (WA-003 Jul) | **FAIL** — see risks |
-| Live Excel / delivery / return / recruitment smoke | Functional | Not re-exercised end-to-end in browser this gate | **NOT RUN** (manual) |
-
-### 14. Flag isolation
-
-| Test | Expected | Actual | Pass/Fail |
-|---|---|---|---|
-| Each flag independent | Enabling payout cycles alone does not enable auto deductions | Confirmed in unit test | **PASS** |
-| Prod remains OFF after gate | All SRS-014 unset | Confirmed via `vercel env ls production` | **PASS** |
-
-### 15. Audit trail (code review)
-
-| Mutation | Audit action / domain | Status |
-|---|---|---|
-| create liability | `equipment` / `create_liability` | Present |
-| balance update | `update_liability_balance` | Present |
-| settlement payment | `settlement_payment` | Present (added) |
-| waiver | `waive_liability` / `approve_waiver` | Present |
-| cycle create/update/finalize | `payout_cycles` | Present |
-| manual deduction V2 | `payroll` / `manual_deduction_v2` | Present |
-| recruitment security fee | `recruitment` (V2 route) | Present |
-
-Live audit row verification on Prod for SRS-014 entities: **BLOCKED** (undeployed).
-
-### 16. Cleanup
-
-| Item | Status |
+| Item | Value |
 |---|---|
-| No SRS-014 QA liability / ledger / auto-deduction rows created | **N/A — none written** |
-| SRS-013 Phase 0 verify appended **1** audit row to `سجل_العمليات` (1110→1111) | Pre-existing Phase 0 harness behavior; not rider financial history |
+| Production URL | https://wakeel-team-dashboard.vercel.app |
+| Deployment ID (alias at gate time) | `dpl_6YwbkWKLyWx3UvpdPkeJpJA7SGiR` |
+| Deploy URL | https://wakeel-team-dashboard-r1il1u8zn-ragab-team.vercel.app |
+| Git SHA on that deploy | `fac888ca90701feb7a90d8faa8424789ccce74bd` |
+| Commit message | `feat(srs014): add equipment liability, payout cycles, and auto-deductions behind flags` |
+| Follow-up (one-deduct-per-cycle + QA scripts + this report) | Committed/pushed after green QA; must be live before any flag enable |
 
-### 17. Final regression commands
-
-| Command | Result |
-|---|---|
-| `npm run test:srs014` | **40/40 PASS** |
-| `tsc --noEmit` | **PASS** (exit 0) |
-| `next build` | **PASS** (exit 0) |
-| `tsx scripts/srs013-phase0-verify.ts` | **5/5 PASS** |
-| `tsx scripts/srs013-phase3-regression-check.ts` | **4 PASS / 1 FAIL** |
+**Evidence that SRS-014 code is on Production:** authenticated cron returns structured skip for the new route; unauthenticated hits to new admin/supervisor routes return **401** (not 404).
 
 ---
 
-## E. Exact production data touched
+## Exact feature-flag state (Production Vercel)
 
-| Resource | Touch |
-|---|---|
-| Vercel Production env | **Read-only** (`vercel env ls`) — no writes |
-| Google Sheets via Phase 0 verify | **1 append** to `سجل_العمليات` (audit test harness) |
-| SRS-014 new sheets / liability / ledger / auto-deductions | **None** |
-| Real rider financial history | **None** |
-
----
-
-## F. Exact files changed during this gate (delta on top of SRS-014 WIP)
-
-Critical fixes discovered by the gate:
-
-- `lib/equipmentDeductions/engine.ts` — partial installment carry (`amountDeductedMilli`, `installmentComplete`)
-- `lib/equipmentLiability/store.ts` — `applySettlementPayment`; `updateBalance({ incrementInstallment })`
-- `lib/equipmentReturns/settlement.ts` — `approveSettlement` / `patchSettlementAmounts`
-- `app/api/admin/equipment-settlements/[id]/approve/route.ts` — payment vs waiver body
-- `app/api/equipment-returns/route.ts` — do not pre-waive on return
-- `lib/srs014SafetyGate.test.ts` — new deep suite
-- `docs/SRS014_PRODUCTION_SAFETY_GATE_REPORT.md` — this report
-- `package.json` — `test:srs014` includes safety gate
-
-(Full SRS-014 WIP remains uncommitted relative to `d7aca2b`.)
-
----
-
-## G. Git commit hashes
-
-| Ref | Hash |
-|---|---|
-| Current Production / origin `main` HEAD (no SRS-014) | `d7aca2bf4837ee808a4e8591ae52ab321b4ee3ba` |
-| SRS-014 implementation commits | **None yet** (working tree only) |
-
----
-
-## H. Deployment status
-
-| Item | Status |
-|---|---|
-| SRS-014 on Production Vercel | **Not deployed** |
-| Local `next build` of WIP | **Succeeded** |
-| Recommended deploy posture | Deploy WIP with **all SRS-014 flags unset**, then re-run live QA |
-
----
-
-## I. Current Production feature flag values
+Source: `vercel env ls production -S ragab-team` (2026-08-09).
 
 | Flag | Production |
 |---|---|
-| `FEATURE_PAYROLL_LEDGER_ENABLED` | Present (SRS-013; value hidden; local pull shows `true`) |
+| `FEATURE_PAYROLL_LEDGER_ENABLED` | Present (SRS-013) |
+| `FEATURE_RIDER_SEARCH_ENABLED` | Present (SRS-013) |
+| `FEATURE_SHIFT_IMPORT_ENABLED` | Present (SRS-013) |
 | `FEATURE_RECRUITMENT_V2_ENABLED` | **Absent → OFF** |
 | `FEATURE_PAYOUT_CYCLES_ENABLED` | **Absent → OFF** |
 | `FEATURE_EQUIPMENT_LEDGER_ENABLED` | **Absent → OFF** |
@@ -228,24 +57,186 @@ Critical fixes discovered by the gate:
 | `FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED` | **Absent → OFF** |
 | `FEATURE_EQUIPMENT_INVENTORY_V2_ENABLED` | **Absent → OFF** |
 
+### Runtime proof (deployed Production HTTP)
+
+```
+GET /api/cron/equipment-auto-deductions
+Authorization: Bearer <CRON_SECRET>
+→ 200 {"success":true,"skipped":true,"reason":"FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED off"}
+```
+
+Script: `scripts/srs014-prod-verify-flags-off.ts`
+
 ---
 
-## J. Remaining risks
+## WA-003 root cause and resolution
 
-1. **Not deployed** — offline PASS ≠ Production runtime validation.
-2. **SRS-013 Phase 3 regression FAIL** on `WA-003 / 2026-07` OFF vs ON (payroll ledger). Needs triage before any SRS-014 enablement; may be pre-existing ledger optional fields / timezone period labeling (`startDate` shows `2026-06-30`).
-3. **Double-count guard granularity** — supervisor-level zeroing of legacy `المعدات` when any V2 liability rider exists (sheet has no per-rider breakdown).
-4. **`ensureHeaderRow` on payroll ledger** — first ledger touch after deploy will extend header row additively; data cells preserved, but header rewrite is a Production sheet metadata change.
-5. **Live idempotency (Redis + Sheet)** and **live salary matrix** still required after deploy-with-flags-OFF, then a controlled staging of `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED` on a QA supervisor only.
-6. Phase 0 verify wrote one audit log row — harmless but note for sheet noise.
+### Symptom
+SRS-013 Phase 3 OFF vs ON regression reported **FAIL** for `WA-003 / July`.
+
+### Investigation
+1. Recomputed `calculateSupervisorSalary('WA-003', '2026-07-01', '2026-07-31')` with payroll ledger OFF and ON.
+2. When Google Sheets reads succeed: **byte-identical** financial fingerprint; `netSalary = 7234.5`, legacy equipment = 0.
+3. Stability script (`scripts/srs013-wa003-stability.ts`): A==B==C==D when quota healthy.
+4. Failures correlated with `Quota exceeded … Read requests per minute` → incomplete sheet reads → **false mismatch**.
+5. Not timezone math changing salary; period labels may show `2026-06-30` UTC boundary but OFF/ON still match.
+6. Not ledger-shape for WA-003 July (no active `ledger_native` rows for that pair).
+7. Not caused by SRS-014 salary paths (auto equipment flag OFF; no open liability for real WA-003 during triage).
+8. Pre-existing unrelated: `السلف!A:Z` parse error → advances fall back to 0 (same OFF and ON).
+
+### Fix
+Hardened `scripts/srs013-phase3-regression-check.ts`: rate-limit, retry on quota, financial fingerprint compare. No production salary formula change required for WA-003.
+
+### Can it affect real salaries?
+The **false FAIL** cannot. Incomplete sheet reads under quota can temporarily produce wrong salary API responses in any environment — that is a Sheets QPM operational risk, not an OFF/ON ledger divergence for WA-003.
+
+### Rerun result
+`tsx scripts/srs013-phase3-regression-check.ts` → **5 passed, 0 failed, 1 skipped**
+
+| Pair | Result |
+|---|---|
+| WA-003 / July | **PASS** (OFF == ON) |
+| Other applicable pairs | **PASS** |
+| WA-002 / July | **SKIP** — 2 active `ledger_native` rows (OFF/ON expected to differ by design) |
+
+**SRS-013 regression requirement met:** 0 failures on applicable pairs.
 
 ---
 
-## Recommended sequence (discussion only — do not enable yet)
+## SRS-014 offline test result
 
-1. Commit SRS-014 WIP.  
-2. Deploy Production with **zero** SRS-014 flags.  
-3. Re-run live QA checklist (§2–§16 against Sheets) with isolated `QA-*` rider codes; cleanup.  
-4. Triage SRS-013 Phase 3 WA-003 mismatch.  
-5. Enable **first** flag candidate: `FEATURE_PAYOUT_CYCLES_ENABLED` (no money movement).  
-6. Then `FEATURE_EQUIPMENT_LEDGER_ENABLED` → Returns → Auto deductions last.
+| Command | Result |
+|---|---|
+| `npm run test:srs014` | **41/41 PASS** |
+| Includes | money, cycles, eligibility, engine (incl. one-per-cycle), liability, inventory anomalies, `srs014SafetyGate.test.ts` |
+
+---
+
+## SRS-014 Production QA result (isolated)
+
+### Method (critical)
+- Production **Vercel flags remained OFF** the entire time (cron skipped).
+- QA script `scripts/srs014-prod-qa-gate.ts` ran **locally** with process-env SRS-014 flags ON against Production Google Sheets only.
+- All artifacts prefixed `SRS014QA_`.
+- No real rider financial history mutated (synthetic rider codes / issue IDs only).
+- Cleanup: `scripts/srs014-prod-qa-cleanup.ts` → **0 leftovers** on financial sheets.
+
+### Result: **19/19 PASS**
+
+### A. 900 EGP liability
+- pouch 530 + two shirts 270 + security 100 = **900**
+- milliemes: `90000`
+
+### B. Security fee already paid → 800
+- milliemes: `80000`
+
+### C. Installment split (integer-safe)
+- 900 → `30000 + 30000 + 30000`
+- 800 → `26667 + 26667 + 26666` (remainder front-loaded; sum exact)
+
+### D. Activation timing
+- Activation inside cycle → no deduct that cycle; first eligible = next equipment-enabled non-closing cycle
+- Activation before cycle → first deduct in that next eligible cycle
+
+### E. Partial payout
+- expected 300, available 150 → deduct 150; installment **not** advanced; carry remaining 150
+
+### F. Closing cycle
+- `isClosing=true` → skip; liability remains outstanding
+
+### G. Idempotency
+- Same rider+cycle cron/API twice → **exactly one** ledger tx + **exactly one** auto-deduction after fix
+- Root cause of earlier FAIL: idempotency key included installment number, so a second run could post installment 2 in the same cycle
+- Fix: `existingIssueCycleKeys` / reason `already_posted_for_cycle` in `lib/equipmentDeductions/engine.ts`
+
+### H. Settlement payment
+- remaining 600, pay 200 → remaining **400**; status **not** waived
+
+### I. Waiver
+- Explicit Admin waive → outstanding waived; no fake payment; audit trail with actor + before/after
+
+### J. Return before completion
+- Return records paid amount + remaining liability; Admin must settle or **explicitly** waive — never auto-waive
+
+### K. Salary double-count protection
+- With QA open liability on WA-003 and auto flag ON in **local process**: log  
+  `SRS-014 double-count guard: excluding legacy equipmentCost for WA-003`  
+  → `equipment=0`, `net=7234.5`
+- Legacy path (no open liability / flag OFF): legacy `المعدات` behavior unchanged
+- **Deployed Production** with flags OFF never entered the V2 deduction path during this gate
+
+### Reconciliation
+Observed identity example from QA run:
+`original=90000`, `deducted=50000`, `outstanding=40000`, ledger milli sum + settlement paid + waived balance the liability equation.
+
+Sheets touched (QA only):
+- `عهدة_المعدات`
+- `استقطاعات_المعدات_التلقائية`
+- `دورات_القبض`
+- `تسوية_استرجاع_المعدات`
+- `سجل_المعاملات_المالية`
+- `سجل_العمليات` (audit appends)
+
+### Cleanup proof
+Post-QA wipe + verification wipe:
+```
+عهدة_المعدات deleted 0
+استقطاعات_المعدات_التلقائية deleted 0
+دورات_القبض deleted 0
+تسوية_استرجاع_المعدات deleted 0
+سجل_المعاملات_المالية deleted 0
+```
+QA financial leftovers = **0**.
+
+---
+
+## Old system with SRS-014 OFF (mandatory)
+
+| Surface | Evidence |
+|---|---|
+| Salary calculations | Phase 3 regression PASS (incl. WA-003); Production flags OFF |
+| Payroll ledger (SRS-013) | Still gated only by `FEATURE_PAYROLL_LEDGER_ENABLED`; present |
+| Equipment auto cron | Skipped on Production HTTP |
+| New V2 APIs | Present but auth-gated; no money movement without flags |
+| Legacy recruitment / delivery / return / Excel deductions | Code paths unchanged when SRS-014 flags false; no Production flag ON test that alters them |
+
+Browser end-to-end click-through of every legacy UI was not re-run in this gate; behavioral isolation is proven by flag defaults + cron skip + regression salaries.
+
+---
+
+## Data-integrity / existing-data protection
+
+| Rule | Status |
+|---|---|
+| Snapshot / isolated `SRS014QA_` IDs before mutation | Done |
+| No delete/rename of existing sheets or columns | Observed (additive `ensureSheetExists` / headers only) |
+| No overwrite of real historical rows | Done |
+| SRS-013 functionality preserved | Phase 3 PASS |
+| Cleanup only QA artifacts | Done for liability/auto/cycles/settlements/ledger |
+
+---
+
+## Remaining risks (do not ignore)
+
+1. **Supervisor-level double-count guard granularity** — when auto flag ON and any open liability rider exists for a supervisor, legacy `المعدات` cost is zeroed for the whole supervisor (sheet has no per-rider breakdown). Mixed legacy+V2 riders under one supervisor need an enablement plan.
+2. **Google Sheets QPM** — can cause incomplete salary reads / false diffs; operational, not SRS-014-specific.
+3. **`السلف` sheet parse error** — pre-existing; advances may read as 0.
+4. **One-deduct-per-cycle fix** must be on the Production alias before enabling `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED` (QA passed with local engine containing the fix).
+5. **Audit rows** in `سجل_العمليات` with `SRS014QA_` may remain as append-only history of the gate.
+6. First enablement should still be staged: cycles → liability ledger → returns → auto deductions last, on a dedicated QA supervisor only.
+
+---
+
+## STOP — flags not enabled
+
+The following remain **OFF / absent** in Production and were **not** set during this gate:
+
+- `FEATURE_RECRUITMENT_V2_ENABLED`
+- `FEATURE_PAYOUT_CYCLES_ENABLED`
+- `FEATURE_EQUIPMENT_LEDGER_ENABLED`
+- `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED`
+- `FEATURE_EQUIPMENT_RETURNS_V2_ENABLED`
+- `FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED`
+- `FEATURE_EQUIPMENT_INVENTORY_V2_ENABLED`
+
+Await human review of this report before any enablement.
