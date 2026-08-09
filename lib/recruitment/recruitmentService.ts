@@ -18,6 +18,7 @@ import type {
   RecruitmentStats,
 } from './types';
 import { isRecruitmentV2Enabled } from '@/lib/srs014Flags';
+import { normalizeRiderCodeForPerformance } from '@/lib/riderCodeUtils';
 import {
   CANDIDATE_HEADERS,
   OFFICE_MANAGER_ASSIGNMENT_OPTION,
@@ -35,6 +36,7 @@ import {
 } from './recruitmentSheetParser';
 import { logCandidateChanges } from './recruitmentActivityLog';
 import { notifyNewCandidate } from './recruitmentNotifications';
+import { normalizeIdentityPhone, normalizeNationalId } from './phaseB';
 
 function randomCandidateId(): string {
   return `c_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
@@ -281,6 +283,48 @@ export async function getCandidateById(id: string): Promise<Candidate | null> {
   return all.find((c) => c.id === id) ?? null;
 }
 
+/**
+ * Additive duplicate guard — never merges. Checks active pipeline for phone/NID;
+ * rider code uniqueness across all candidates that already have a code.
+ */
+export async function findIdentityDuplicate(opts: {
+  phone?: string;
+  nationalId?: string;
+  riderCode?: string;
+  excludeId?: string;
+}): Promise<string | null> {
+  const phoneDigits = opts.phone ? normalizeIdentityPhone(opts.phone) : '';
+  const nid = opts.nationalId ? normalizeNationalId(opts.nationalId) : '';
+  const riderRaw = String(opts.riderCode ?? '').trim();
+  const rider = riderRaw ? normalizeRiderCodeForPerformance(riderRaw) : '';
+  if (!phoneDigits && !nid && !rider) return null;
+
+  const all = await loadAllCandidates(false);
+  for (const c of all) {
+    if (opts.excludeId && c.id === opts.excludeId) continue;
+    const active = c.pipelineStatus === 'active' && !c.isLegacy;
+
+    if (
+      phoneDigits.length >= 8 &&
+      active &&
+      normalizeIdentityPhone(c.phone) === phoneDigits
+    ) {
+      return 'يوجد مرشح نشط مسجّل مسبقاً بنفس رقم الهاتف الأساسي';
+    }
+    if (
+      nid.length >= 10 &&
+      active &&
+      normalizeNationalId(c.nationalId) === nid
+    ) {
+      return 'يوجد مرشح نشط مسجّل مسبقاً بنفس الرقم القومي';
+    }
+    if (rider && c.riderCode && normalizeRiderCodeForPerformance(c.riderCode) === rider) {
+      return 'كود المندوب مستخدم بالفعل لمرشح آخر';
+    }
+  }
+  return null;
+}
+
 export async function ensureCandidatesSheet(): Promise<void> {
   await ensureSheetExists(SHEET_CANDIDATES, [...CANDIDATE_HEADERS]);
   await ensureHeaderRow(SHEET_CANDIDATES, [...CANDIDATE_HEADERS]);
@@ -397,6 +441,12 @@ export async function createCandidate(
   options?: { skipNotification?: boolean; isLegacy?: boolean }
 ): Promise<Candidate> {
   await ensureCandidatesSheet();
+  const dup = await findIdentityDuplicate({
+    phone: input.phone,
+    nationalId: input.nationalId,
+  });
+  if (dup) throw new Error(dup);
+
   const id = randomCandidateId();
   const fields = defaultCandidateFields(
     { ...input, isLegacy: options?.isLegacy ?? input.isLegacy },
@@ -463,6 +513,21 @@ export async function updateCandidate(
     createdAt: existing.createdAt,
     createdBy: existing.createdBy,
   };
+
+  const identityTouched =
+    (patch.phone !== undefined && patch.phone !== existing.phone) ||
+    (patch.nationalId !== undefined && patch.nationalId !== existing.nationalId) ||
+    (patch.riderCode !== undefined &&
+      String(patch.riderCode).trim() !== String(existing.riderCode || '').trim());
+  if (identityTouched) {
+    const dup = await findIdentityDuplicate({
+      phone: updated.phone,
+      nationalId: updated.nationalId,
+      riderCode: updated.riderCode,
+      excludeId: existing.id,
+    });
+    if (dup) throw new Error(dup);
+  }
 
   const assignmentPatch = computeAssignmentState(updated, existing);
   updated.assignmentStatus = assignmentPatch.assignmentStatus;

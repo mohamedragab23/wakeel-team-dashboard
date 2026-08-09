@@ -55,14 +55,27 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
   useEffect(() => {
-    try {
-      const u = getStoredUser() || {};
-      setUserRole(String(u.role ?? ''));
-      setIsAdmin(u.role === 'admin');
-    } catch {
-      setUserRole('');
-      setIsAdmin(false);
-    }
+    let cancelled = false;
+    const syncRole = () => {
+      if (cancelled) return;
+      try {
+        const u = getStoredUser() || {};
+        setUserRole(String(u.role ?? ''));
+        setIsAdmin(u.role === 'admin');
+      } catch {
+        setUserRole('');
+        setIsAdmin(false);
+      }
+    };
+    // Login sets session before navigation; Layout verify may refresh it shortly after mount.
+    syncRole();
+    const t1 = window.setTimeout(syncRole, 100);
+    const t2 = window.setTimeout(syncRole, 800);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
   }, []);
 
   useEffect(() => {
@@ -301,6 +314,11 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
           <LegendItem label="انتظار/قيد المراجعة" className="bg-amber-500/20 text-amber-300 border border-amber-500/40" />
           <LegendItem label="متابعة/مستحق" className="bg-sky-500/20 text-sky-300 border border-sky-500/40" />
           <LegendItem label="غير محدد" className="bg-slate-500/20 text-slate-300 border border-slate-500/40" />
+        </div>
+        <div className="rounded-lg border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.02)] px-3 py-2 text-xs text-[rgba(234,240,255,0.7)] leading-relaxed">
+          مراحل المتابعة (V2): مقدم/بيانات أولية ← مستني المحاضرة ← غاب/إعادة محاضرة ← حضر/مستني
+          التفعيل والكود ← اتفعّل ومستني Admin لتعيين مشرف التشغيل ← اكتمل التعيين. استخدم فلتر «مرحلة
+          المتابعة (V2)» للفرز السريع.
         </div>
         <div className="flex flex-wrap gap-2 items-end">
           <FilterField label="بحث">
@@ -570,7 +588,10 @@ export default function CandidatesTable({ mode }: { mode: Mode }) {
                               </>
                             );
                           })()}
-                          {isAdmin && <ActionBtn onClick={() => setEditCandidate(c)}>تعديل</ActionBtn>}
+                          {/* Phase B: RM must manage V2 profile/contacts; Edit is not Admin-only. */}
+                          {(isAdmin || userRole === 'recruitment_manager') && (
+                            <ActionBtn onClick={() => setEditCandidate(c)}>تعديل</ActionBtn>
+                          )}
                         </>
                       )}
                       {mode === 'archive' && (
@@ -793,9 +814,9 @@ function statusHint(
 
 function assignmentHint(c: Candidate): string {
   const parts: string[] = [];
-  if (c.assignedSupervisorCode) parts.push(`اختيار أولي: ${c.assignedSupervisorCode}`);
+  // Do not surface preferred Ops codes — Admin final assignment is the source of truth.
   if (c.finalAssignedSupervisorCode) parts.push(`إسناد نهائي: ${c.finalAssignedSupervisorCode}`);
   if (c.assignedAt) parts.push(`تاريخ الإسناد: ${c.assignedAt}`);
   if (c.assignmentNote) parts.push(`ملاحظة: ${c.assignmentNote}`);
-  return parts.length ? parts.join(' | ') : 'لم يتم إسناد مشرف حتى الآن';
+  return parts.length ? parts.join(' | ') : 'بانتظار تعيين مشرف التشغيل بواسطة الأدمن';
 }

@@ -239,7 +239,11 @@ export async function PUT(request: NextRequest, ctx: RouteCtx) {
     return NextResponse.json({ success: true, data: updated });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'حدث خطأ';
-    return NextResponse.json({ success: false, error: msg }, { status: 500 });
+    const status =
+      /مسجّل مسبقاً|مستخدم بالفعل|لا يمكن تفعيل|مطلوب|غير صالح|غير صالحة|أدمن فقط/.test(msg)
+        ? 400
+        : 500;
+    return NextResponse.json({ success: false, error: msg }, { status });
   }
 }
 

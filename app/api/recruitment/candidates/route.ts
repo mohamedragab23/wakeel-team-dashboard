@@ -82,7 +82,9 @@ export async function POST(request: NextRequest) {
     }
 
     let securityFee: 'PAID' | 'NOT_PAID' | '' = '';
-    if (isRecruitmentV2Enabled()) {
+    const v2On = isRecruitmentV2Enabled();
+    const isAdmin = decoded.role === 'admin';
+    if (v2On) {
       if (
         !String(body.nationalId ?? '').trim() ||
         !String(body.detailedAddress ?? '').trim() ||
@@ -101,7 +103,7 @@ export async function POST(request: NextRequest) {
         const normalized = normalizeSecurityFeeInput(body.securityInquiryPayment);
         if (!normalized) {
           return NextResponse.json(
-            { success: false, error: 'حالة رسوم الاستعلام يجب أن تكون PAID أو UNPAID/NOT_PAID' },
+            { success: false, error: 'حالة رسوم الاستعلام غير صالحة' },
             { status: 400 }
           );
         }
@@ -110,6 +112,10 @@ export async function POST(request: NextRequest) {
         securityFee = 'NOT_PAID';
       }
     }
+
+    // Phase B: RM must not select Ops supervisor on create. Keep empty for Admin later.
+    const assignedSupervisorCode =
+      v2On && !isAdmin ? '' : body.assignedSupervisorCode;
 
     const candidate = await createCandidate(
       {
@@ -121,7 +127,7 @@ export async function POST(request: NextRequest) {
         workedBefore: body.workedBefore,
         governorate: body.governorate,
         zone: body.zone,
-        assignedSupervisorCode: body.assignedSupervisorCode,
+        assignedSupervisorCode,
         hiringDecision: body.hiringDecision,
         notHiredReason: body.notHiredReason,
         lecturePlannedDate: body.lecturePlannedDate,
@@ -147,6 +153,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, data: candidate });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'حدث خطأ';
-    return NextResponse.json({ success: false, error: msg }, { status: 500 });
+    const status =
+      /مسجّل مسبقاً|مستخدم بالفعل|مطلوب|غير صالح|غير صالحة/.test(msg) ? 400 : 500;
+    return NextResponse.json({ success: false, error: msg }, { status });
   }
 }

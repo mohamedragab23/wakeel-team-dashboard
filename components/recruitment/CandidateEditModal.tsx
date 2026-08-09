@@ -153,7 +153,7 @@ export default function CandidateEditModal({ candidate, open, onClose, onSaved }
                   onChange={(e) => setForm({ ...form, detailedAddress: e.target.value })}
                 />
               </Field>
-              <Field label="رسوم الاستعلام الأمني (100 ج)">
+              <Field label="الاستعلام الأمني — 100 جنيه">
                 <select
                   className={inputClass}
                   value={form.securityInquiryPayment ?? 'NOT_PAID'}
@@ -164,12 +164,12 @@ export default function CandidateEditModal({ candidate, open, onClose, onSaved }
                     })
                   }
                 >
-                  <option value="PAID">مدفوع (PAID)</option>
-                  <option value="NOT_PAID">غير مدفوع (UNPAID)</option>
+                  <option value="PAID">تم السداد</option>
+                  <option value="NOT_PAID">لم يتم السداد</option>
                 </select>
               </Field>
               {isAdmin && (
-                <Field label="استثناء جهات الاتصال (أقل من 2)">
+                <Field label="استثناء جهات الاتصال (أقل من 2 قبل التفعيل)">
                   <select
                     className={inputClass}
                     value={form.contactsExceptionApproved ? 'yes' : 'no'}
@@ -181,7 +181,7 @@ export default function CandidateEditModal({ candidate, open, onClose, onSaved }
                     }
                   >
                     <option value="no">لا</option>
-                    <option value="yes">نعم — موافقة أدمن</option>
+                    <option value="yes">نعم — موافقة أدمن على التفعيل بأقل من جهتين</option>
                   </select>
                 </Field>
               )}
@@ -295,13 +295,15 @@ export default function CandidateEditModal({ candidate, open, onClose, onSaved }
               onChange={(e) => setForm({ ...form, contactDate: e.target.value })}
             />
           </Field>
-          <Field label="المشرف المسؤول">
-            <input
-              className={inputClass}
-              value={form.assignedManager ?? ''}
-              onChange={(e) => setForm({ ...form, assignedManager: e.target.value })}
-            />
-          </Field>
+          {!v2Enabled && (
+            <Field label="مسؤول المتابعة الداخلي">
+              <input
+                className={inputClass}
+                value={form.assignedManager ?? ''}
+                onChange={(e) => setForm({ ...form, assignedManager: e.target.value })}
+              />
+            </Field>
+          )}
           <Field label="حضور المحاضرة">
             <select
               className={inputClass}

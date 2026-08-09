@@ -119,6 +119,7 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
     if (
       step === 3 &&
       canManageFinalAssignment &&
+      !v2Enabled &&
       form.assignedSupervisorCode === OFFICE_MANAGER_ASSIGNMENT_OPTION &&
       (form.activationConfirmed === 'مؤكد' || form.activationStatus === 'مفعل - تم القبول')
     ) {
@@ -131,7 +132,7 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
       return !!form.equipmentDate;
     }
     return true;
-  }, [activationRejectReason, canManageFinalAssignment, form, step]);
+  }, [activationRejectReason, canManageFinalAssignment, form, step, v2Enabled]);
 
   const activationDone = form.activationConfirmed === 'مؤكد' || form.activationStatus === 'مفعل - تم القبول';
 
@@ -371,11 +372,27 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
                 onChange={(e) => setForm({ ...form, activationDate: e.target.value })}
               />
             </Field>
-            {canManageFinalAssignment &&
-              form.assignedSupervisorCode === OFFICE_MANAGER_ASSIGNMENT_OPTION &&
+            {v2Enabled && (
+              <>
+                <Field label="كود المندوب (مطلوب عند التفعيل)">
+                  <input
+                    className={inputClass}
+                    value={form.riderCode ?? ''}
+                    onChange={(e) => setForm({ ...form, riderCode: e.target.value })}
+                    placeholder="أرقام فقط — ليس كود مشرف WA-"
+                  />
+                </Field>
+                <p className="text-xs text-[rgba(234,240,255,0.65)] leading-relaxed">
+                  التفعيل يتطلب جهتي اتصال عائلة/طوارئ على الأقل، أو موافقة أدمن على الاستثناء. تعيين
+                  مشرف التشغيل يتم لاحقاً بواسطة الأدمن فقط.
+                </p>
+              </>
+            )}
+            {v2Enabled &&
+              canManageFinalAssignment &&
               (form.activationConfirmed === 'مؤكد' || form.activationStatus === 'مفعل - تم القبول') && (
                 <>
-                  <Field label="تعيين المشرف بواسطة مدير المكتب">
+                  <Field label="تعيين مشرف التشغيل (Admin فقط)">
                     <select
                       className={inputClass}
                       value={form.finalAssignedSupervisorCode ?? ''}
@@ -398,7 +415,29 @@ export default function CandidateFollowupWizardModal({ candidate, open, onClose,
                   </Field>
                 </>
               )}
-            {(form.activationConfirmed === 'مؤكد' || form.activationStatus === 'مفعل - تم القبول') &&
+            {!v2Enabled &&
+              canManageFinalAssignment &&
+              form.assignedSupervisorCode === OFFICE_MANAGER_ASSIGNMENT_OPTION &&
+              (form.activationConfirmed === 'مؤكد' || form.activationStatus === 'مفعل - تم القبول') && (
+                <>
+                  <Field label="تعيين المشرف بواسطة مدير المكتب">
+                    <select
+                      className={inputClass}
+                      value={form.finalAssignedSupervisorCode ?? ''}
+                      onChange={(e) => setForm({ ...form, finalAssignedSupervisorCode: e.target.value })}
+                    >
+                      <option value="">— اختر مشرف تشغيل —</option>
+                      {supervisors.map((s) => (
+                        <option key={s.code} value={s.code}>
+                          {s.name} ({s.code})
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </>
+              )}
+            {!v2Enabled &&
+              (form.activationConfirmed === 'مؤكد' || form.activationStatus === 'مفعل - تم القبول') &&
               canManageFinalAssignment && (
                 <div className="mt-2 p-3 rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.03)] space-y-3">
                   <p className="text-sm font-semibold">إرسال طلب تعيين المندوب للأدمن</p>

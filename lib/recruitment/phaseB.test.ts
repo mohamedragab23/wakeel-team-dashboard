@@ -5,7 +5,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  ACTIVATION_CONTACTS_BLOCKED_AR,
   deriveRecruitmentPipelineStage,
+  normalizeIdentityPhone,
+  normalizeNationalId,
   normalizeSecurityFeeInput,
   validateActivationPatch,
   validateContactInput,
@@ -240,6 +243,12 @@ describe('SRS-014 Phase B — permissions (flag ON)', () => {
         existing
       );
       assert.match(String(err), /أدمن/);
+      const prefErr = assertOpsAssignmentPermission(
+        'recruitment_manager',
+        { assignedSupervisorCode: 'WA-010' },
+        existing
+      );
+      assert.match(String(prefErr), /أدمن/);
     });
   });
 
@@ -302,6 +311,15 @@ describe('SRS-014 Phase B — flag OFF regression', () => {
         null
       );
     });
+  });
+});
+
+describe('SRS-014 Phase B — identity normalization + activation copy', () => {
+  it('normalizes phone/NID digits and exposes activation contacts message', () => {
+    assert.equal(normalizeIdentityPhone('010-1234 5678'), '01012345678');
+    assert.equal(normalizeNationalId('298-01-011234567'), '29801011234567');
+    assert.match(ACTIVATION_CONTACTS_BLOCKED_AR, /جهتي اتصال/);
+    assert.match(ACTIVATION_CONTACTS_BLOCKED_AR, /موافقة الإدارة/);
   });
 });
 

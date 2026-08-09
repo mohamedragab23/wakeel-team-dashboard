@@ -80,11 +80,12 @@ export default function NewCandidateForm({ onCreated }: Props) {
     setError('');
     setOk('');
     try {
+      const payload = v2Enabled ? { ...form, assignedSupervisorCode: '' } : form;
       const res = await authFetch('/api/recruitment/candidates', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json' },
-        body: JSON.stringify(form) });
+        body: JSON.stringify(payload) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل الإضافة');
       setOk('تم إضافة بيانات التعيين الجديدة بنجاح');
@@ -156,7 +157,7 @@ export default function NewCandidateForm({ onCreated }: Props) {
                 onChange={(e) => setForm({ ...form, detailedAddress: e.target.value })}
               />
             </Field>
-            <Field label="رسوم الاستعلام الأمني (100 ج)">
+            <Field label="الاستعلام الأمني — 100 جنيه">
               <select
                 className={inputClass}
                 value={form.securityInquiryPayment}
@@ -167,8 +168,8 @@ export default function NewCandidateForm({ onCreated }: Props) {
                   })
                 }
               >
-                <option value="NOT_PAID">غير مدفوع (UNPAID)</option>
-                <option value="PAID">مدفوع (PAID)</option>
+                <option value="NOT_PAID">لم يتم السداد</option>
+                <option value="PAID">تم السداد</option>
               </select>
             </Field>
           </>
@@ -196,26 +197,32 @@ export default function NewCandidateForm({ onCreated }: Props) {
             ))}
           </select>
         </Field>
-        <Field label="المشرف المسؤول">
-          <select
-            className={inputClass}
-            value={form.assignedSupervisorCode}
-            onChange={(e) => setForm({ ...form, assignedSupervisorCode: e.target.value })}
-          >
-            <option value="">— بدون تحديد الآن —</option>
-            <option value={OFFICE_MANAGER_ASSIGNMENT_OPTION}>سيتم التحديد من خلال مدير المكتب بعد التفعيل</option>
-            {supervisors.map((s) => (
-              <option key={s.code} value={s.code}>
-                {s.name} ({s.code})
-              </option>
-            ))}
-          </select>
-          {form.assignedSupervisorCode === OFFICE_MANAGER_ASSIGNMENT_OPTION && (
-            <p className="text-xs text-[rgba(234,240,255,0.65)] mt-1">
-              سيتمكن الأدمن من تحديد مشرف التشغيل بعد التفعيل من شاشة المتابعة.
-            </p>
-          )}
-        </Field>
+        {v2Enabled ? (
+          <div className="md:col-span-2 rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs text-[rgba(234,240,255,0.75)]">
+            تعيين مشرف التشغيل يتم بواسطة الأدمن فقط بعد التفعيل — لا يظهر اختيار مشرف في هذه المرحلة.
+          </div>
+        ) : (
+          <Field label="المشرف المسؤول">
+            <select
+              className={inputClass}
+              value={form.assignedSupervisorCode}
+              onChange={(e) => setForm({ ...form, assignedSupervisorCode: e.target.value })}
+            >
+              <option value="">— بدون تحديد الآن —</option>
+              <option value={OFFICE_MANAGER_ASSIGNMENT_OPTION}>سيتم التحديد من خلال مدير المكتب بعد التفعيل</option>
+              {supervisors.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.name} ({s.code})
+                </option>
+              ))}
+            </select>
+            {form.assignedSupervisorCode === OFFICE_MANAGER_ASSIGNMENT_OPTION && (
+              <p className="text-xs text-[rgba(234,240,255,0.65)] mt-1">
+                سيتمكن الأدمن من تحديد مشرف التشغيل بعد التفعيل من شاشة المتابعة.
+              </p>
+            )}
+          </Field>
+        )}
         <Field label="حالة التعيين">
           <select className={inputClass} value={form.hiringDecision} onChange={(e) => setForm({ ...form, hiringDecision: e.target.value as 'قيد المراجعة' | 'هيشتغل' | 'لن يشتغل' })}>
             {HIRING_DECISION_VALUES.map((s) => (

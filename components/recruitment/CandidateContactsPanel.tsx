@@ -90,7 +90,16 @@ export default function CandidateContactsPanel({ candidateId, enabled }: Props) 
 
   return (
     <div className="md:col-span-2 border border-[rgba(255,255,255,0.1)] rounded-lg p-3 space-y-3">
-      <h3 className="font-semibold text-sm">جهات اتصال العائلة / الطوارئ (حتى 3 — مطلوب 2)</h3>
+      <h3 className="font-semibold text-sm">جهات اتصال العائلة / الطوارئ</h3>
+      <p className="text-xs text-[rgba(234,240,255,0.65)] leading-relaxed">
+        3 خانات متاحة: جهتان مطلوبتان للتفعيل، والثالثة اختيارية. يمكن حفظ المرشح الآن بدون اكتمال
+        الجهتين، لكن لن يُسمح بالتفعيل قبل تسجيل جهتي اتصال على الأقل (ما لم يعتمد الأدمن استثناءً).
+        عند اختيار «أخرى» يجب كتابة توضيح صلة القرابة، ورقم الهاتف مطلوب لكل جهة.
+      </p>
+      <p className="text-xs text-[rgba(234,240,255,0.55)]">
+        المسجّل الآن: {contacts.length} من 3
+        {contacts.length < 2 ? ' — ناقص للتفعيل' : contacts.length === 2 ? ' — جاهز للتفعيل (الثالثة اختيارية)' : ' — مكتمل'}
+      </p>
       {loading ? <p className="text-xs text-[rgba(234,240,255,0.55)]">جاري التحميل…</p> : null}
       <ul className="space-y-1 text-sm">
         {contacts.map((c) => (

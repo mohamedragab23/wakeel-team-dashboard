@@ -9,6 +9,10 @@ import {
   type RecruitmentPipelineStage,
 } from './types';
 
+/** User-facing activation block when contacts < 2 and no Admin exception. */
+export const ACTIVATION_CONTACTS_BLOCKED_AR =
+  'لا يمكن تفعيل المندوب قبل تسجيل جهتي اتصال على الأقل، أو الحصول على موافقة الإدارة على الاستثناء.';
+
 export function normalizeSecurityFeeInput(
   value: unknown
 ): 'PAID' | 'NOT_PAID' | null {
@@ -18,6 +22,15 @@ export function normalizeSecurityFeeInput(
   if (v === 'PAID') return 'PAID';
   if (v === 'NOT_PAID' || v === 'UNPAID') return 'NOT_PAID';
   return null;
+}
+
+/** Digits-only phone for duplicate checks (not for display). */
+export function normalizeIdentityPhone(phone: string): string {
+  return String(phone ?? '').replace(/\D/g, '');
+}
+
+export function normalizeNationalId(id: string): string {
+  return String(id ?? '').replace(/\D/g, '');
 }
 
 export function isValidContactRelationship(value: string): value is ContactRelationship {
@@ -146,12 +159,12 @@ export function deriveRecruitmentPipelineStage(c: Candidate): RecruitmentPipelin
 }
 
 export const PIPELINE_STAGE_LABELS_AR: Record<RecruitmentPipelineStage, string> = {
-  awaiting_lecture: 'بانتظار المحاضرة',
-  absent: 'غائب / بانتظار تأكيد الحضور',
+  awaiting_lecture: 'مستني المحاضرة',
+  absent: 'غاب — يحتاج تأكيد أو إعادة محاضرة',
   rescheduled: 'محاضرة معاد جدولتها',
-  attended_awaiting_activation: 'حضر / بانتظار التفعيل',
-  activated: 'مفعّل',
-  not_activated: 'غير مفعّل',
-  activated_awaiting_ops_assignment: 'مفعّل — بانتظار تعيين مشرف العمليات',
-  other: 'أخرى',
+  attended_awaiting_activation: 'حضر — مستني التفعيل وكود المندوب',
+  activated: 'اكتمل التعيين',
+  not_activated: 'مرفوض / غير مفعّل',
+  activated_awaiting_ops_assignment: 'اتفعّل — مستني تعيين مشرف التشغيل (Admin)',
+  other: 'مقدم / بيانات أولية',
 };

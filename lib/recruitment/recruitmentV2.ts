@@ -77,8 +77,12 @@ export function assertOpsAssignmentPermission(
     patch.assignmentStatus !== undefined &&
     patch.assignmentStatus !== existing.assignmentStatus &&
     (patch.assignmentStatus === 'تم التعيين' || existing.assignmentStatus === 'تم التعيين');
+  const touchingPreferredOps =
+    patch.assignedSupervisorCode !== undefined &&
+    String(patch.assignedSupervisorCode).trim() !==
+      String(existing.assignedSupervisorCode || '').trim();
 
-  if (touchingFinal || touchingAssignedAt || touchingStatus) {
+  if (touchingFinal || touchingAssignedAt || touchingStatus || touchingPreferredOps) {
     return 'تعيين مشرف العمليات متاح للأدمن فقط';
   }
   return null;

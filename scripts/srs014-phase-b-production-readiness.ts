@@ -15,7 +15,7 @@ dotenv.config({ path: '.env.vercel.prod' });
 dotenv.config({ path: '.env.vercel.cron', override: true });
 
 import { getJwtSecret } from '../lib/jwtConfig';
-import { getSheetData } from '../lib/googleSheets';
+import { deleteSheetRow, getSheetData } from '../lib/googleSheets';
 import {
   SHEET_CANDIDATES,
   SHEET_CANDIDATE_CONTACTS,
@@ -99,7 +99,9 @@ function todayOffset(days: number): string {
 
 async function countQaInSheet(sheet: string): Promise<number> {
   try {
-    const data = await getSheetData(sheet, false);
+    const range =
+      sheet === SHEET_CANDIDATES ? `${SHEET_CANDIDATES}!A:BZ` : undefined;
+    const data = await getSheetData(sheet, false, range);
     return data.filter((r) => JSON.stringify(r).includes(PREFIX)).length;
   } catch {
     return 0;
@@ -145,19 +147,31 @@ async function cleanup() {
     }
   }
 
-  // Soft-delete QA contacts left in sheet
+  // Hard-delete any remaining QA contact rows (soft-delete leaves PREFIX text)
   try {
     const contacts = await getSheetData(SHEET_CANDIDATE_CONTACTS, false);
-    // API soft-delete already; verify no active QA names
-    const qaActive = contacts.filter(
-      (r) =>
-        JSON.stringify(r).includes(PREFIX) ||
-        String(r[5] ?? '').includes('019998887') ||
-        String(r[2] ?? '').includes(PREFIX)
-    );
-    notes.push(`contacts sheet QA-ish rows after cleanup (may include inactive): ${qaActive.length}`);
-  } catch {
-    /* ok */
+    const rows: number[] = [];
+    for (let i = 0; i < contacts.length; i++) {
+      const blob = JSON.stringify(contacts[i]);
+      if (
+        blob.includes(PREFIX) ||
+        blob.includes('019998887') ||
+        blob.includes('01011112222') ||
+        blob.includes('01033334444') ||
+        blob.includes('01055556666')
+      ) {
+        if (String(contacts[i][0]).toLowerCase() === 'contactid') continue;
+        rows.push(i + 1);
+      }
+    }
+    for (const rowNum of rows.sort((a, b) => b - a)) {
+      await deleteSheetRow(SHEET_CANDIDATE_CONTACTS, rowNum);
+    }
+    const after = await getSheetData(SHEET_CANDIDATE_CONTACTS, false);
+    const left = after.filter((r) => JSON.stringify(r).includes(PREFIX)).length;
+    check('ZERO SRS014_UI_QA_ in contacts sheet', left === 0, `leftover=${left}`);
+  } catch (e: any) {
+    notes.push(`contacts cleanup: ${String(e?.message || e).slice(0, 120)}`);
   }
 
   const candQa = await countQaInSheet(SHEET_CANDIDATES);
@@ -204,10 +218,10 @@ async function main() {
     check('Admin → 200', ad.status === 200, `status=${ad.status}`);
   }
 
-  // Snapshot sheet header before create (integrity)
-  const headerBefore = (await getSheetData(SHEET_CANDIDATES, false))[0]?.map((c) =>
-    String(c ?? '').trim()
-  ) || [];
+  // Snapshot sheet header before create (integrity) — wide range (A:Z truncates)
+  const headerBefore = (
+    await getSheetData(SHEET_CANDIDATES, false, `${SHEET_CANDIDATES}!A:BZ`)
+  )[0]?.map((c) => String(c ?? '').trim()) || [];
   const first22Before = headerBefore.slice(0, 22);
 
   // A) Create — validation failures first
@@ -452,12 +466,16 @@ async function main() {
       ok.status === 200 && ok.j?.data?.riderCode === QA_RIDER_CODE,
       `status=${ok.status} code=${ok.j?.data?.riderCode} err=${ok.j?.error}`
     );
-    const stage = deriveRecruitmentPipelineStage(ok.j.data);
-    check(
-      'pipeline activated_awaiting_ops_assignment',
-      stage === 'activated_awaiting_ops_assignment',
-      `stage=${stage}`
-    );
+    if (ok.j?.data) {
+      const stage = deriveRecruitmentPipelineStage(ok.j.data);
+      check(
+        'pipeline activated_awaiting_ops_assignment',
+        stage === 'activated_awaiting_ops_assignment',
+        `stage=${stage}`
+      );
+    } else {
+      check('pipeline activated_awaiting_ops_assignment', false, 'no candidate data after activate');
+    }
   }
 
   // D) Ops assignment permissions
@@ -540,9 +558,9 @@ async function main() {
 
   // H) Sheet integrity
   {
-    const headerAfter = (await getSheetData(SHEET_CANDIDATES, false))[0]?.map((c) =>
-      String(c ?? '').trim()
-    ) || [];
+    const headerAfter = (
+      await getSheetData(SHEET_CANDIDATES, false, `${SHEET_CANDIDATES}!A:BZ`)
+    )[0]?.map((c) => String(c ?? '').trim()) || [];
     const first22After = headerAfter.slice(0, 22);
     check(
       'first-22 headers unchanged meaning',

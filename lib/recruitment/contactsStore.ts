@@ -2,7 +2,7 @@
  * SRS-014 Phase B — candidate emergency/family contacts (append-only + active flag).
  */
 import { appendToSheet, ensureSheetExists, getSheetData, updateSheetRow } from '@/lib/googleSheets';
-import { validateContactInput } from './phaseB';
+import { ACTIVATION_CONTACTS_BLOCKED_AR, validateContactInput } from './phaseB';
 import {
   CANDIDATE_CONTACT_HEADERS,
   SHEET_CANDIDATE_CONTACTS,
@@ -169,9 +169,10 @@ export async function assertMinContacts(
   candidateId: string,
   exceptionApproved: boolean
 ): Promise<void> {
+  // Design freeze: Admin exception waives the minimum (0 or 1 contact allowed).
   if (exceptionApproved) return;
   const contacts = await listByCandidate(candidateId);
   if (contacts.length < MIN_ACTIVE_CONTACTS_DEFAULT) {
-    throw new Error('يجب إضافة جهتي اتصال على الأقل قبل التفعيل (أو اعتماد استثناء من الأدمن)');
+    throw new Error(ACTIVATION_CONTACTS_BLOCKED_AR);
   }
 }
