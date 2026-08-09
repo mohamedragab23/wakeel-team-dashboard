@@ -581,10 +581,22 @@ Await explicit approval for the next single flag.
 
 ### Production deployment / flag state
 
-- Deploy Phase B code with **`FEATURE_RECRUITMENT_V2_ENABLED` absent/OFF** (do **not** enable).
-- Keep `FEATURE_PAYOUT_CYCLES_ENABLED=true` (Phase A).
-- Keep all equipment / auto-deduction / returns / inventory / manual-deduction V2 flags OFF.
-- No synthetic production candidate writes in this ship (flag OFF ⇒ V2 APIs 503).
+| Item | Value |
+|---|---|
+| Commit | `0bfbc65` |
+| Deploy | `dpl_8qqjHZM39TWgvSxMtKMUYQAgUvvo` **READY** (Production alias) |
+| `FEATURE_RECRUITMENT_V2_ENABLED` | **absent / OFF** (not set in Vercel Production) |
+| `FEATURE_PAYOUT_CYCLES_ENABLED` | **ON** (Phase A retained) |
+| Equipment / auto / returns / inventory / manual V2 flags | **OFF / absent** |
+
+Production probes after READY:
+- `GET .../candidates/x/contacts` → **503** `enabled:false`
+- `PATCH .../security-fee` → **503** `enabled:false`
+- `GET .../candidates` (legacy) → **401** (route live; auth required)
+- `GET .../capability` → **401** (route live)
+- Cron auto-deductions → **200** `skipped:true` (`FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED off`)
+
+No synthetic production candidate writes (flag OFF ⇒ V2 APIs 503).
 
 ### Phase B STOP
 
