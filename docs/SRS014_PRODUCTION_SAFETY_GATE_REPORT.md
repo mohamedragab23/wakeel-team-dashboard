@@ -240,3 +240,132 @@ The following remain **OFF / absent** in Production and were **not** set during 
 - `FEATURE_EQUIPMENT_INVENTORY_V2_ENABLED`
 
 Await human review of this report before any enablement.
+
+---
+
+## FINAL RELEASE AUDIT
+
+**Audit type:** READ-ONLY  
+**Audit time (local):** 2026-08-09 ~18:15 EEST  
+**Mutations performed:** none (no Sheet writes, no Vercel env changes, no flag enables)  
+**Flags enabled:** none
+
+### Exact Production alias
+
+| Field | Value |
+|---|---|
+| Alias | https://wakeel-team-dashboard.vercel.app |
+| Vercel deployment ID | `dpl_4xe3bofk7tGfVt2NBxBQ87ktUpmD` |
+| Deploy URL | https://wakeel-team-dashboard-d0ytecv1q-ragab-team.vercel.app |
+| Production commit SHA | `c91798d889706a008d662a4aef7f773d63c99e99` |
+| Commit subject | `docs(srs014): record production deploy id after safety-gate redeploy` |
+| Deployment ready (UTC) | `2026-08-09T14:57:45.435Z` |
+| Deployment ready (EEST) | `2026-08-09 17:57:45 GMT+0300` |
+| `readyState` | `READY` |
+| Alias includes Production | Yes (`wakeel-team-dashboard.vercel.app`) |
+
+### Commit ancestry (required fixes on Production)
+
+| Commit | Role | On Production alias? |
+|---|---|---|
+| `fac888c` | SRS-014 feature ship (flags default OFF) | Yes (ancestor) |
+| `67617e1` | One auto-deduct per issue+cycle + QA scripts | Yes (ancestor of `c91798d`) |
+| `c91798d` | Report deploy-ID docs only (no runtime logic delta) | **Yes — currently serving** |
+
+`git merge-base --is-ancestor 67617e1 c91798d` → exit 0. Local `HEAD` = `c91798d` matches Vercel `githubCommitSha`.
+
+### All 7 SRS-014 flag states (Production)
+
+Source: `vercel env ls production -S ragab-team` + live cron probe.
+
+| Flag | State |
+|---|---|
+| `FEATURE_RECRUITMENT_V2_ENABLED` | **Absent → OFF** |
+| `FEATURE_PAYOUT_CYCLES_ENABLED` | **Absent → OFF** |
+| `FEATURE_EQUIPMENT_LEDGER_ENABLED` | **Absent → OFF** |
+| `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED` | **Absent → OFF** |
+| `FEATURE_EQUIPMENT_RETURNS_V2_ENABLED` | **Absent → OFF** |
+| `FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED` | **Absent → OFF** |
+| `FEATURE_EQUIPMENT_INVENTORY_V2_ENABLED` | **Absent → OFF** |
+
+Present non-SRS-014 flags only: `FEATURE_PAYROLL_LEDGER_ENABLED`, `FEATURE_RIDER_SEARCH_ENABLED`, `FEATURE_SHIFT_IMPORT_ENABLED`.
+
+**No automatic enablement by deploy:** `vercel.json` registers the cron path only; it does not set any `FEATURE_*` env. Flag helpers require env === `'true'` (`lib/srs014Flags.ts`).
+
+### Cron cannot deduct while auto flag OFF
+
+Live Production:
+
+```
+GET /api/cron/equipment-auto-deductions
+→ 200 {"success":true,"skipped":true,"reason":"FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED off"}
+```
+
+Code path (`app/api/cron/equipment-auto-deductions/route.ts`): returns before `runEquipmentAutoDeductionsForDate` when `isAutoEquipmentDeductionsEnabled()` is false.
+
+### Test ↔ deployed code correspondence
+
+| Suite | Result | Code correspondence |
+|---|---|---|
+| Offline `npm run test:srs014` | **41/41 PASS** (re-run during this audit on `c91798d`) | Same tree as Production SHA |
+| Production Sheets QA | **19/19 PASS** (prior gate) | Exercised runtime from `67617e1` (engine idempotency fix); `c91798d` is docs-only after that — **no financial logic drift** |
+| SRS-013 Phase 3 | **5 PASS / 0 FAIL / 1 SKIP** (re-run this audit) | Salary path on deployed tree; auto equipment flag forced OFF in harness |
+
+### SRS-013 Phase 3 (re-verified this audit)
+
+```
+=== Result: 5 passed, 0 failed, 1 skipped ===
+```
+
+- **WA-003 / July:** PASS — OFF==ON, `netSalary=7234.5`
+- **WA-002 skip:** intentional and justified — read-only ledger check found **2 active `ledger_native`** rows for `WA-002` / `2026-07`:
+  - `f7d55def-…` deduction −200 (`خصم`)
+  - `95b24683-…` advance −1000 (`سلفه`)
+
+### Checklist confirmations (items 7–20)
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 7 | Salary double-count protection | **PASS** | Legacy `equipmentCost` only zeroed when auto flag ON **and** open liability riders exist (`lib/salaryService.ts`). Ledger sums **only** `source==='ledger_native' && status==='active'`; `legacy_mirror` excluded (`lib/payrollLedger.ts` + salary comments). With Production auto flag OFF, legacy equipment path is unchanged. |
+| 8 | Activation-cycle eligibility | **PASS** | `isCycleEligibleForEquipmentDeduction` returns `activation_in_current_cycle` when activation falls inside cycle; first deduct = next equipment-enabled non-closing cycle with `startDate > activationDate` (`lib/payoutCycles/eligibility.ts` + offline tests). |
+| 9 | Closing-cycle protection | **PASS** | `isClosing=true` → `closing_cycle` skip; `shouldSkipEquipmentAutoDeductions` true (`eligibility.ts` + engine tests). |
+| 10 | Partial payout carry-forward | **PASS** | 300 expected / 150 available → deduct 150, `installmentComplete=false`; next cycle remaining 150 of same installment (`expectedInstallmentMilliemes` + safety-gate / engine tests). |
+| 11 | 800/900 liability | **PASS** | PAID→80000 milli; NOT_PAID→90000 (`lib/money.ts`). |
+| 12 | Installment rounding | **PASS** | 800→26667+26667+26666; 900→30000×3 (integer milliemes). |
+| 13 | Settlement payment | **PASS** | `applySettlementPayment` reduces balance; status stays `open` if remaining > 0; does **not** call waive (`store.ts` / `approveSettlement`). |
+| 14 | Waiver explicit only | **PASS** | Waiver only via `markIssueWaived` when Admin sets `waivedMilli` / `waiverReason` (`approveSettlement`). |
+| 15 | Idempotency (one per issue+cycle) | **PASS** | `existingIssueCycleKeys` → `already_posted_for_cycle` plus idempotency key + Redis NX + ledger dup check (`engine.ts` on `67617e1`/`c91798d`). |
+| 16 | Audit trail on financial mutations | **PASS (with note)** | Liability create/balance/settlement/waive and settlement approve write `سجل_العمليات` via `appendAuditLog` with `actorCode`/`actorName`, `timestamp`, `before`/`after` (create has `after` only). Auto-deduct also updates liability via `updateBalance` (audited) and posts `ledger_native` with `createdBy`. |
+| 17 | Legacy Excel / admin deductions untouched | **PASS** | `app/api/admin/salary/admin-deductions` still uses `خصومات_الإدارة`; SRS-014 flags do not gate that route. |
+| 18 | No destructive sheet delete/rename | **PASS** | No `deleteSheet`/`renameSheet` in SRS-014 modules (`equipmentLiability`, `equipmentDeductions`, `payoutCycles`, `equipmentReturns`). |
+| 19 | New sheets additive / lazy | **PASS** | Created only via `ensureSheetExists` on first use. |
+| 20 | Deploy does not enable flags | **PASS** | Confirmed absent in Production env after deploy of `c91798d`. |
+
+### Cleanup / data integrity (read-only re-check)
+
+| Sheet | `SRS014QA_` rows now |
+|---|---|
+| `عهدة_المعدات` | **0** |
+| `استقطاعات_المعدات_التلقائية` | **0** |
+| `دورات_القبض` | **0** |
+| `تسوية_استرجاع_المعدات` | **0** |
+| `سجل_المعاملات_المالية` | **0** |
+
+**Confirmation:** Production QA artifacts on financial sheets are fully cleaned.  
+**Confirmation:** This audit performed **no** production financial mutations. Prior gate mutations were isolated `SRS014QA_` rows only and were removed.
+
+### Audit verdict
+
+| Gate | Status |
+|---|---|
+| Deployed commit includes all required fixes through `c91798d` | **PASS** |
+| All 7 SRS-014 flags OFF | **PASS** |
+| Cron cannot deduct | **PASS** |
+| SRS-013 regression | **PASS** (5/0/1; WA-003 PASS; WA-002 real ledger_native skip) |
+| SRS-014 offline | **PASS** 41/41 |
+| SRS-014 prod QA (prior) | **PASS** 19/19 (code-aligned) |
+| Ready to discuss **first** single flag enablement | **YES — pending human decision** |
+
+### STOP
+
+No SRS-014 flag was enabled during this audit. Next step is a separate human decision on which **single** flag to enable first.
