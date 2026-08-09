@@ -93,7 +93,14 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
     return NextResponse.json({ success: true, data: contact }, { status: 201 });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'حدث خطأ';
-    const status = msg.includes('مطلوب') || msg.includes('صالحة') || msg.includes('أكثر') ? 400 : 500;
+    const status =
+      msg.includes('مطلوب') ||
+      msg.includes('صالحة') ||
+      msg.includes('أكثر') ||
+      msg.includes('توضيح') ||
+      msg.includes('أخرى')
+        ? 400
+        : 500;
     return NextResponse.json({ success: false, error: msg }, { status });
   }
 }

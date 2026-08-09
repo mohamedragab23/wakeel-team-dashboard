@@ -69,7 +69,13 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
     return NextResponse.json({ success: true, data: updated });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'حدث خطأ';
-    const status = msg.includes('مطلوب') || msg.includes('صالحة') ? 400 : 500;
+    const status =
+      msg.includes('مطلوب') ||
+      msg.includes('صالحة') ||
+      msg.includes('توضيح') ||
+      msg.includes('أخرى')
+        ? 400
+        : 500;
     return NextResponse.json({ success: false, error: msg }, { status });
   }
 }

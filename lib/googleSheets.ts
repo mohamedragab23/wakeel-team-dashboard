@@ -495,7 +495,9 @@ function a1ColumnEnd(columnCount: number): string {
  */
 export async function ensureHeaderRow(sheetName: string, headers: string[]): Promise<void> {
   if (!headers.length) return;
-  const data = await getSheetData(sheetName, false);
+  // Wide range: default A:Z truncates after col 26 and falsely treats extended headers as missing.
+  const endCol = a1ColumnEnd(Math.max(headers.length, 52));
+  const data = await getSheetData(sheetName, false, `${sheetName}!A:${endCol}`);
   const row0 = data[0] || [];
   const match =
     row0.length >= headers.length &&
@@ -503,10 +505,9 @@ export async function ensureHeaderRow(sheetName: string, headers: string[]): Pro
   if (match) return;
 
   const sheets = await getSheetsClient();
-  const end = a1ColumnEnd(headers.length);
   await sheets.spreadsheets.values.update({
     spreadsheetId: getMainSpreadsheetId(),
-    range: `${sheetName}!A1:${end}1`,
+    range: `${sheetName}!A1:${endCol}1`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [headers] },
   });

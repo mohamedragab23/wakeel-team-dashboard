@@ -182,11 +182,14 @@ function inDateRange(value: string, from?: string, to?: string): boolean {
   return true;
 }
 
+/** Wide enough for Phase B headers (52+) — default A:Z truncates after zone (col 26). */
+const CANDIDATES_SHEET_RANGE = `${SHEET_CANDIDATES}!A:BZ`;
+
 /** تحميل كل المرشحين من الشيت */
 export async function loadAllCandidates(useCache = true): Promise<Candidate[]> {
   let data: unknown[][] = [];
   try {
-    data = await getSheetData(SHEET_CANDIDATES, useCache);
+    data = await getSheetData(SHEET_CANDIDATES, useCache, CANDIDATES_SHEET_RANGE);
   } catch {
     return [];
   }
