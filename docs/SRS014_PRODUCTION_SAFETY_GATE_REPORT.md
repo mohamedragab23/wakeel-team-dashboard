@@ -30,11 +30,11 @@
 | Item | Value |
 |---|---|
 | Production URL | https://wakeel-team-dashboard.vercel.app |
-| Deployment ID (alias at gate time) | `dpl_6YwbkWKLyWx3UvpdPkeJpJA7SGiR` |
-| Deploy URL | https://wakeel-team-dashboard-r1il1u8zn-ragab-team.vercel.app |
-| Git SHA on that deploy | `fac888ca90701feb7a90d8faa8424789ccce74bd` |
-| Commit message | `feat(srs014): add equipment liability, payout cycles, and auto-deductions behind flags` |
-| Follow-up (one-deduct-per-cycle + QA scripts + this report) | Committed/pushed after green QA; must be live before any flag enable |
+| Current Production deployment ID | `dpl_EorcGo6Ah9bjKci1zuYCmJvaXVgV` |
+| Deploy URL | https://wakeel-team-dashboard-gnq0q2ape-ragab-team.vercel.app |
+| Git SHA on Production alias | `67617e148f36df73b1f0dff8485f941acfd1e9bd` |
+| Prior SRS-014 ship (flags-OFF baseline) | `fac888c` / `dpl_6YwbkWKLyWx3UvpdPkeJpJA7SGiR` |
+| Current commit message | `fix(srs014): one auto-deduct per issue per cycle + production safety gate evidence` |
 
 **Evidence that SRS-014 code is on Production:** authenticated cron returns structured skip for the new route; unauthenticated hits to new admin/supervisor routes return **401** (not 404).
 
@@ -221,7 +221,7 @@ Browser end-to-end click-through of every legacy UI was not re-run in this gate;
 1. **Supervisor-level double-count guard granularity** — when auto flag ON and any open liability rider exists for a supervisor, legacy `المعدات` cost is zeroed for the whole supervisor (sheet has no per-rider breakdown). Mixed legacy+V2 riders under one supervisor need an enablement plan.
 2. **Google Sheets QPM** — can cause incomplete salary reads / false diffs; operational, not SRS-014-specific.
 3. **`السلف` sheet parse error** — pre-existing; advances may read as 0.
-4. **One-deduct-per-cycle fix** must be on the Production alias before enabling `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED` (QA passed with local engine containing the fix).
+4. **One-deduct-per-cycle fix** is now on Production alias (`67617e1` / `dpl_EorcGo6Ah9bjKci1zuYCmJvaXVgV`). Still do not enable auto deductions until human approval.
 5. **Audit rows** in `سجل_العمليات` with `SRS014QA_` may remain as append-only history of the gate.
 6. First enablement should still be staged: cycles → liability ledger → returns → auto deductions last, on a dedicated QA supervisor only.
 
