@@ -369,3 +369,142 @@ Code path (`app/api/cron/equipment-auto-deductions/route.ts`): returns before `r
 ### STOP
 
 No SRS-014 flag was enabled during this audit. Next step is a separate human decision on which **single** flag to enable first.
+
+---
+
+## PHASE A — PAYOUT CYCLES CONTROLLED ROLLOUT
+
+**Date:** 2026-08-09  
+**Status:** **PASS — STOPPED** (awaiting explicit approval before Phase B)  
+**Enabled flag:** `FEATURE_PAYOUT_CYCLES_ENABLED=true` **only**
+
+### Isolation (before enable)
+
+| System | Coupled to payout-cycles flag? | Evidence |
+|---|---|---|
+| Salary calculation | **No** | `lib/salaryService.ts` has zero `payoutCycles` / `FEATURE_PAYOUT_CYCLES` references |
+| Equipment liability | **No** | Liability store gated by equipment-ledger paths, not payout flag |
+| Equipment auto deductions | **No** | Engine/cron gated solely by `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED` |
+| Payroll ledger | **No** | Gated by `FEATURE_PAYROLL_LEDGER_ENABLED` only |
+| Recruitment / delivery / return / Excel admin deductions | **No** | Unchanged routes; payout flag only unlocks Admin payout-cycle APIs/UI |
+
+With payout flag ON, those systems do not automatically change behavior.
+
+### Deploy + flag state
+
+| Field | Value |
+|---|---|
+| Production commit | `b29b566d266c0025e74937cf21663d8295414758` |
+| Commit subject | `docs(srs014): add FINAL RELEASE AUDIT section before Phase A` |
+| Code base for runtime | Includes `fac888c` + `67617e1` (SRS-014 engine) + docs tip |
+| Vercel deployment ID | `dpl_6mCMaCJ9emNpKFsxze5WDHFcjfud` |
+| Deploy URL | https://wakeel-team-dashboard-31nxymwub-ragab-team.vercel.app |
+| Ready (UTC) | `2026-08-09T15:33:37.634Z` |
+| Ready (EEST) | `2026-08-09 18:33:37 GMT+0300` |
+| Alias | https://wakeel-team-dashboard.vercel.app |
+
+| Flag | Production |
+|---|---|
+| `FEATURE_PAYOUT_CYCLES_ENABLED` | **true** (added; Sensitive) |
+| `FEATURE_RECRUITMENT_V2_ENABLED` | **Absent → OFF** |
+| `FEATURE_EQUIPMENT_LEDGER_ENABLED` | **Absent → OFF** |
+| `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED` | **Absent → OFF** |
+| `FEATURE_EQUIPMENT_RETURNS_V2_ENABLED` | **Absent → OFF** |
+| `FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED` | **Absent → OFF** |
+| `FEATURE_EQUIPMENT_INVENTORY_V2_ENABLED` | **Absent → OFF** |
+
+Live capability: `GET /api/admin/payout-cycles/capability` → `{ enabled: true }`.
+
+### August 2026 configuration (Admin API — not hard-coded)
+
+Dates are **configuration data only** stored in `دورات_القبض`. Application logic has no hard-coded August 2026 calendar (UI label "دورة التقفيلة" is display-only).
+
+| # | cycleId | Range | deductionGenerationDate | isClosing | status |
+|---|---|---|---|---|---|
+| 1 | `8e3bd7b6-6ded-48e5-af43-30782aad6f7c` | 2026-08-01 → 2026-08-09 | 2026-08-09 | false | **finalized** (finalize + explicit correction audit test) |
+| 2 | `5187b581-0025-4b57-bbdc-482cf7fed78e` | 2026-08-10 → 2026-08-16 | 2026-08-16 | false | active |
+| 3 | `99e5f369-32f8-454e-8f2b-fe299a53cfd3` | 2026-08-17 → 2026-08-23 | 2026-08-23 | false | active |
+| 4 | `d6e19bd4-cd26-490d-888b-60dfc649b1b3` | 2026-08-24 → 2026-08-31 | 2026-08-31 | **true** | active |
+
+Canonical identity = `cycleId` (UUID). Arabic labels are not used as keys.
+
+### Validation results (Production API + engine)
+
+Script: `scripts/srs014-phase-a-payout-cycles-rollout.ts` → **35/35 PASS**
+
+Rejected as required:
+- overlapping cycles
+- startDate > endDate
+- duplicate cycleNumber
+- invalid month
+- multiple closing cycles
+- closing cycle not final by endDate
+- invalid payout/deduction dates
+- silent edit of finalized cycle (409) — explicit correction allowed with audit
+
+### Permissions
+
+| Actor | Create/edit/finalize | Result |
+|---|---|---|
+| Admin | Allowed | PASS |
+| Supervisor | Denied | **401** |
+| Recruitment | Denied | **401** |
+
+### Audit results
+
+`سجل_العمليات` contains create/correct rows for August cycles with actor (`PHASEA-ADMIN`), action, timestamp, after JSON including `cycleId` (4 audit hits verified). Finalize/correction paths use `appendAuditLog` with before/after.
+
+### Cron status
+
+```
+GET /api/cron/equipment-auto-deductions
+→ {"success":true,"skipped":true,"reason":"FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED off"}
+```
+
+No automatic equipment deduction occurred.
+
+### SRS-013 regression (with payout flag ON in process)
+
+```
+=== Result: 5 passed, 0 failed, 1 skipped ===
+```
+
+WA-002 skip remains the approved intentional `ledger_native` case. Salary output remained byte-identical OFF/ON for applicable pairs while `FEATURE_PAYOUT_CYCLES_ENABLED=true`.
+
+### Equipment / ledger safety proof
+
+| Check | Result |
+|---|---|
+| New equipment liability rows | **0 → 0** |
+| New auto-deduction rows | **0 → 0** |
+| `equipment_installment` ledger rows | **0 → 0** |
+| Rejected invalid POSTs persisted | **none** |
+
+### Persistence / data integrity
+
+- `دورات_القبض` lazy-created / readable; **4** August rows kept as intended production calendar
+- No existing sheets deleted/renamed
+- No rider financial history modified
+- No legacy Excel migration
+- Temporary rejected cycleNumbers (94–99) did **not** persist
+
+### Closing-cycle / generation-date behavior
+
+- Cycle 4 exists for payroll/reporting (`isClosing=true`, status active)
+- `shouldSkipEquipmentAutoDeductions` / eligibility reason `closing_cycle` confirmed
+- `resolveCycleForDeductionDate(..., '2026-08-16')` → cycle **#2** via configured `deductionGenerationDate` (not week inference)
+- Cycle 1 starts **2026-08-01** (Admin-configured month start / first Sunday boundary), not a hard-coded Monday week rule
+
+### Phase A STOP
+
+**Do not proceed to Phase B automatically.**
+
+Still OFF:
+- `FEATURE_RECRUITMENT_V2_ENABLED`
+- `FEATURE_EQUIPMENT_LEDGER_ENABLED`
+- `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED`
+- `FEATURE_EQUIPMENT_RETURNS_V2_ENABLED`
+- `FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED`
+- `FEATURE_EQUIPMENT_INVENTORY_V2_ENABLED`
+
+Await explicit approval for the next single flag.
