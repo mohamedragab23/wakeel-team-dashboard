@@ -86,6 +86,26 @@ equipmentIssueId, riderCode, riderNameSnapshot, zoneSnapshot, supervisorCodeSnap
 ### Flag
 `FEATURE_EQUIPMENT_LEDGER_ENABLED`
 
+### Amendment — Equipment Liability Management Desk (additive)
+
+Authorized under `FEATURE_EQUIPMENT_LEDGER_ENABLED` **independently** of Returns V2.
+
+- **Purpose:** Admin desk to list liabilities and record **financial cash payments** against an existing `عهدة_المعدات` row.
+- **History sheet (append-only):** `مدفوعات_عهدة_المعدات` — transaction evidence only; **not** a second liability ledger. Authoritative balance remains on `عهدة_المعدات` (`settlementPaidMilli`, `outstandingMilli`).
+- **Cash payment does not imply physical return** and does **not** create return records.
+- **Does not** enable or require `FEATURE_EQUIPMENT_RETURNS_V2_ENABLED`.
+- **Does not** enable Auto Deduction (`FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED`).
+- Cash payments update `settlementPaidMilli` only; they must **not** modify `amountDeductedMilli` or installment index.
+- Permission: admin feature key `equipment_liability`. UI: `/admin/equipment-liability`.
+
+Distinction:
+
+| Concept | Flag / sheet |
+|---|---|
+| A) Equipment liability cash payment | Ledger ON · `مدفوعات_عهدة_المعدات` |
+| B) Physical return / return settlement | Returns V2 · `تسوية_استرجاع_المعدات` |
+| C) Auto deduction | Auto flag · `استقطاعات_المعدات_التلقائية` |
+
 ---
 
 ## Phase D — Returns V2

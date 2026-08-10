@@ -1,4 +1,10 @@
-import { appendToSheet, ensureSheetExists, getSheetData, updateSheetRow } from '@/lib/googleSheets';
+import {
+  appendToSheet,
+  ensureHeaderRow,
+  ensureSheetExists,
+  getSheetDataOrThrow,
+  updateSheetRow,
+} from '@/lib/googleSheets';
 import { appendAuditLog } from '@/lib/auditLog';
 import {
   BAG_COST_MILLI,
@@ -40,7 +46,10 @@ export type EquipmentLiabilityIssue = {
   securityPaidUpfront: boolean;
   originalLiabilityMilli: number;
   outstandingMilli: number;
+  /** Installment / auto-deduction progress only (never settlement cash). */
   amountDeductedMilli: number;
+  /** Cash return settlement paid (does not advance installments). */
+  settlementPaidMilli: number;
   installmentsCompleted: number;
   status: EquipmentLiabilityStatus;
   deliveryRowRef: string;
@@ -145,6 +154,7 @@ export function computeLiabilityFields(params: {
   originalLiabilityMilli: number;
   outstandingMilli: number;
   amountDeductedMilli: number;
+  settlementPaidMilli: number;
   installmentsCompleted: number;
   installmentSchedule: number[];
   jacketHeld: boolean;
@@ -160,6 +170,7 @@ export function computeLiabilityFields(params: {
     originalLiabilityMilli,
     outstandingMilli: originalLiabilityMilli,
     amountDeductedMilli: 0,
+    settlementPaidMilli: 0,
     installmentsCompleted: 0,
     installmentSchedule: schedule,
     jacketHeld: Boolean(params.jacketHeld),
@@ -207,6 +218,7 @@ export function rowToEquipmentLiability(row: unknown[], sheetRow: number): Equip
     createdBy: cell(row, 23),
     updatedAt: cell(row, 24),
     updatedBy: cell(row, 25),
+    settlementPaidMilli: Number(cell(row, 26)) || 0,
     sheetRow,
     installmentSchedule: schedule,
   };
@@ -240,18 +252,21 @@ function issueToRow(issue: EquipmentLiabilityIssue): unknown[] {
     issue.createdBy,
     issue.updatedAt,
     issue.updatedBy,
+    issue.settlementPaidMilli ?? 0,
   ];
 }
 
 export async function ensureEquipmentLiabilitySheet(): Promise<void> {
   if (ensuredOnce) return;
   await ensureSheetExists(SHEET_EQUIPMENT_LIABILITY, [...EQUIPMENT_LIABILITY_HEADERS]);
+  await ensureHeaderRow(SHEET_EQUIPMENT_LIABILITY, [...EQUIPMENT_LIABILITY_HEADERS]);
   ensuredOnce = true;
 }
 
 async function readAllIssues(): Promise<EquipmentLiabilityIssue[]> {
   await ensureEquipmentLiabilitySheet();
-  const data = await getSheetData(SHEET_EQUIPMENT_LIABILITY, false);
+  // Fail closed: Sheets quota/transport errors must not look like "no liabilities".
+  const data = await getSheetDataOrThrow(SHEET_EQUIPMENT_LIABILITY, false);
   const out: EquipmentLiabilityIssue[] = [];
   for (let i = 1; i < data.length; i++) {
     const issue = rowToEquipmentLiability(data[i], i + 1);
@@ -389,6 +404,7 @@ export async function createLiabilityFromDelivery(
       originalLiabilityMilli: computed.originalLiabilityMilli,
       outstandingMilli: computed.outstandingMilli,
       amountDeductedMilli: computed.amountDeductedMilli,
+      settlementPaidMilli: computed.settlementPaidMilli,
       installmentsCompleted: computed.installmentsCompleted,
       status: 'open',
       deliveryRowRef,
@@ -483,6 +499,10 @@ export async function updateBalance(
 /**
  * Apply a cash settlement payment without advancing installment index
  * (return settlement ≠ cycle installment).
+ *
+ * Settlement reduces outstanding and increments settlementPaidMilli only.
+ * It must NOT inflate amountDeductedMilli (installment progress).
+ * Overpayment is rejected (never clamped to outstanding).
  */
 export async function applySettlementPayment(
   equipmentIssueId: string,
@@ -493,15 +513,27 @@ export async function applySettlementPayment(
   if (!issue || !issue.sheetRow) return { ok: false, error: 'issue not found' };
   if (issue.status !== 'open') return { ok: false, error: 'issue not open' };
 
-  const paid = Math.max(0, Math.trunc(paidMilli));
-  const newDeducted = issue.amountDeductedMilli + paid;
-  const newOutstanding = Math.max(0, issue.outstandingMilli - paid);
+  if (!Number.isFinite(paidMilli)) {
+    return { ok: false, error: 'EQUIPMENT_PAYMENT_INVALID_AMOUNT' };
+  }
+  const paid = Math.trunc(paidMilli);
+  if (paid <= 0) {
+    return { ok: false, error: 'EQUIPMENT_PAYMENT_INVALID_AMOUNT' };
+  }
+  if (paid > issue.outstandingMilli) {
+    return { ok: false, error: 'EQUIPMENT_PAYMENT_EXCEEDS_OUTSTANDING' };
+  }
+
+  const newOutstanding = issue.outstandingMilli - paid;
+  const newSettlementPaid = Math.max(0, (issue.settlementPaidMilli || 0) + paid);
   const newStatus: EquipmentLiabilityStatus =
     newOutstanding <= 0 ? 'settled' : issue.status;
 
   const now = new Date().toISOString();
   const updated = withImmutableOriginal(issue, {
-    amountDeductedMilli: newDeducted,
+    // Installment progress unchanged — settlement is not an installment payment.
+    amountDeductedMilli: issue.amountDeductedMilli,
+    settlementPaidMilli: newSettlementPaid,
     outstandingMilli: newOutstanding,
     status: newStatus,
     updatedAt: now,

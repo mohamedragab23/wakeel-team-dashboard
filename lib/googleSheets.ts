@@ -86,6 +86,67 @@ export async function getSheetData(
   }
 }
 
+/**
+ * Like `getSheetData`, but rethrows on Google Sheets API / transport failure.
+ * Use for financial paths (equipment liability / auto deductions) where an
+ * empty result must NOT be interpreted as "no rows / not found".
+ */
+export async function getSheetDataOrThrow(
+  sheetName: string,
+  useCache: boolean = true,
+  rangeOverride?: string
+): Promise<any[][]> {
+  const range = rangeOverride ?? `${sheetName}!A:Z`;
+  const cacheKey = rangeOverride ? `${CACHE_KEYS.sheetData(sheetName)}::${range}` : CACHE_KEYS.sheetData(sheetName);
+  const sheetTtlMs = 15 * 60 * 1000;
+
+  if (useCache) {
+    const cached = cache.get<any[][]>(cacheKey);
+    if (cached) return cached;
+
+    const fromRedis = await redisCacheGet<any[][]>(cacheKey);
+    if (fromRedis) {
+      cache.set(cacheKey, fromRedis, sheetTtlMs);
+      return fromRedis;
+    }
+
+    if (isMirrorReadEnabled() && mirrorSupportsSheet(sheetName) && !rangeOverride) {
+      const fromMirror = await tryGetMirrorSheetData(sheetName);
+      if (fromMirror && fromMirror.length > 0) {
+        cache.set(cacheKey, fromMirror, sheetTtlMs);
+        void redisCacheSet(cacheKey, fromMirror, sheetTtlMs);
+        return fromMirror;
+      }
+    }
+  }
+
+  try {
+    const sheets = await getSheetsClient();
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: getMainSpreadsheetId(),
+      range,
+      majorDimension: 'ROWS',
+      valueRenderOption: 'FORMATTED_VALUE',
+    });
+    const data = response.data.values || [];
+    if (useCache) {
+      cache.set(cacheKey, data, sheetTtlMs);
+      void redisCacheSet(cacheKey, data, sheetTtlMs);
+    }
+    return data;
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logStructured('error', 'google_sheets_get_or_throw_failed', {
+      sheetName,
+      range,
+      useCache,
+      errorName: err.name,
+      errorMessage: err.message,
+    });
+    throw err;
+  }
+}
+
 // Append data to sheet with batch processing for large datasets
 // Data is ADDED to existing data (not replaced) - important for historical tracking
 export async function appendToSheet(sheetName: string, values: any[][], useCache: boolean = true): Promise<boolean> {

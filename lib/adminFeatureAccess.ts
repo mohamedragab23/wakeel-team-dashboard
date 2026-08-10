@@ -177,6 +177,7 @@ export function getAdminMenuDefs(): AdminMenuDef[] {
     { href: '/admin/salaries', label: 'حساب الرواتب', icon: '💰', feature: 'salaries' },
     { href: '/admin/deductions-reconcile', label: 'استقطاعات المدير (مقارنة)', icon: '🔎', feature: 'deductions_reconcile' },
     { href: '/admin/payout-cycles', label: 'دورات القبض', icon: '📅', feature: 'payout_cycles' },
+    { href: '/admin/equipment-liability', label: 'مكتب عهدة المعدات', icon: '💳', feature: 'equipment_liability' },
     { href: '/admin/equipment-finance', label: 'مالية المعدات', icon: '🧾', feature: 'equipment_finance' },
     { href: '/admin/debug', label: 'تهيئة النظام والتحقق', icon: '🧹', feature: 'debug' },
     { href: '/shifts', label: 'الشفتات', icon: '🕒', feature: 'shifts' },

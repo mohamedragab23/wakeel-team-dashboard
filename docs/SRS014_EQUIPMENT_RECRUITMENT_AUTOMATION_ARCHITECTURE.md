@@ -55,9 +55,9 @@ Supervisors must **not** need Excel for *new* equipment deductions. Legacy Excel
 |---|---|
 | `FEATURE_RECRUITMENT_V2_ENABLED` | Contacts, security fee fields, lecture/activation upgrades |
 | `FEATURE_PAYOUT_CYCLES_ENABLED` | Cycle CRUD + Admin UI |
-| `FEATURE_EQUIPMENT_LEDGER_ENABLED` | Liability creation on issue |
+| `FEATURE_EQUIPMENT_LEDGER_ENABLED` | Liability creation on issue + **Equipment Liability Management Desk** (cash payments) |
 | `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED` | Cron + engine + salary guard |
-| `FEATURE_EQUIPMENT_RETURNS_V2_ENABLED` | Settlement / waiver |
+| `FEATURE_EQUIPMENT_RETURNS_V2_ENABLED` | Physical return + return-settlement / waiver sheet |
 | `FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED` | Supervisor form (no Excel) |
 | `FEATURE_EQUIPMENT_INVENTORY_V2_ENABLED` | Inventory anomaly flags / extras |
 
@@ -71,9 +71,10 @@ Pattern: `String(process.env.X||'').trim().toLowerCase()==='true'`. API → `503
 |---|---|
 | `دورات_القبض` | Admin payout cycles |
 | `جهات_اتصال_المرشحين` | Family/emergency contacts |
-| `عهدة_المعدات` | Equipment issue + balances |
+| `عهدة_المعدات` | Equipment issue + balances (authoritative aggregate) |
+| `مدفوعات_عهدة_المعدات` | Liability Desk cash payment history (append-only; Ledger ON) |
 | `استقطاعات_المعدات_التلقائية` | Auto deduction history (append-only) |
-| `تسوية_استرجاع_المعدات` | Settlement / waiver |
+| `تسوية_استرجاع_المعدات` | Physical return settlement / waiver (Returns V2) |
 | `مطابقة_دورات_الاستقطاع` | Cycle reconciliation snapshots |
 
 Existing tabs extended additively only (headers via `ensureHeaderRow`).
@@ -89,13 +90,15 @@ Admin assigns Ops Supervisor
        ↓
 Equipment issue → عهدة_المعدات (900/800 once)
        ↓
+Liability Desk (cash payments) → مدفوعات_عهدة_المعدات  [Ledger ON; not Returns]
+       ↓
 Payout cycles (دورات_القبض)
        ↓
-Auto engine (cron) → ledger_native + استقطاعات_المعدات_التلقائية
+Auto engine (cron) → ledger_native + استقطاعات_المعدات_التلقائية  [Auto ON; separate]
        ↓
 Salary fold-in (no double-count)
        ↓
-Return → settlement/waiver → ledger + audit
+Return → return-settlement/waiver → ledger + audit  [Returns V2; separate]
 ```
 
 Money: `lib/money.ts` (integer milliemes).  

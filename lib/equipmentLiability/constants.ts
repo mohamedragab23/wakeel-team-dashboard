@@ -27,6 +27,8 @@ export const EQUIPMENT_LIABILITY_HEADERS = [
   'createdBy',
   'updatedAt',
   'updatedBy',
+  /** Additive — cash return settlement paid (not installment progress). */
+  'settlementPaidMilli',
 ] as const;
 
 export type EquipmentLiabilityStatus = 'open' | 'settled' | 'waived' | 'closed';
