@@ -8,6 +8,8 @@ import {
 } from '@/lib/equipmentLiability/paymentStatus';
 import {
   EQUIPMENT_PAYMENT_ERROR,
+  classifyPaymentAggregateState,
+  ensurePaymentAggregateApplied,
   recordEquipmentLiabilityCashPayment,
   validateCashPaymentAmount,
   toDeskIssueView,
@@ -554,5 +556,423 @@ describe('equipment liability desk — permissions & flags & isolation', () => {
 
   it('applySettlementPayment export still exists for Returns path compatibility', () => {
     assert.equal(typeof applySettlementPayment, 'function');
+  });
+});
+
+function makeHarness(initial = baseIssue()) {
+  let current = { ...initial };
+  const payments: any[] = [];
+  let applyCount = 0;
+  let appendShouldFail = false;
+  let applyShouldFail = false;
+  let applyFailOnce = false;
+  let readShouldFail = false;
+
+  const deps = {
+    getById: async () => {
+      if (readShouldFail) throw new Error('SHEETS_READ_FAILED');
+      return current;
+    },
+    findPaymentByIdempotencyKey: async (k: string) =>
+      payments.find((p) => p.idempotencyKey === k) || null,
+    acquireLock: async () => ({ ok: true as const, token: 't', release: async () => undefined }),
+    getCachedResult: async () => null as string | null,
+    cacheResult: async () => undefined,
+    appendPayment: async (p: any) => {
+      if (appendShouldFail) throw new Error('SHEETS_APPEND_FAILED');
+      payments.push(p);
+    },
+    applyPayment: async (_id: string, paid: number, actor: { code: string }) => {
+      if (applyShouldFail || applyFailOnce) {
+        applyFailOnce = false;
+        return { ok: false as const, error: 'SHEETS_WRITE_FAILED' };
+      }
+      applyCount++;
+      const next = withImmutableOriginal(current, {
+        settlementPaidMilli: (current.settlementPaidMilli || 0) + paid,
+        outstandingMilli: current.outstandingMilli - paid,
+        amountDeductedMilli: current.amountDeductedMilli,
+        installmentsCompleted: current.installmentsCompleted,
+        status: current.outstandingMilli - paid <= 0 ? 'settled' : 'open',
+        updatedBy: actor.code,
+      });
+      current = next;
+      return { ok: true as const, issue: next };
+    },
+    skipAudit: true,
+  };
+
+  return {
+    get current() {
+      return current;
+    },
+    set current(v) {
+      current = v;
+    },
+    payments,
+    get applyCount() {
+      return applyCount;
+    },
+    deps,
+    setAppendFail(v: boolean) {
+      appendShouldFail = v;
+    },
+    setApplyFail(v: boolean) {
+      applyShouldFail = v;
+    },
+    setApplyFailOnce() {
+      applyFailOnce = true;
+    },
+    setReadFail(v: boolean) {
+      readShouldFail = v;
+    },
+  };
+}
+
+describe('equipment liability desk — consistency / recovery matrix', () => {
+  it('classify: applied / needs_apply / conflict', () => {
+    const payment = {
+      amountMilli: 10000,
+      outstandingBeforeMilli: 80000,
+      resultingOutstandingMilli: 70000,
+      resultingSettlementPaidMilli: 10000,
+    };
+    assert.equal(
+      classifyPaymentAggregateState(
+        { settlementPaidMilli: 0, outstandingMilli: 80000, status: 'open' },
+        payment
+      ),
+      'needs_apply'
+    );
+    assert.equal(
+      classifyPaymentAggregateState(
+        { settlementPaidMilli: 10000, outstandingMilli: 70000, status: 'open' },
+        payment
+      ),
+      'applied'
+    );
+    assert.equal(
+      classifyPaymentAggregateState(
+        { settlementPaidMilli: 5000, outstandingMilli: 75000, status: 'open' },
+        payment
+      ),
+      'conflict'
+    );
+  });
+
+  it('A: normal payment — history=1, money once, invariants', async () => {
+    const h = makeHarness();
+    const before = { ...h.current };
+    const r = await recordEquipmentLiabilityCashPayment(
+      {
+        equipmentIssueId: before.equipmentIssueId,
+        amountMilli: 15000,
+        paymentMethod: 'CASH',
+        idempotencyKey: 'mat_A',
+      },
+      { code: 'A', name: 'A' },
+      h.deps
+    );
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    assert.equal(h.payments.length, 1);
+    assert.equal(h.applyCount, 1);
+    assert.equal(h.current.settlementPaidMilli, before.settlementPaidMilli + 15000);
+    assert.equal(h.current.outstandingMilli, before.outstandingMilli - 15000);
+    assert.equal(h.current.originalLiabilityMilli, before.originalLiabilityMilli);
+    assert.equal(h.current.amountDeductedMilli, before.amountDeductedMilli);
+    assert.equal(h.current.installmentsCompleted, before.installmentsCompleted);
+    assert.equal(r.paymentStatus, 'PARTIALLY_PAID');
+  });
+
+  it('B: duplicate same idempotencyKey — no second apply', async () => {
+    const h = makeHarness();
+    const input = {
+      equipmentIssueId: h.current.equipmentIssueId,
+      amountMilli: 10000,
+      paymentMethod: 'CASH' as const,
+      idempotencyKey: 'mat_B',
+    };
+    const a = await recordEquipmentLiabilityCashPayment(input, { code: 'A', name: 'A' }, h.deps);
+    const b = await recordEquipmentLiabilityCashPayment(input, { code: 'A', name: 'A' }, h.deps);
+    assert.equal(a.ok && b.ok, true);
+    assert.equal(h.payments.length, 1);
+    assert.equal(h.applyCount, 1);
+    assert.equal(h.current.settlementPaidMilli, 10000);
+    assert.equal(h.current.outstandingMilli, 70000);
+  });
+
+  it('C: concurrent same idempotencyKey — lock busy then recover once', async () => {
+    const h = makeHarness();
+    let locked = false;
+    const deps = {
+      ...h.deps,
+      acquireLock: async () => {
+        if (locked) return { ok: false as const, reason: 'lock_busy' as const };
+        locked = true;
+        return {
+          ok: true as const,
+          token: 't',
+          release: async () => {
+            locked = false;
+          },
+        };
+      },
+    };
+    const input = {
+      equipmentIssueId: h.current.equipmentIssueId,
+      amountMilli: 10000,
+      paymentMethod: 'CASH' as const,
+      idempotencyKey: 'mat_C',
+    };
+    const first = await recordEquipmentLiabilityCashPayment(input, { code: 'A', name: 'A' }, deps);
+    const busy = await recordEquipmentLiabilityCashPayment(input, { code: 'A', name: 'A' }, {
+      ...deps,
+      acquireLock: async () => ({ ok: false as const, reason: 'lock_busy' as const }),
+    });
+    const retry = await recordEquipmentLiabilityCashPayment(input, { code: 'A', name: 'A' }, deps);
+    assert.equal(first.ok, true);
+    assert.equal(busy.ok, false);
+    if (!busy.ok) assert.equal(busy.code, EQUIPMENT_PAYMENT_ERROR.LOCK_BUSY);
+    assert.equal(retry.ok, true);
+    assert.equal(h.payments.length, 1);
+    assert.equal(h.applyCount, 1);
+    assert.equal(h.current.settlementPaidMilli, 10000);
+  });
+
+  it('D/E: crash after history append → retry recovers exactly once', async () => {
+    const h = makeHarness();
+    h.setApplyFailOnce();
+    const input = {
+      equipmentIssueId: h.current.equipmentIssueId,
+      amountMilli: 20000,
+      paymentMethod: 'CASH' as const,
+      idempotencyKey: 'mat_DE',
+    };
+    const crashed = await recordEquipmentLiabilityCashPayment(input, { code: 'A', name: 'A' }, h.deps);
+    assert.equal(crashed.ok, false);
+    if (!crashed.ok) assert.equal(crashed.code, EQUIPMENT_PAYMENT_ERROR.AGGREGATE_PENDING);
+    assert.equal(h.payments.length, 1);
+    assert.equal(h.current.settlementPaidMilli, 0);
+    assert.equal(h.current.outstandingMilli, 80000);
+
+    const recovered = await recordEquipmentLiabilityCashPayment(input, { code: 'A', name: 'A' }, h.deps);
+    assert.equal(recovered.ok, true);
+    if (!recovered.ok) return;
+    assert.equal(recovered.recovered, true);
+    assert.equal(h.payments.length, 1);
+    assert.equal(h.applyCount, 1);
+    assert.equal(h.current.settlementPaidMilli, 20000);
+    assert.equal(h.current.outstandingMilli, 60000);
+    assert.equal(
+      deriveEquipmentPaymentStatus({
+        settlementPaidMilli: h.current.settlementPaidMilli,
+        amountDeductedMilli: h.current.amountDeductedMilli,
+        outstandingMilli: h.current.outstandingMilli,
+      }),
+      'PARTIALLY_PAID'
+    );
+  });
+
+  it('F/G/H: crash/timeout after aggregate → retry is no-op (no double charge)', async () => {
+    const h = makeHarness();
+    const input = {
+      equipmentIssueId: h.current.equipmentIssueId,
+      amountMilli: 25000,
+      paymentMethod: 'CASH' as const,
+      idempotencyKey: 'mat_FGH',
+    };
+    const first = await recordEquipmentLiabilityCashPayment(input, { code: 'A', name: 'A' }, h.deps);
+    assert.equal(first.ok, true);
+    // Simulate client timeout / crash after aggregate: retry same key.
+    const retry = await recordEquipmentLiabilityCashPayment(input, { code: 'A', name: 'A' }, h.deps);
+    assert.equal(retry.ok, true);
+    if (!retry.ok) return;
+    assert.equal(retry.replayed, true);
+    assert.equal(retry.recovered, false);
+    assert.equal(h.payments.length, 1);
+    assert.equal(h.applyCount, 1);
+    assert.equal(h.current.settlementPaidMilli, 25000);
+    assert.equal(h.current.outstandingMilli, 55000);
+  });
+
+  it('I: two different payment keys concurrently (serialized) both apply once each', async () => {
+    const h = makeHarness();
+    const r1 = await recordEquipmentLiabilityCashPayment(
+      {
+        equipmentIssueId: h.current.equipmentIssueId,
+        amountMilli: 10000,
+        paymentMethod: 'CASH',
+        idempotencyKey: 'mat_I_1',
+      },
+      { code: 'A', name: 'A' },
+      h.deps
+    );
+    const r2 = await recordEquipmentLiabilityCashPayment(
+      {
+        equipmentIssueId: h.current.equipmentIssueId,
+        amountMilli: 15000,
+        paymentMethod: 'CASH',
+        idempotencyKey: 'mat_I_2',
+      },
+      { code: 'A', name: 'A' },
+      h.deps
+    );
+    assert.equal(r1.ok && r2.ok, true);
+    assert.equal(h.payments.length, 2);
+    assert.equal(h.applyCount, 2);
+    assert.equal(h.current.settlementPaidMilli, 25000);
+    assert.equal(h.current.outstandingMilli, 55000);
+  });
+
+  it('J/K/L: overpay / zero / settled rejected; no history; no money', async () => {
+    const open = makeHarness();
+    for (const [key, amount] of [
+      ['mat_J', 90000],
+      ['mat_K', 0],
+    ] as const) {
+      const r = await recordEquipmentLiabilityCashPayment(
+        {
+          equipmentIssueId: open.current.equipmentIssueId,
+          amountMilli: amount,
+          paymentMethod: 'CASH',
+          idempotencyKey: key,
+        },
+        { code: 'A', name: 'A' },
+        open.deps
+      );
+      assert.equal(r.ok, false);
+    }
+    assert.equal(open.payments.length, 0);
+    assert.equal(open.applyCount, 0);
+    assert.equal(open.current.settlementPaidMilli, 0);
+
+    const settled = makeHarness(
+      baseIssue({ status: 'settled', outstandingMilli: 0, settlementPaidMilli: 80000 })
+    );
+    const r = await recordEquipmentLiabilityCashPayment(
+      {
+        equipmentIssueId: settled.current.equipmentIssueId,
+        amountMilli: 1000,
+        paymentMethod: 'CASH',
+        idempotencyKey: 'mat_L',
+      },
+      { code: 'A', name: 'A' },
+      settled.deps
+    );
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.code, EQUIPMENT_PAYMENT_ERROR.NOT_PAYABLE);
+    assert.equal(settled.payments.length, 0);
+    assert.equal(settled.applyCount, 0);
+  });
+
+  it('Sheets: history append fail → no success, no aggregate mutate', async () => {
+    const h = makeHarness();
+    h.setAppendFail(true);
+    const r = await recordEquipmentLiabilityCashPayment(
+      {
+        equipmentIssueId: h.current.equipmentIssueId,
+        amountMilli: 10000,
+        paymentMethod: 'CASH',
+        idempotencyKey: 'mat_sheets_append',
+      },
+      { code: 'A', name: 'A' },
+      h.deps
+    );
+    assert.equal(r.ok, false);
+    assert.equal(h.payments.length, 0);
+    assert.equal(h.applyCount, 0);
+    assert.equal(h.current.settlementPaidMilli, 0);
+  });
+
+  it('Sheets: liability write fail after history → pending, retry recovers', async () => {
+    const h = makeHarness();
+    h.setApplyFailOnce();
+    const input = {
+      equipmentIssueId: h.current.equipmentIssueId,
+      amountMilli: 12000,
+      paymentMethod: 'CASH' as const,
+      idempotencyKey: 'mat_sheets_write',
+    };
+    const fail = await recordEquipmentLiabilityCashPayment(input, { code: 'A', name: 'A' }, h.deps);
+    assert.equal(fail.ok, false);
+    if (!fail.ok) assert.equal(fail.code, EQUIPMENT_PAYMENT_ERROR.AGGREGATE_PENDING);
+    const ok = await recordEquipmentLiabilityCashPayment(input, { code: 'A', name: 'A' }, h.deps);
+    assert.equal(ok.ok, true);
+    assert.equal(h.payments.length, 1);
+    assert.equal(h.applyCount, 1);
+    assert.equal(h.current.settlementPaidMilli, 12000);
+  });
+
+  it('Sheets: liability read fail is not empty success', async () => {
+    const h = makeHarness();
+    h.setReadFail(true);
+    await assert.rejects(
+      () =>
+        recordEquipmentLiabilityCashPayment(
+          {
+            equipmentIssueId: 'iss_1',
+            amountMilli: 1000,
+            paymentMethod: 'CASH',
+            idempotencyKey: 'mat_read_fail',
+          },
+          { code: 'A', name: 'A' },
+          h.deps
+        ),
+      /SHEETS_READ_FAILED/
+    );
+  });
+
+  it('ensurePaymentAggregateApplied recovers needs_apply and is idempotent when applied', async () => {
+    let current = baseIssue();
+    const payment = {
+      paymentId: 'p1',
+      equipmentIssueId: current.equipmentIssueId,
+      riderCode: current.riderCode,
+      amountMilli: 10000,
+      paymentDate: '2026-01-01',
+      paymentMethod: 'CASH' as const,
+      note: '',
+      idempotencyKey: 'ens_1',
+      outstandingBeforeMilli: 80000,
+      resultingOutstandingMilli: 70000,
+      resultingSettlementPaidMilli: 10000,
+      actorCode: 'A',
+      actorName: 'A',
+      createdAt: '2026-01-01',
+    };
+    let applies = 0;
+    const first = await ensurePaymentAggregateApplied(payment, { code: 'A', name: 'A' }, {
+      getById: async () => current,
+      applyPayment: async (_id, paid, actor) => {
+        applies++;
+        current = withImmutableOriginal(current, {
+          settlementPaidMilli: (current.settlementPaidMilli || 0) + paid,
+          outstandingMilli: current.outstandingMilli - paid,
+          updatedBy: actor.code,
+        });
+        return { ok: true as const, issue: current };
+      },
+    });
+    assert.equal(first.ok, true);
+    if (first.ok) assert.equal(first.recovered, true);
+    const second = await ensurePaymentAggregateApplied(payment, { code: 'A', name: 'A' }, {
+      getById: async () => current,
+      applyPayment: async () => {
+        applies++;
+        return { ok: true as const, issue: current };
+      },
+    });
+    assert.equal(second.ok, true);
+    if (second.ok) assert.equal(second.recovered, false);
+    assert.equal(applies, 1);
+    assert.equal(current.settlementPaidMilli, 10000);
+  });
+
+  it('R/S/T isolation still holds in payments module source', () => {
+    const src = readFileSync(join(process.cwd(), 'lib/equipmentLiability/payments.ts'), 'utf8');
+    assert.ok(src.includes('ensurePaymentAggregateApplied'));
+    assert.ok(src.includes('classifyPaymentAggregateState'));
+    assert.ok(!/payroll|rooster|salaryService/i.test(src));
   });
 });

@@ -56,6 +56,10 @@ export const EQUIPMENT_PAYMENT_ERROR = {
   IDEMPOTENCY_REQUIRED: 'EQUIPMENT_PAYMENT_IDEMPOTENCY_REQUIRED',
   LOCK_BUSY: 'EQUIPMENT_PAYMENT_LOCK_BUSY',
   METHOD_INVALID: 'EQUIPMENT_PAYMENT_METHOD_INVALID',
+  /** History exists but aggregate not yet applied — client must retry same key. */
+  AGGREGATE_PENDING: 'EQUIPMENT_PAYMENT_AGGREGATE_PENDING',
+  /** History/aggregate diverge in a non-recoverable way. */
+  AGGREGATE_CONFLICT: 'EQUIPMENT_PAYMENT_AGGREGATE_CONFLICT',
 } as const;
 
 export type EquipmentPaymentErrorCode =
@@ -137,6 +141,48 @@ export function validateCashPaymentAmount(
     };
   }
   return { ok: true, paid };
+}
+
+/**
+ * Classify whether عهدة_المعدات already reflects a history payment row.
+ * History alone is never treated as success — aggregate must match.
+ */
+export function classifyPaymentAggregateState(
+  issue: Pick<
+    EquipmentLiabilityIssue,
+    'settlementPaidMilli' | 'outstandingMilli' | 'status'
+  >,
+  payment: Pick<
+    EquipmentLiabilityPayment,
+    | 'amountMilli'
+    | 'outstandingBeforeMilli'
+    | 'resultingOutstandingMilli'
+    | 'resultingSettlementPaidMilli'
+  >
+): 'applied' | 'needs_apply' | 'conflict' {
+  const settlement = Math.trunc(issue.settlementPaidMilli || 0);
+  const outstanding = Math.trunc(issue.outstandingMilli);
+  const expectedSettlementBefore =
+    Math.trunc(payment.resultingSettlementPaidMilli) - Math.trunc(payment.amountMilli);
+
+  const exactAfter =
+    settlement === Math.trunc(payment.resultingSettlementPaidMilli) &&
+    outstanding === Math.trunc(payment.resultingOutstandingMilli);
+
+  // Later payments may have moved balances further after this one posted.
+  const atOrBeyondAfter =
+    settlement >= Math.trunc(payment.resultingSettlementPaidMilli) &&
+    outstanding <= Math.trunc(payment.resultingOutstandingMilli);
+
+  if (exactAfter || atOrBeyondAfter) return 'applied';
+
+  const atBefore =
+    settlement === expectedSettlementBefore &&
+    outstanding === Math.trunc(payment.outstandingBeforeMilli);
+
+  if (atBefore && (issue.status === 'open' || outstanding > 0)) return 'needs_apply';
+
+  return 'conflict';
 }
 
 function paymentToRow(p: EquipmentLiabilityPayment): (string | number | boolean)[] {
@@ -270,12 +316,135 @@ export type RecordCashPaymentResult =
       issue: EquipmentLiabilityIssue;
       paymentStatus: EquipmentPaymentStatus;
       replayed: boolean;
+      recovered?: boolean;
     }
   | { ok: false; code: EquipmentPaymentErrorCode; error: string; httpStatus: number };
 
+type ResolvedDeps = {
+  getIssue: typeof getById;
+  findIdem: typeof findPaymentByIdempotencyKey;
+  acquireLock: typeof acquireEquipmentPaymentLock;
+  getCached: typeof getCachedPaymentResult;
+  cacheResult: typeof cachePaymentResult;
+  applyPayment: typeof applySettlementPayment;
+  appendPayment: (payment: EquipmentLiabilityPayment) => Promise<void>;
+  skipAudit: boolean;
+};
+
 /**
- * Safe transactional cash payment:
- * history-first (idempotency SoT) then liability mutation — retry never double-pays.
+ * Ensure history payment is reflected on عهدة_المعدات exactly once.
+ * Never returns success while aggregate still lags history.
+ */
+export async function ensurePaymentAggregateApplied(
+  payment: EquipmentLiabilityPayment,
+  actor: { code: string; name: string },
+  deps: {
+    getById: typeof getById;
+    applyPayment: typeof applySettlementPayment;
+  }
+): Promise<
+  | { ok: true; issue: EquipmentLiabilityIssue; recovered: boolean }
+  | { ok: false; code: EquipmentPaymentErrorCode; error: string; httpStatus: number }
+> {
+  const issue = await deps.getById(payment.equipmentIssueId);
+  if (!issue) {
+    return {
+      ok: false,
+      code: EQUIPMENT_PAYMENT_ERROR.NOT_FOUND,
+      error: EQUIPMENT_PAYMENT_ERROR.NOT_FOUND,
+      httpStatus: 404,
+    };
+  }
+
+  const state = classifyPaymentAggregateState(issue, payment);
+  if (state === 'applied') {
+    return { ok: true, issue, recovered: false };
+  }
+  if (state === 'conflict') {
+    return {
+      ok: false,
+      code: EQUIPMENT_PAYMENT_ERROR.AGGREGATE_CONFLICT,
+      error: EQUIPMENT_PAYMENT_ERROR.AGGREGATE_CONFLICT,
+      httpStatus: 409,
+    };
+  }
+
+  // needs_apply — crash window: history written, aggregate not yet mutated.
+  const applyResult = await deps.applyPayment(payment.equipmentIssueId, payment.amountMilli, actor);
+  if (!applyResult.ok) {
+    return {
+      ok: false,
+      code: EQUIPMENT_PAYMENT_ERROR.AGGREGATE_PENDING,
+      error: applyResult.error || EQUIPMENT_PAYMENT_ERROR.AGGREGATE_PENDING,
+      httpStatus: 503,
+    };
+  }
+
+  const after = classifyPaymentAggregateState(applyResult.issue, payment);
+  if (after !== 'applied') {
+    return {
+      ok: false,
+      code: EQUIPMENT_PAYMENT_ERROR.AGGREGATE_CONFLICT,
+      error: EQUIPMENT_PAYMENT_ERROR.AGGREGATE_CONFLICT,
+      httpStatus: 409,
+    };
+  }
+
+  return { ok: true, issue: applyResult.issue, recovered: true };
+}
+
+function successFromPayment(
+  payment: EquipmentLiabilityPayment,
+  issue: EquipmentLiabilityIssue,
+  replayed: boolean,
+  recovered?: boolean
+): Extract<RecordCashPaymentResult, { ok: true }> {
+  return {
+    ok: true,
+    payment,
+    issue,
+    paymentStatus: deriveEquipmentPaymentStatus({
+      settlementPaidMilli: issue.settlementPaidMilli || 0,
+      amountDeductedMilli: issue.amountDeductedMilli || 0,
+      outstandingMilli: issue.outstandingMilli,
+    }),
+    replayed,
+    recovered: Boolean(recovered),
+  };
+}
+
+async function resolveExistingPaymentUnderLock(
+  payment: EquipmentLiabilityPayment,
+  actor: { code: string; name: string },
+  deps: ResolvedDeps
+): Promise<RecordCashPaymentResult> {
+  const ensured = await ensurePaymentAggregateApplied(payment, actor, {
+    getById: deps.getIssue,
+    applyPayment: deps.applyPayment,
+  });
+  if (!ensured.ok) return ensured;
+
+  const payload = JSON.stringify({
+    payment,
+    issue: ensured.issue,
+    paymentStatus: deriveEquipmentPaymentStatus({
+      settlementPaidMilli: ensured.issue.settlementPaidMilli || 0,
+      amountDeductedMilli: ensured.issue.amountDeductedMilli || 0,
+      outstandingMilli: ensured.issue.outstandingMilli,
+    }),
+  });
+  await deps.cacheResult(payment.idempotencyKey, payload);
+
+  return successFromPayment(payment, ensured.issue, true, ensured.recovered);
+}
+
+/**
+ * Transaction order:
+ * 1) validate  2) issue lock  3) re-read  4) idempotency check
+ * 5) append history intent  6) apply aggregate  7) cache only after aggregate confirmed
+ *
+ * History alone never means success. Retry with same key recovers missing aggregate
+ * exactly once via classifyPaymentAggregateState + ensurePaymentAggregateApplied.
  */
 export async function recordEquipmentLiabilityCashPayment(
   input: RecordCashPaymentInput,
@@ -312,85 +481,50 @@ export async function recordEquipmentLiabilityCashPayment(
     };
   }
 
-  const getIssue = deps?.getById ?? getById;
-  const findIdem = deps?.findPaymentByIdempotencyKey ?? findPaymentByIdempotencyKey;
-  const acquireLock = deps?.acquireLock ?? acquireEquipmentPaymentLock;
-  const getCached = deps?.getCachedResult ?? getCachedPaymentResult;
-  const cacheResult = deps?.cacheResult ?? cachePaymentResult;
-  const applyPayment = deps?.applyPayment ?? applySettlementPayment;
-  const appendPayment =
-    deps?.appendPayment ??
-    (async (payment: EquipmentLiabilityPayment) => {
-      await ensureEquipmentLiabilityPaymentsSheet();
-      await appendToSheet(SHEET_EQUIPMENT_LIABILITY_PAYMENTS, [paymentToRow(payment)]);
-    });
+  const resolved: ResolvedDeps = {
+    getIssue: deps?.getById ?? getById,
+    findIdem: deps?.findPaymentByIdempotencyKey ?? findPaymentByIdempotencyKey,
+    acquireLock: deps?.acquireLock ?? acquireEquipmentPaymentLock,
+    getCached: deps?.getCachedResult ?? getCachedPaymentResult,
+    cacheResult: deps?.cacheResult ?? cachePaymentResult,
+    applyPayment: deps?.applyPayment ?? applySettlementPayment,
+    appendPayment:
+      deps?.appendPayment ??
+      (async (payment: EquipmentLiabilityPayment) => {
+        await ensureEquipmentLiabilityPaymentsSheet();
+        await appendToSheet(SHEET_EQUIPMENT_LIABILITY_PAYMENTS, [paymentToRow(payment)]);
+      }),
+    skipAudit: Boolean(deps?.skipAudit),
+  };
 
-  // Fast path: Redis cache of prior success
-  const cached = await getCached(idempotencyKey);
-  if (cached) {
-    try {
-      const parsed = JSON.parse(cached) as {
-        payment: EquipmentLiabilityPayment;
-        issue: EquipmentLiabilityIssue;
-        paymentStatus: EquipmentPaymentStatus;
+  // Pre-lock validation (fast reject; re-validated under lock)
+  const issueBeforeLock = await resolved.getIssue(equipmentIssueId);
+  // Existing idempotency may still recover even if currently settled — handle under lock.
+  const existingProbe = await resolved.findIdem(idempotencyKey);
+  if (!existingProbe) {
+    if (!issueBeforeLock) {
+      return {
+        ok: false,
+        code: EQUIPMENT_PAYMENT_ERROR.NOT_FOUND,
+        error: EQUIPMENT_PAYMENT_ERROR.NOT_FOUND,
+        httpStatus: 404,
       };
-      if (parsed?.payment?.idempotencyKey === idempotencyKey) {
-        return {
-          ok: true,
-          payment: parsed.payment,
-          issue: parsed.issue,
-          paymentStatus: parsed.paymentStatus,
-          replayed: true,
-        };
-      }
-    } catch {
-      /* ignore corrupt cache */
+    }
+    if (issueBeforeLock.status !== 'open' || issueBeforeLock.outstandingMilli <= 0) {
+      return {
+        ok: false,
+        code: EQUIPMENT_PAYMENT_ERROR.NOT_PAYABLE,
+        error: EQUIPMENT_PAYMENT_ERROR.NOT_PAYABLE,
+        httpStatus: 400,
+      };
+    }
+    const preAmt = validateCashPaymentAmount(input.amountMilli, issueBeforeLock.outstandingMilli);
+    if (!preAmt.ok) {
+      return { ok: false, code: preAmt.code, error: preAmt.error, httpStatus: 400 };
     }
   }
 
-  const existing = await findIdem(idempotencyKey);
-  if (existing) {
-    const issue = (await getIssue(equipmentIssueId)) || {
-      equipmentIssueId,
-      riderCode: existing.riderCode,
-      outstandingMilli: existing.resultingOutstandingMilli,
-      settlementPaidMilli: existing.resultingSettlementPaidMilli,
-      amountDeductedMilli: 0,
-      originalLiabilityMilli: 0,
-      status: existing.resultingOutstandingMilli === 0 ? ('settled' as const) : ('open' as const),
-    } as EquipmentLiabilityIssue;
-    const paymentStatus = deriveEquipmentPaymentStatus({
-      settlementPaidMilli: issue.settlementPaidMilli || existing.resultingSettlementPaidMilli,
-      amountDeductedMilli: issue.amountDeductedMilli || 0,
-      outstandingMilli: issue.outstandingMilli ?? existing.resultingOutstandingMilli,
-    });
-    return { ok: true, payment: existing, issue, paymentStatus, replayed: true };
-  }
-
-  // Pre-lock validation (fast reject; re-validated under lock)
-  const issueBeforeLock = await getIssue(equipmentIssueId);
-  if (!issueBeforeLock) {
-    return {
-      ok: false,
-      code: EQUIPMENT_PAYMENT_ERROR.NOT_FOUND,
-      error: EQUIPMENT_PAYMENT_ERROR.NOT_FOUND,
-      httpStatus: 404,
-    };
-  }
-  if (issueBeforeLock.status !== 'open' || issueBeforeLock.outstandingMilli <= 0) {
-    return {
-      ok: false,
-      code: EQUIPMENT_PAYMENT_ERROR.NOT_PAYABLE,
-      error: EQUIPMENT_PAYMENT_ERROR.NOT_PAYABLE,
-      httpStatus: 400,
-    };
-  }
-  const preAmt = validateCashPaymentAmount(input.amountMilli, issueBeforeLock.outstandingMilli);
-  if (!preAmt.ok) {
-    return { ok: false, code: preAmt.code, error: preAmt.error, httpStatus: 400 };
-  }
-
-  const lock = await acquireLock(equipmentIssueId);
+  const lock = await resolved.acquireLock(equipmentIssueId);
   if (!lock.ok) {
     return {
       ok: false,
@@ -401,25 +535,27 @@ export async function recordEquipmentLiabilityCashPayment(
   }
 
   try {
-    // Re-check idempotency under lock
-    const existingUnderLock = await findIdem(idempotencyKey);
+    // Idempotent path: history exists → reconcile aggregate (recover if needed).
+    const existingUnderLock = await resolved.findIdem(idempotencyKey);
     if (existingUnderLock) {
-      const issue = (await getIssue(equipmentIssueId))!;
-      const paymentStatus = deriveEquipmentPaymentStatus({
-        settlementPaidMilli: issue.settlementPaidMilli || 0,
-        amountDeductedMilli: issue.amountDeductedMilli || 0,
-        outstandingMilli: issue.outstandingMilli,
-      });
-      return {
-        ok: true,
-        payment: existingUnderLock,
-        issue,
-        paymentStatus,
-        replayed: true,
-      };
+      return resolveExistingPaymentUnderLock(existingUnderLock, actor, resolved);
     }
 
-    const issue = await getIssue(equipmentIssueId);
+    // Cache hint only after we know there is no history row; still never trust alone.
+    const cached = await resolved.getCached(idempotencyKey);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as { payment?: EquipmentLiabilityPayment };
+        if (parsed?.payment?.idempotencyKey === idempotencyKey) {
+          // History missing but cache present — treat as recovery candidate via payment snapshot.
+          return resolveExistingPaymentUnderLock(parsed.payment, actor, resolved);
+        }
+      } catch {
+        /* ignore corrupt cache */
+      }
+    }
+
+    const issue = await resolved.getIssue(equipmentIssueId);
     if (!issue || !issue.sheetRow) {
       return {
         ok: false,
@@ -466,17 +602,37 @@ export async function recordEquipmentLiabilityCashPayment(
       createdAt: now,
     };
 
-    // History first → retry with same key never mutates money twice.
-    await appendPayment(payment);
-
-    const applyResult = await applyPayment(equipmentIssueId, paid, actor);
-    if (!applyResult.ok) {
-      // History already written; surface failure (do not claim success).
+    // Intent evidence first (append-only). Not success until aggregate confirms.
+    try {
+      await resolved.appendPayment(payment);
+    } catch (err) {
+      console.error('[equipmentLiability] payment history append failed:', err);
       return {
         ok: false,
-        code: EQUIPMENT_PAYMENT_ERROR.NOT_PAYABLE,
-        error: applyResult.error || EQUIPMENT_PAYMENT_ERROR.NOT_PAYABLE,
-        httpStatus: 400,
+        code: EQUIPMENT_PAYMENT_ERROR.AGGREGATE_PENDING,
+        error: 'EQUIPMENT_PAYMENT_HISTORY_APPEND_FAILED',
+        httpStatus: 503,
+      };
+    }
+
+    const applyResult = await resolved.applyPayment(equipmentIssueId, paid, actor);
+    if (!applyResult.ok) {
+      // Do NOT claim success. Same idempotencyKey retry will recover aggregate.
+      return {
+        ok: false,
+        code: EQUIPMENT_PAYMENT_ERROR.AGGREGATE_PENDING,
+        error: applyResult.error || EQUIPMENT_PAYMENT_ERROR.AGGREGATE_PENDING,
+        httpStatus: 503,
+      };
+    }
+
+    const confirmed = classifyPaymentAggregateState(applyResult.issue, payment);
+    if (confirmed !== 'applied') {
+      return {
+        ok: false,
+        code: EQUIPMENT_PAYMENT_ERROR.AGGREGATE_PENDING,
+        error: EQUIPMENT_PAYMENT_ERROR.AGGREGATE_PENDING,
+        httpStatus: 503,
       };
     }
 
@@ -486,14 +642,12 @@ export async function recordEquipmentLiabilityCashPayment(
       outstandingMilli: applyResult.issue.outstandingMilli,
     });
 
-    const payload = JSON.stringify({
-      payment,
-      issue: applyResult.issue,
-      paymentStatus,
-    });
-    await cacheResult(idempotencyKey, payload);
+    await resolved.cacheResult(
+      idempotencyKey,
+      JSON.stringify({ payment, issue: applyResult.issue, paymentStatus })
+    );
 
-    if (!deps?.skipAudit) {
+    if (!resolved.skipAudit) {
       void appendAuditLog({
         domain: 'equipment',
         action: 'liability_cash_payment',
@@ -516,6 +670,7 @@ export async function recordEquipmentLiabilityCashPayment(
       issue: applyResult.issue,
       paymentStatus,
       replayed: false,
+      recovered: false,
     };
   } finally {
     await lock.release();
