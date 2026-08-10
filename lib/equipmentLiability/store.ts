@@ -7,12 +7,21 @@ import {
   liabilityInstallmentSchedule,
   type SecurityInquiryPayment,
 } from '@/lib/money';
+import { normalizeRiderCodeForPerformance } from '@/lib/riderCodeUtils';
+import { loadAllCandidates } from '@/lib/recruitment/recruitmentService';
 import {
   EQUIPMENT_LIABILITY_HEADERS,
   SHEET_EQUIPMENT_LIABILITY,
   type EquipmentBagType,
   type EquipmentLiabilityStatus,
 } from './constants';
+import {
+  PHASE_C_ERROR,
+  PHASE_C_ERROR_AR,
+  assertPhaseCCandidateReady,
+  type PhaseCErrorCode,
+} from './phaseCGates';
+import { acquirePhaseCLiabilityLocks } from './phaseCLock';
 
 export type EquipmentLiabilityIssue = {
   equipmentIssueId: string;
@@ -54,12 +63,53 @@ export type DeliveryLiabilityInput = {
   supervisorCodeSnapshot: string;
   supervisorNameSnapshot: string;
   issueDate: string;
-  activationDate: string;
+  /** Ignored when Phase C gates resolve activation from candidate. */
+  activationDate?: string;
   bagType: EquipmentBagType;
-  securityPaidUpfront: boolean;
+  /**
+   * @deprecated Phase C ignores caller-supplied security; fee comes from candidate only.
+   * Kept optional for type compatibility with older call sites.
+   */
+  securityPaidUpfront?: boolean;
   jacketHeld?: boolean;
   helmetHeld?: boolean;
 };
+
+/** Preserve originalLiabilityMilli on every balance mutation (immutability). */
+export function withImmutableOriginal(
+  issue: EquipmentLiabilityIssue,
+  patch: Partial<EquipmentLiabilityIssue>
+): EquipmentLiabilityIssue {
+  return {
+    ...issue,
+    ...patch,
+    originalLiabilityMilli: issue.originalLiabilityMilli,
+    equipmentIssueId: issue.equipmentIssueId,
+    deliveryRowRef: issue.deliveryRowRef,
+    riderCode: issue.riderCode,
+  };
+}
+
+/** Optional deps for offline Phase C acceptance tests (production omits this). */
+export type CreateLiabilityDeps = {
+  getByDeliveryRowRef?: (deliveryRowRef: string) => Promise<EquipmentLiabilityIssue | null>;
+  findCandidateByRiderCode?: (
+    riderCode: string
+  ) => Promise<import('@/lib/recruitment/types').Candidate | null>;
+  hasActiveEquipmentIssue?: (riderCode: string) => Promise<boolean>;
+  acquirePhaseCLiabilityLocks?: typeof acquirePhaseCLiabilityLocks;
+  appendIssue?: (issue: EquipmentLiabilityIssue) => Promise<void>;
+  skipAudit?: boolean;
+};
+
+export async function findCandidateByRiderCode(riderCodeRaw: string) {
+  const normalized = normalizeRiderCodeForPerformance(riderCodeRaw);
+  if (!normalized) return null;
+  const all = await loadAllCandidates(false);
+  return (
+    all.find((c) => normalizeRiderCodeForPerformance(c.riderCode) === normalized) || null
+  );
+}
 
 let ensuredOnce = false;
 
@@ -241,63 +291,147 @@ export async function getByDeliveryRowRef(deliveryRowRef: string): Promise<Equip
 
 export async function createLiabilityFromDelivery(
   input: DeliveryLiabilityInput,
-  actor: { code: string; name: string }
-): Promise<{ ok: true; issue: EquipmentLiabilityIssue; created: boolean } | { ok: false; error: string }> {
-  const existing = await getByDeliveryRowRef(input.deliveryRowRef);
-  if (existing) return { ok: true, issue: existing, created: false };
+  actor: { code: string; name: string },
+  deps?: CreateLiabilityDeps
+): Promise<
+  | { ok: true; issue: EquipmentLiabilityIssue; created: boolean }
+  | { ok: false; error: string; code: PhaseCErrorCode }
+> {
+  const deliveryRowRef = String(input.deliveryRowRef || '').trim();
+  if (!deliveryRowRef) {
+    return {
+      ok: false,
+      code: PHASE_C_ERROR.LIABILITY_CREATE_FAILED,
+      error: 'معرّف صف التسليم مطلوب',
+    };
+  }
 
-  const computed = computeLiabilityFields({
-    securityPaidUpfront: input.securityPaidUpfront,
-    bagType: input.bagType,
-    jacketHeld: input.jacketHeld,
-    helmetHeld: input.helmetHeld,
+  const getByRef = deps?.getByDeliveryRowRef ?? getByDeliveryRowRef;
+  const findCandidate = deps?.findCandidateByRiderCode ?? findCandidateByRiderCode;
+  const hasOpen = deps?.hasActiveEquipmentIssue ?? hasActiveEquipmentIssue;
+  const acquireLocks = deps?.acquirePhaseCLiabilityLocks ?? acquirePhaseCLiabilityLocks;
+
+  const existingByDelivery = await getByRef(deliveryRowRef);
+  if (existingByDelivery) {
+    return { ok: true, issue: existingByDelivery, created: false };
+  }
+
+  const candidate = await findCandidate(input.riderCode);
+  const gate = assertPhaseCCandidateReady(candidate, input.riderCode);
+  if (!gate.ok) {
+    return {
+      ok: false,
+      code: gate.code,
+      error:
+        gate.code === PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS
+          ? PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS
+          : PHASE_C_ERROR_AR[gate.code],
+    };
+  }
+
+  if (await hasOpen(gate.riderCode)) {
+    return {
+      ok: false,
+      code: PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS,
+      error: PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS,
+    };
+  }
+
+  const locks = await acquireLocks({
+    deliveryRowRef,
+    riderCode: gate.riderCode,
   });
+  if (!locks.ok) {
+    return {
+      ok: false,
+      code: PHASE_C_ERROR.LOCK_BUSY,
+      error: PHASE_C_ERROR_AR.LOCK_BUSY,
+    };
+  }
 
-  const now = new Date().toISOString();
-  const issue: EquipmentLiabilityIssue = {
-    equipmentIssueId: newIssueId(),
-    riderCode: input.riderCode.trim(),
-    riderNameSnapshot: input.riderNameSnapshot.trim(),
-    zoneSnapshot: input.zoneSnapshot.trim(),
-    supervisorCodeSnapshot: input.supervisorCodeSnapshot.trim(),
-    supervisorNameSnapshot: input.supervisorNameSnapshot.trim(),
-    issueDate: input.issueDate.trim(),
-    activationDate: input.activationDate.trim(),
-    bagType: input.bagType,
-    bagCostMilli: computed.bagCostMilli,
-    shirtQty: computed.shirtQty,
-    shirtCostMilli: computed.shirtCostMilli,
-    securityFeeMilli: computed.securityFeeMilli,
-    securityPaidUpfront: input.securityPaidUpfront,
-    originalLiabilityMilli: computed.originalLiabilityMilli,
-    outstandingMilli: computed.outstandingMilli,
-    amountDeductedMilli: computed.amountDeductedMilli,
-    installmentsCompleted: computed.installmentsCompleted,
-    status: 'open',
-    deliveryRowRef: input.deliveryRowRef.trim(),
-    jacketHeld: computed.jacketHeld,
-    helmetHeld: computed.helmetHeld,
-    createdAt: now,
-    createdBy: actor.code,
-    updatedAt: now,
-    updatedBy: actor.code,
-    installmentSchedule: computed.installmentSchedule,
-  };
+  try {
+    // Re-check under lock (concurrency / Sheets lag).
+    const againDelivery = await getByRef(deliveryRowRef);
+    if (againDelivery) return { ok: true, issue: againDelivery, created: false };
 
-  await ensureEquipmentLiabilitySheet();
-  await appendToSheet(SHEET_EQUIPMENT_LIABILITY, [issueToRow(issue)]);
+    if (await hasOpen(gate.riderCode)) {
+      return {
+        ok: false,
+        code: PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS,
+        error: PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS,
+      };
+    }
 
-  void appendAuditLog({
-    domain: 'equipment',
-    action: 'create_liability',
-    entityType: 'equipment_issue',
-    entityCode: issue.equipmentIssueId,
-    actorCode: actor.code,
-    actorName: actor.name,
-    after: issue,
-  }).catch((err) => console.error('[equipmentLiability] audit create failed:', err));
+    const computed = computeLiabilityFields({
+      securityPaidUpfront: gate.securityPaidUpfront,
+      bagType: input.bagType,
+      jacketHeld: input.jacketHeld,
+      helmetHeld: input.helmetHeld,
+    });
 
-  return { ok: true, issue, created: true };
+    const now = new Date().toISOString();
+    const issue: EquipmentLiabilityIssue = {
+      equipmentIssueId: newIssueId(),
+      riderCode: gate.riderCode,
+      riderNameSnapshot: input.riderNameSnapshot.trim(),
+      zoneSnapshot: input.zoneSnapshot.trim(),
+      supervisorCodeSnapshot:
+        input.supervisorCodeSnapshot.trim() || gate.finalAssignedSupervisorCode,
+      supervisorNameSnapshot: input.supervisorNameSnapshot.trim(),
+      issueDate: input.issueDate.trim(),
+      activationDate: gate.activationDate,
+      bagType: input.bagType,
+      bagCostMilli: computed.bagCostMilli,
+      shirtQty: computed.shirtQty,
+      shirtCostMilli: computed.shirtCostMilli,
+      securityFeeMilli: computed.securityFeeMilli,
+      securityPaidUpfront: gate.securityPaidUpfront,
+      originalLiabilityMilli: computed.originalLiabilityMilli,
+      outstandingMilli: computed.outstandingMilli,
+      amountDeductedMilli: computed.amountDeductedMilli,
+      installmentsCompleted: computed.installmentsCompleted,
+      status: 'open',
+      deliveryRowRef,
+      jacketHeld: computed.jacketHeld,
+      helmetHeld: computed.helmetHeld,
+      createdAt: now,
+      createdBy: actor.code,
+      updatedAt: now,
+      updatedBy: actor.code,
+      installmentSchedule: computed.installmentSchedule,
+    };
+
+    if (deps?.appendIssue) {
+      await deps.appendIssue(issue);
+    } else {
+      await ensureEquipmentLiabilitySheet();
+      await appendToSheet(SHEET_EQUIPMENT_LIABILITY, [issueToRow(issue)]);
+    }
+
+    // Post-append uniqueness: if a twin row appeared, return the first by delivery ref.
+    const after = await getByRef(deliveryRowRef);
+    const finalIssue = after || issue;
+
+    if (!deps?.skipAudit) {
+      void appendAuditLog({
+        domain: 'equipment',
+        action: 'create_liability',
+        entityType: 'equipment_issue',
+        entityCode: finalIssue.equipmentIssueId,
+        actorCode: actor.code,
+        actorName: actor.name,
+        after: finalIssue,
+      }).catch((err) => console.error('[equipmentLiability] audit create failed:', err));
+    }
+
+    return {
+      ok: true,
+      issue: finalIssue,
+      created: !after || after.equipmentIssueId === issue.equipmentIssueId,
+    };
+  } finally {
+    await locks.release();
+  }
 }
 
 /** Apply an installment deduction to the issue balance (mutates sheet row). */
@@ -321,15 +455,14 @@ export async function updateBalance(
     newOutstanding <= 0 && issue.status === 'open' ? 'settled' : issue.status;
 
   const now = new Date().toISOString();
-  const updated: EquipmentLiabilityIssue = {
-    ...issue,
+  const updated = withImmutableOriginal(issue, {
     amountDeductedMilli: newDeducted,
     outstandingMilli: newOutstanding,
     installmentsCompleted: newInstallments,
     status: newStatus,
     updatedAt: now,
     updatedBy: actor.code,
-  };
+  });
 
   await updateSheetRow(SHEET_EQUIPMENT_LIABILITY, issue.sheetRow, issueToRow(updated));
 
@@ -367,14 +500,13 @@ export async function applySettlementPayment(
     newOutstanding <= 0 ? 'settled' : issue.status;
 
   const now = new Date().toISOString();
-  const updated: EquipmentLiabilityIssue = {
-    ...issue,
+  const updated = withImmutableOriginal(issue, {
     amountDeductedMilli: newDeducted,
     outstandingMilli: newOutstanding,
     status: newStatus,
     updatedAt: now,
     updatedBy: actor.code,
-  };
+  });
 
   await updateSheetRow(SHEET_EQUIPMENT_LIABILITY, issue.sheetRow, issueToRow(updated));
 
@@ -401,13 +533,12 @@ export async function markIssueWaived(
   if (!issue || !issue.sheetRow) return { ok: false, error: 'issue not found' };
 
   const now = new Date().toISOString();
-  const updated: EquipmentLiabilityIssue = {
-    ...issue,
+  const updated = withImmutableOriginal(issue, {
     outstandingMilli: 0,
     status: 'waived',
     updatedAt: now,
     updatedBy: actor.code,
-  };
+  });
 
   await updateSheetRow(SHEET_EQUIPMENT_LIABILITY, issue.sheetRow, issueToRow(updated));
 
