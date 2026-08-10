@@ -514,16 +514,19 @@ export async function updateCandidate(
     createdBy: existing.createdBy,
   };
 
-  const identityTouched =
-    (patch.phone !== undefined && patch.phone !== existing.phone) ||
-    (patch.nationalId !== undefined && patch.nationalId !== existing.nationalId) ||
-    (patch.riderCode !== undefined &&
-      String(patch.riderCode).trim() !== String(existing.riderCode || '').trim());
-  if (identityTouched) {
+  const phoneChanged =
+    patch.phone !== undefined && String(patch.phone).trim() !== String(existing.phone || '').trim();
+  const nidChanged =
+    patch.nationalId !== undefined &&
+    String(patch.nationalId).trim() !== String(existing.nationalId || '').trim();
+  const riderChanged =
+    patch.riderCode !== undefined &&
+    String(patch.riderCode).trim() !== String(existing.riderCode || '').trim();
+  if (phoneChanged || nidChanged || riderChanged) {
     const dup = await findIdentityDuplicate({
-      phone: updated.phone,
-      nationalId: updated.nationalId,
-      riderCode: updated.riderCode,
+      phone: phoneChanged ? updated.phone : undefined,
+      nationalId: nidChanged ? updated.nationalId : undefined,
+      riderCode: riderChanged ? updated.riderCode : undefined,
       excludeId: existing.id,
     });
     if (dup) throw new Error(dup);
