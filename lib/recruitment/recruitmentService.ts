@@ -36,7 +36,7 @@ import {
 } from './recruitmentSheetParser';
 import { logCandidateChanges } from './recruitmentActivityLog';
 import { notifyNewCandidate } from './recruitmentNotifications';
-import { normalizeIdentityPhone, normalizeNationalId } from './phaseB';
+import { normalizeIdentityPhone, normalizeNationalId, phonesMatchForDuplicate } from './phaseB';
 
 function randomCandidateId(): string {
   return `c_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
@@ -304,11 +304,7 @@ export async function findIdentityDuplicate(opts: {
     if (opts.excludeId && c.id === opts.excludeId) continue;
     const active = c.pipelineStatus === 'active' && !c.isLegacy;
 
-    if (
-      phoneDigits.length >= 8 &&
-      active &&
-      normalizeIdentityPhone(c.phone) === phoneDigits
-    ) {
+    if (phoneDigits.length >= 8 && active && phonesMatchForDuplicate(opts.phone || '', c.phone)) {
       return 'يوجد مرشح نشط مسجّل مسبقاً بنفس رقم الهاتف الأساسي';
     }
     if (

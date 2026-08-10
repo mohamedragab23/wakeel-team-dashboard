@@ -29,6 +29,15 @@ export function normalizeIdentityPhone(phone: string): string {
   return String(phone ?? '').replace(/\D/g, '');
 }
 
+/** Sheets may strip a leading 0 when a phone is stored as a number. */
+export function phonesMatchForDuplicate(a: string, b: string): boolean {
+  const da = normalizeIdentityPhone(a);
+  const db = normalizeIdentityPhone(b);
+  if (da.length < 8 || db.length < 8) return false;
+  if (da === db) return true;
+  return da.replace(/^0+/, '') === db.replace(/^0+/, '');
+}
+
 export function normalizeNationalId(id: string): string {
   return String(id ?? '').replace(/\D/g, '');
 }

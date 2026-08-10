@@ -9,6 +9,7 @@ import {
   deriveRecruitmentPipelineStage,
   normalizeIdentityPhone,
   normalizeNationalId,
+  phonesMatchForDuplicate,
   normalizeSecurityFeeInput,
   validateActivationPatch,
   validateContactInput,
@@ -318,6 +319,8 @@ describe('SRS-014 Phase B — identity normalization + activation copy', () => {
   it('normalizes phone/NID digits and exposes activation contacts message', () => {
     assert.equal(normalizeIdentityPhone('010-1234 5678'), '01012345678');
     assert.equal(normalizeNationalId('298-01-011234567'), '29801011234567');
+    assert.equal(phonesMatchForDuplicate('01999111001', '1999111001'), true);
+    assert.equal(phonesMatchForDuplicate('01999111001', '01999111002'), false);
     assert.match(ACTIVATION_CONTACTS_BLOCKED_AR, /جهتي اتصال/);
     assert.match(ACTIVATION_CONTACTS_BLOCKED_AR, /موافقة الإدارة/);
   });
