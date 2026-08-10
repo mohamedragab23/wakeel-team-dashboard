@@ -5,7 +5,10 @@ import Layout from '@/components/Layout';
 import { authFetch } from '@/lib/authFetch';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { egpToMilliemes, formatMilliemesAsEgp } from '@/lib/money';
-import { EQUIPMENT_PAYMENT_STATUS_AR } from '@/lib/equipmentLiability/paymentStatus';
+import {
+  EQUIPMENT_PAYMENT_AGGREGATE_STATUS_AR,
+  EQUIPMENT_PAYMENT_STATUS_AR,
+} from '@/lib/equipmentLiability/paymentStatus';
 
 type DeskIssue = {
   equipmentIssueId: string;
@@ -27,8 +30,13 @@ type DeskIssue = {
   lastPaymentAt?: string;
 };
 
+type AggregateStatus = 'PENDING' | 'APPLIED' | 'CONFLICT' | 'REQUIRES_REVIEW';
+
 type PaymentRow = {
   paymentId: string;
+  equipmentIssueId?: string;
+  riderCode?: string;
+  riderNameSnapshot?: string;
   amountMilli: number;
   paymentDate: string;
   paymentMethod: string;
@@ -38,6 +46,12 @@ type PaymentRow = {
   actorCode: string;
   actorName: string;
   createdAt: string;
+  aggregateStatus?: AggregateStatus;
+  reconciledAt?: string;
+  lastReconcileResult?: string;
+  lastReconcileReason?: string;
+  currentOutstandingMilli?: number | null;
+  idempotencyKey?: string;
 };
 
 const LIABILITY_STATUS_AR: Record<string, string> = {
@@ -60,6 +74,22 @@ function paymentStatusBadge(status: DeskIssue['paymentStatus']) {
       : status === 'PARTIALLY_PAID'
         ? 'bg-amber-50 text-amber-900 border-amber-200'
         : 'bg-rose-50 text-rose-800 border-rose-200';
+  return (
+    <span className={`inline-block rounded border px-2 py-0.5 text-xs font-medium ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+function aggregateStatusBadge(status?: AggregateStatus) {
+  const s = status || 'PENDING';
+  const label = EQUIPMENT_PAYMENT_AGGREGATE_STATUS_AR[s] || s;
+  const cls =
+    s === 'APPLIED'
+      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+      : s === 'PENDING'
+        ? 'bg-amber-50 text-amber-900 border-amber-200'
+        : 'bg-rose-50 text-rose-900 border-rose-200';
   return (
     <span className={`inline-block rounded border px-2 py-0.5 text-xs font-medium ${cls}`}>
       {label}
@@ -96,6 +126,8 @@ export default function EquipmentLiabilityDeskPage() {
   const [receipt, setReceipt] = useState<any>(null);
   const [payError, setPayError] = useState('');
   const [idemKey, setIdemKey] = useState('');
+  const [reconcilingId, setReconcilingId] = useState<string | null>(null);
+  const [reconMsg, setReconMsg] = useState('');
 
   const listUrl = useMemo(() => {
     const params = new URLSearchParams({ list: '1' });
@@ -141,6 +173,53 @@ export default function EquipmentLiabilityDeskPage() {
       return json as { issue: DeskIssue; payments: PaymentRow[] };
     },
   });
+
+  const paymentsOpsQ = useQuery({
+    queryKey: ['admin', 'equipment-liability-payments-ops'],
+    queryFn: async () => {
+      const res = await authFetch('/api/admin/equipment-liability/payments');
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'فشل سجل المدفوعات');
+      return json as {
+        payments: PaymentRow[];
+        summary: {
+          total: number;
+          pending: number;
+          applied: number;
+          conflict: number;
+          requiresReview: number;
+        };
+      };
+    },
+  });
+
+  const retryReconcile = async (paymentId: string) => {
+    setReconcilingId(paymentId);
+    setReconMsg('');
+    try {
+      const res = await authFetch(
+        `/api/admin/equipment-liability/payments/${paymentId}/reconcile`,
+        { method: 'POST' }
+      );
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        setReconMsg(json.error || 'فشل إعادة المطابقة');
+        return;
+      }
+      setReconMsg(
+        `نتيجة المطابقة: ${json.reconcile?.result || 'OK'} — ${json.reconcile?.reason || ''}`
+      );
+      await qc.invalidateQueries({ queryKey: ['admin', 'equipment-liability-payments-ops'] });
+      await qc.invalidateQueries({ queryKey: ['admin', 'equipment-liability-desk'] });
+      if (detailId) {
+        await qc.invalidateQueries({ queryKey: ['admin', 'equipment-liability-detail', detailId] });
+      }
+    } catch (e: any) {
+      setReconMsg(e?.message || 'فشل إعادة المطابقة');
+    } finally {
+      setReconcilingId(null);
+    }
+  };
 
   const openPay = (issue: DeskIssue) => {
     setPayIssue(issue);
@@ -379,6 +458,93 @@ export default function EquipmentLiabilityDeskPage() {
                 </tbody>
               </table>
             </div>
+
+            <section className="border rounded-lg bg-white overflow-x-auto space-y-2">
+              <div className="p-3 border-b flex flex-wrap items-center justify-between gap-2">
+                <h2 className="font-semibold">سجل المدفوعات / حالة التطبيق على العهدة</h2>
+                <div className="text-xs text-slate-500 flex gap-3">
+                  <span>معلّق: {paymentsOpsQ.data?.summary?.pending ?? '—'}</span>
+                  <span>مطبّق: {paymentsOpsQ.data?.summary?.applied ?? '—'}</span>
+                  <span>تعارض: {paymentsOpsQ.data?.summary?.conflict ?? '—'}</span>
+                  <span>مراجعة: {paymentsOpsQ.data?.summary?.requiresReview ?? '—'}</span>
+                </div>
+              </div>
+              {reconMsg ? (
+                <div className="mx-3 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                  {reconMsg}
+                </div>
+              ) : null}
+              {paymentsOpsQ.isError ? (
+                <p className="p-4 text-rose-700">{(paymentsOpsQ.error as Error).message}</p>
+              ) : paymentsOpsQ.isLoading ? (
+                <p className="p-4">جاري تحميل المدفوعات…</p>
+              ) : (
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="p-2 text-right">حالة التطبيق</th>
+                      <th className="p-2 text-right">التاريخ</th>
+                      <th className="p-2 text-right">المبلغ</th>
+                      <th className="p-2 text-right">الطيار</th>
+                      <th className="p-2 text-right">المتبقي الحالي</th>
+                      <th className="p-2 text-right">آخر مطابقة</th>
+                      <th className="p-2 text-right">paymentId</th>
+                      <th className="p-2 text-right">إجراء</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(paymentsOpsQ.data?.payments || []).map((p) => (
+                      <tr key={p.paymentId} className="border-t">
+                        <td className="p-2">{aggregateStatusBadge(p.aggregateStatus)}</td>
+                        <td className="p-2 text-xs">
+                          {new Date(p.createdAt || p.paymentDate).toLocaleString('ar-EG')}
+                        </td>
+                        <td className="p-2">{formatMilliemesAsEgp(p.amountMilli)}</td>
+                        <td className="p-2">
+                          {p.riderNameSnapshot || '—'} ({p.riderCode})
+                        </td>
+                        <td className="p-2">
+                          {p.currentOutstandingMilli == null
+                            ? '—'
+                            : `${formatMilliemesAsEgp(p.currentOutstandingMilli)} ج.م`}
+                        </td>
+                        <td className="p-2 text-xs text-slate-500">
+                          {p.reconciledAt
+                            ? `${new Date(p.reconciledAt).toLocaleString('ar-EG')} · ${p.lastReconcileResult || ''}`
+                            : '—'}
+                        </td>
+                        <td className="p-2 font-mono text-[10px]">{p.paymentId}</td>
+                        <td className="p-2">
+                          {p.aggregateStatus && p.aggregateStatus !== 'APPLIED' ? (
+                            <button
+                              type="button"
+                              disabled={reconcilingId === p.paymentId}
+                              className="text-emerald-700 hover:underline disabled:text-slate-400"
+                              onClick={() => retryReconcile(p.paymentId)}
+                            >
+                              {reconcilingId === p.paymentId ? 'جاري…' : 'إعادة مطابقة'}
+                            </button>
+                          ) : (
+                            <span className="text-slate-400 text-xs">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {(paymentsOpsQ.data?.payments || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="p-6 text-center text-slate-500">
+                          لا توجد مدفوعات مسجّلة بعد.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              )}
+              <p className="px-3 pb-3 text-xs text-slate-400">
+                حالة التطبيق توضح هل أثّرت الدفعة فعليًا على العهدة. إعادة المطابقة تستخدم نفس
+                paymentId/idempotencyKey ولا تنشئ دفعة جديدة.
+              </p>
+            </section>
           </>
         )}
 
@@ -425,17 +591,20 @@ export default function EquipmentLiabilityDeskPage() {
                     <table className="min-w-full text-sm border">
                       <thead className="bg-slate-50">
                         <tr>
+                          <th className="p-2 text-right">حالة التطبيق</th>
                           <th className="p-2 text-right">التاريخ</th>
                           <th className="p-2 text-right">المبلغ</th>
                           <th className="p-2 text-right">الطريقة</th>
                           <th className="p-2 text-right">الموظف</th>
                           <th className="p-2 text-right">قبل / بعد</th>
                           <th className="p-2 text-right">paymentId</th>
+                          <th className="p-2 text-right">إجراء</th>
                         </tr>
                       </thead>
                       <tbody>
                         {(detailQ.data.payments || []).map((p) => (
                           <tr key={p.paymentId} className="border-t">
+                            <td className="p-2">{aggregateStatusBadge(p.aggregateStatus)}</td>
                             <td className="p-2 text-xs">
                               {new Date(p.createdAt || p.paymentDate).toLocaleString('ar-EG')}
                             </td>
@@ -449,11 +618,25 @@ export default function EquipmentLiabilityDeskPage() {
                               {formatMilliemesAsEgp(p.resultingOutstandingMilli)}
                             </td>
                             <td className="p-2 font-mono text-[10px]">{p.paymentId}</td>
+                            <td className="p-2">
+                              {p.aggregateStatus && p.aggregateStatus !== 'APPLIED' ? (
+                                <button
+                                  type="button"
+                                  disabled={reconcilingId === p.paymentId}
+                                  className="text-emerald-700 hover:underline text-xs"
+                                  onClick={() => retryReconcile(p.paymentId)}
+                                >
+                                  إعادة مطابقة
+                                </button>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
                           </tr>
                         ))}
                         {(detailQ.data.payments || []).length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="p-4 text-center text-slate-500">
+                            <td colSpan={8} className="p-4 text-center text-slate-500">
                               لا توجد مدفوعات مسجّلة.
                             </td>
                           </tr>

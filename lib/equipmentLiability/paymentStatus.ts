@@ -11,6 +11,23 @@ export const EQUIPMENT_PAYMENT_STATUS_AR: Record<EquipmentPaymentStatus, string>
   PAID: 'دفع بالكامل',
 };
 
+/** Lifecycle of a cash payment history row vs العهدة aggregate. */
+export type EquipmentPaymentAggregateStatus =
+  | 'PENDING'
+  | 'APPLIED'
+  | 'CONFLICT'
+  | 'REQUIRES_REVIEW';
+
+export const EQUIPMENT_PAYMENT_AGGREGATE_STATUS_AR: Record<
+  EquipmentPaymentAggregateStatus,
+  string
+> = {
+  PENDING: 'معلّق',
+  APPLIED: 'مطبّق',
+  CONFLICT: 'تعارض',
+  REQUIRES_REVIEW: 'يحتاج مراجعة',
+};
+
 export function deriveEquipmentPaymentStatus(params: {
   settlementPaidMilli: number;
   amountDeductedMilli: number;

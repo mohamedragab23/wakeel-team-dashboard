@@ -131,6 +131,17 @@ describe('equipment liability desk — amount validation', () => {
   });
 });
 
+function memoryLifecycle(payments: any[]) {
+  return async (paymentId: string, patch: any) => {
+    const idx = payments.findIndex((p) => p.paymentId === paymentId);
+    if (idx < 0) {
+      return { paymentId, aggregateStatus: patch.aggregateStatus, ...patch };
+    }
+    payments[idx] = { ...payments[idx], ...patch, reconciledAt: new Date().toISOString() };
+    return payments[idx];
+  };
+}
+
 describe('equipment liability desk — recordCashPayment orchestration', () => {
   it('B: partial cash payment updates settlement only', async () => {
     const issue = baseIssue();
@@ -155,6 +166,7 @@ describe('equipment liability desk — recordCashPayment orchestration', () => {
         appendPayment: async (p) => {
           payments.push(p);
         },
+        updateLifecycle: memoryLifecycle(payments),
         applyPayment: async (_id, paid, actor) => {
           const next = withImmutableOriginal(current, {
             settlementPaidMilli: (current.settlementPaidMilli || 0) + paid,
@@ -207,6 +219,7 @@ describe('equipment liability desk — recordCashPayment orchestration', () => {
         appendPayment: async (p) => {
           payments.push(p);
         },
+        updateLifecycle: memoryLifecycle(payments),
         applyPayment: async (_id, paid, actor) => {
           const next = withImmutableOriginal(current, {
             settlementPaidMilli: (current.settlementPaidMilli || 0) + paid,
@@ -277,6 +290,7 @@ describe('equipment liability desk — recordCashPayment orchestration', () => {
       appendPayment: async (p: any) => {
         payments.push(p);
       },
+      updateLifecycle: memoryLifecycle(payments),
       applyPayment: async (_id: string, paid: number, actor: { code: string; name: string }) => {
         applyCount++;
         const next = withImmutableOriginal(current, {
@@ -408,6 +422,7 @@ describe('equipment liability desk — recordCashPayment orchestration', () => {
       appendPayment: async (p: any) => {
         payments.push(p);
       },
+      updateLifecycle: memoryLifecycle(payments),
       applyPayment: async (_id: string, paid: number, actor: { code: string }) => {
         current = withImmutableOriginal(current, {
           settlementPaidMilli: (current.settlementPaidMilli || 0) + paid,
@@ -580,7 +595,21 @@ function makeHarness(initial = baseIssue()) {
     cacheResult: async () => undefined,
     appendPayment: async (p: any) => {
       if (appendShouldFail) throw new Error('SHEETS_APPEND_FAILED');
-      payments.push(p);
+      payments.push({
+        ...p,
+        aggregateStatus: p.aggregateStatus || 'PENDING',
+        sheetRow: payments.length + 2,
+      });
+    },
+    updateLifecycle: async (paymentId: string, patch: any) => {
+      const idx = payments.findIndex((p) => p.paymentId === paymentId);
+      if (idx < 0) return null;
+      payments[idx] = {
+        ...payments[idx],
+        ...patch,
+        reconciledAt: new Date().toISOString(),
+      };
+      return payments[idx];
     },
     applyPayment: async (_id: string, paid: number, actor: { code: string }) => {
       if (applyShouldFail || applyFailOnce) {

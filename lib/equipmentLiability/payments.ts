@@ -9,6 +9,7 @@ import {
   ensureHeaderRow,
   ensureSheetExists,
   getSheetDataOrThrow,
+  updateSheetRow,
 } from '@/lib/googleSheets';
 import { appendAuditLog } from '@/lib/auditLog';
 import {
@@ -24,8 +25,12 @@ import {
 import {
   deriveEquipmentPaymentStatus,
   totalCreditedMilli,
+  type EquipmentPaymentAggregateStatus,
   type EquipmentPaymentStatus,
 } from './paymentStatus';
+
+export type { EquipmentPaymentAggregateStatus } from './paymentStatus';
+export { EQUIPMENT_PAYMENT_AGGREGATE_STATUS_AR } from './paymentStatus';
 
 export const SHEET_EQUIPMENT_LIABILITY_PAYMENTS = 'مدفوعات_عهدة_المعدات';
 
@@ -44,6 +49,12 @@ export const EQUIPMENT_LIABILITY_PAYMENT_HEADERS = [
   'actorCode',
   'actorName',
   'createdAt',
+  /** Additive lifecycle — not a second money ledger. */
+  'aggregateStatus',
+  'reconciledAt',
+  'lastReconcileResult',
+  'lastReconcileReason',
+  'lastReconcileActor',
 ] as const;
 
 export type EquipmentPaymentMethod = 'CASH' | 'BANK_TRANSFER' | 'OTHER';
@@ -80,8 +91,24 @@ export type EquipmentLiabilityPayment = {
   actorCode: string;
   actorName: string;
   createdAt: string;
+  aggregateStatus: EquipmentPaymentAggregateStatus;
+  reconciledAt: string;
+  lastReconcileResult: string;
+  lastReconcileReason: string;
+  lastReconcileActor: string;
   sheetRow?: number;
 };
+
+function parseAggregateStatus(raw: string): EquipmentPaymentAggregateStatus {
+  const s = String(raw || '')
+    .trim()
+    .toUpperCase();
+  if (s === 'APPLIED' || s === 'CONFLICT' || s === 'REQUIRES_REVIEW' || s === 'PENDING') {
+    return s;
+  }
+  // Legacy rows without status are treated as unresolved until reconciled.
+  return 'PENDING';
+}
 
 export type RecordCashPaymentInput = {
   equipmentIssueId: string;
@@ -201,6 +228,11 @@ function paymentToRow(p: EquipmentLiabilityPayment): (string | number | boolean)
     p.actorCode,
     p.actorName,
     p.createdAt,
+    p.aggregateStatus || 'PENDING',
+    p.reconciledAt || '',
+    p.lastReconcileResult || '',
+    p.lastReconcileReason || '',
+    p.lastReconcileActor || '',
   ];
 }
 
@@ -223,6 +255,11 @@ function rowToPayment(row: unknown[], sheetRow: number): EquipmentLiabilityPayme
     actorCode: cell(row, 11),
     actorName: cell(row, 12),
     createdAt: cell(row, 13),
+    aggregateStatus: parseAggregateStatus(cell(row, 14)),
+    reconciledAt: cell(row, 15),
+    lastReconcileResult: cell(row, 16),
+    lastReconcileReason: cell(row, 17),
+    lastReconcileActor: cell(row, 18),
     sheetRow,
   };
 }
@@ -249,6 +286,10 @@ async function readAllPayments(): Promise<EquipmentLiabilityPayment[]> {
   return out;
 }
 
+export async function listAllPayments(): Promise<EquipmentLiabilityPayment[]> {
+  return readAllPayments();
+}
+
 export async function listPaymentsForIssue(
   equipmentIssueId: string
 ): Promise<EquipmentLiabilityPayment[]> {
@@ -259,12 +300,57 @@ export async function listPaymentsForIssue(
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 
+/** Unresolved lifecycle rows for automatic reconciliation scan. */
+export async function listUnresolvedPayments(): Promise<EquipmentLiabilityPayment[]> {
+  return (await readAllPayments()).filter((p) => p.aggregateStatus !== 'APPLIED');
+}
+
 export async function findPaymentByIdempotencyKey(
   idempotencyKey: string
 ): Promise<EquipmentLiabilityPayment | null> {
   const key = idempotencyKey.trim();
   if (!key) return null;
   return (await readAllPayments()).find((p) => p.idempotencyKey === key) || null;
+}
+
+export async function findPaymentById(
+  paymentId: string
+): Promise<EquipmentLiabilityPayment | null> {
+  const id = paymentId.trim();
+  if (!id) return null;
+  return (await readAllPayments()).find((p) => p.paymentId === id) || null;
+}
+
+/**
+ * Update lifecycle/status columns only (money fields immutable).
+ * Returns updated payment or null if row missing.
+ */
+export async function updatePaymentLifecycle(
+  paymentId: string,
+  patch: {
+    aggregateStatus: EquipmentPaymentAggregateStatus;
+    lastReconcileResult?: string;
+    lastReconcileReason?: string;
+    lastReconcileActor?: string;
+  }
+): Promise<EquipmentLiabilityPayment | null> {
+  const payment = await findPaymentById(paymentId);
+  if (!payment || !payment.sheetRow) return null;
+  const now = new Date().toISOString();
+  const updated: EquipmentLiabilityPayment = {
+    ...payment,
+    aggregateStatus: patch.aggregateStatus,
+    reconciledAt: now,
+    lastReconcileResult: patch.lastReconcileResult ?? payment.lastReconcileResult,
+    lastReconcileReason: patch.lastReconcileReason ?? payment.lastReconcileReason,
+    lastReconcileActor: patch.lastReconcileActor ?? payment.lastReconcileActor,
+  };
+  await updateSheetRow(
+    SHEET_EQUIPMENT_LIABILITY_PAYMENTS,
+    payment.sheetRow,
+    paymentToRow(updated)
+  );
+  return updated;
 }
 
 export type DeskIssueView = EquipmentLiabilityIssue & {
@@ -306,6 +392,7 @@ export type RecordCashPaymentDeps = {
   cacheResult?: typeof cachePaymentResult;
   applyPayment?: typeof applySettlementPayment;
   appendPayment?: (payment: EquipmentLiabilityPayment) => Promise<void>;
+  updateLifecycle?: typeof updatePaymentLifecycle;
   skipAudit?: boolean;
 };
 
@@ -328,6 +415,7 @@ type ResolvedDeps = {
   cacheResult: typeof cachePaymentResult;
   applyPayment: typeof applySettlementPayment;
   appendPayment: (payment: EquipmentLiabilityPayment) => Promise<void>;
+  updateLifecycle: typeof updatePaymentLifecycle;
   skipAudit: boolean;
 };
 
@@ -422,10 +510,40 @@ async function resolveExistingPaymentUnderLock(
     getById: deps.getIssue,
     applyPayment: deps.applyPayment,
   });
-  if (!ensured.ok) return ensured;
+  if (!ensured.ok) {
+    const status: EquipmentPaymentAggregateStatus =
+      ensured.code === EQUIPMENT_PAYMENT_ERROR.AGGREGATE_CONFLICT
+        ? 'CONFLICT'
+        : ensured.code === EQUIPMENT_PAYMENT_ERROR.NOT_FOUND
+          ? 'REQUIRES_REVIEW'
+          : 'PENDING';
+    if (payment.paymentId) {
+      await deps
+        .updateLifecycle(payment.paymentId, {
+          aggregateStatus: status,
+          lastReconcileResult: ensured.code,
+          lastReconcileReason: ensured.error,
+          lastReconcileActor: actor.code,
+        })
+        .catch(() => null);
+    }
+    return ensured;
+  }
+
+  const appliedPayment =
+    (await deps
+      .updateLifecycle(payment.paymentId, {
+        aggregateStatus: 'APPLIED',
+        lastReconcileResult: ensured.recovered ? 'RECOVERED' : 'ALREADY_APPLIED',
+        lastReconcileReason: ensured.recovered
+          ? 'AGGREGATE_APPLIED_ONCE'
+          : 'AGGREGATE_ALREADY_MATCHES',
+        lastReconcileActor: actor.code,
+      })
+      .catch(() => null)) || { ...payment, aggregateStatus: 'APPLIED' as const };
 
   const payload = JSON.stringify({
-    payment,
+    payment: appliedPayment,
     issue: ensured.issue,
     paymentStatus: deriveEquipmentPaymentStatus({
       settlementPaidMilli: ensured.issue.settlementPaidMilli || 0,
@@ -435,7 +553,7 @@ async function resolveExistingPaymentUnderLock(
   });
   await deps.cacheResult(payment.idempotencyKey, payload);
 
-  return successFromPayment(payment, ensured.issue, true, ensured.recovered);
+  return successFromPayment(appliedPayment, ensured.issue, true, ensured.recovered);
 }
 
 /**
@@ -494,6 +612,7 @@ export async function recordEquipmentLiabilityCashPayment(
         await ensureEquipmentLiabilityPaymentsSheet();
         await appendToSheet(SHEET_EQUIPMENT_LIABILITY_PAYMENTS, [paymentToRow(payment)]);
       }),
+    updateLifecycle: deps?.updateLifecycle ?? updatePaymentLifecycle,
     skipAudit: Boolean(deps?.skipAudit),
   };
 
@@ -600,9 +719,14 @@ export async function recordEquipmentLiabilityCashPayment(
       actorCode: actor.code,
       actorName: actor.name,
       createdAt: now,
+      aggregateStatus: 'PENDING',
+      reconciledAt: '',
+      lastReconcileResult: '',
+      lastReconcileReason: '',
+      lastReconcileActor: '',
     };
 
-    // Intent evidence first (append-only). Not success until aggregate confirms.
+    // Intent evidence first (append-only). Status=PENDING until aggregate confirms.
     try {
       await resolved.appendPayment(payment);
     } catch (err) {
@@ -617,7 +741,7 @@ export async function recordEquipmentLiabilityCashPayment(
 
     const applyResult = await resolved.applyPayment(equipmentIssueId, paid, actor);
     if (!applyResult.ok) {
-      // Do NOT claim success. Same idempotencyKey retry will recover aggregate.
+      // Leave PENDING for cron / same-key / manual reconcile recovery.
       return {
         ok: false,
         code: EQUIPMENT_PAYMENT_ERROR.AGGREGATE_PENDING,
@@ -636,6 +760,16 @@ export async function recordEquipmentLiabilityCashPayment(
       };
     }
 
+    const appliedPayment =
+      (await resolved
+        .updateLifecycle(payment.paymentId, {
+          aggregateStatus: 'APPLIED',
+          lastReconcileResult: 'APPLIED',
+          lastReconcileReason: 'AGGREGATE_CONFIRMED_ON_CREATE',
+          lastReconcileActor: actor.code,
+        })
+        .catch(() => null)) || { ...payment, aggregateStatus: 'APPLIED' as const };
+
     const paymentStatus = deriveEquipmentPaymentStatus({
       settlementPaidMilli: applyResult.issue.settlementPaidMilli || 0,
       amountDeductedMilli: applyResult.issue.amountDeductedMilli || 0,
@@ -644,7 +778,7 @@ export async function recordEquipmentLiabilityCashPayment(
 
     await resolved.cacheResult(
       idempotencyKey,
-      JSON.stringify({ payment, issue: applyResult.issue, paymentStatus })
+      JSON.stringify({ payment: appliedPayment, issue: applyResult.issue, paymentStatus })
     );
 
     if (!resolved.skipAudit) {
@@ -660,13 +794,14 @@ export async function recordEquipmentLiabilityCashPayment(
           ...applyResult.issue,
           paymentId: payment.paymentId,
           idempotencyKey,
+          aggregateStatus: 'APPLIED',
         },
       }).catch((err) => console.error('[equipmentLiability] desk payment audit failed:', err));
     }
 
     return {
       ok: true,
-      payment,
+      payment: appliedPayment,
       issue: applyResult.issue,
       paymentStatus,
       replayed: false,
