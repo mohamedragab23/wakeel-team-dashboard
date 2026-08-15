@@ -232,9 +232,15 @@ export default function EquipmentReconciliationPage() {
             تسوية افتتاحية للمعدات (مرة واحدة)
           </h1>
           <p className="text-sm text-slate-600 mt-1">
-            FLOW A — تسوية افتتاحية للمناديب الحاليين. الحفظ مقصور على قائمة طيار
-            صريحة (1–3) ولا يفعّل Financial Apply أو الخصم التلقائي.
+            FLOW A — تسوية افتتاحية للمناديب الحاليين قبل تشغيل الاستقطاع الأوتوماتيك (مين سدد /
+            المتبقي كام). الحفظ مقصور على قائمة طيار صريحة للمسار التجريبي، أو عبر قبول اقتراحات
+            المشرفين في «اقتراحات سداد المعدات». لا يفعّل Financial Apply.
           </p>
+          <ul className="mt-2 text-xs text-slate-600 list-disc pr-5 space-y-0.5">
+            <li>Snapshot: الأسعار تُثبَّت على العهدة عند الإنشاء.</li>
+            <li>Idempotency: مفتاح OPENING لكود المندوب يمنع تكرار Opening لنفس المندوب.</li>
+            <li>بعد اكتمال Opening → جهّز طلبات الدورة من «دورات القبض».</li>
+          </ul>
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
             <span className="rounded px-2 py-1 bg-amber-50 text-amber-900 border border-amber-200">
               FINANCIAL_APPLY ={' '}

@@ -130,6 +130,22 @@ export default function PayoutCyclesPage() {
           شيت الاستقطاعات (معدات) — بدون خصم محفظة. الخصم اليدوي V2 من المشرف يُضاف لنفس الشيت.
           بعد رفع محفظة Talabat تُحضَّر طلبات الدورة التالية تلقائياً.
         </p>
+        <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 space-y-1">
+          <p className="font-semibold text-slate-800">حمايات مفعّلة في النظام</p>
+          <ul className="list-disc pr-5 space-y-0.5">
+            <li>
+              <strong>Snapshot الأسعار:</strong> عند اعتماد تسليم المعدات تُثبَّت أسعار الباوتش/التيشرت/الاستعلام على
+              العهدة ولن تتغير لو عدّلت أسعار الأدمن لاحقاً.
+            </li>
+            <li>
+              <strong>منع الخصم المزدوج:</strong> كل قسط له معرّف ثابت — إعادة التجهيز لا تخصم نفس القسط مرتين.
+            </li>
+            <li>
+              <strong>Opening قبل الأوتوماتيك:</strong> أكمل مين سدد/مين لأ عبر مطابقة العهدة أو اقتراحات المشرفين
+              قبل تشغيل استقطاع المعدات على المناديب القديمة.
+            </li>
+          </ul>
+        </div>
 
         {capability.isLoading ? (
           <p className="text-slate-600">جاري التحقق…</p>
