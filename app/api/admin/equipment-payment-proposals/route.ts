@@ -6,9 +6,11 @@ import { isEquipmentLedgerEnabled, SRS014_FLAG_OFF_BODY } from '@/lib/srs014Flag
 import {
   listEquipmentPaymentProposals,
   reviewEquipmentPaymentProposal,
+  type OpeningAcceptFields,
   type ProposalWorkflowStatus,
 } from '@/lib/equipmentLiability/paymentProposals';
 import type { EquipmentPaymentStatus } from '@/lib/equipmentLiability/paymentStatus';
+import type { OpeningSecurityStatus } from '@/lib/equipmentLiability/openingBalance';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,9 +28,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const statusParam = searchParams.get('status') || 'pending';
   const proposals = await listEquipmentPaymentProposals(
-    statusParam === 'all'
-      ? undefined
-      : { status: statusParam as ProposalWorkflowStatus }
+    statusParam === 'all' ? undefined : { status: statusParam as ProposalWorkflowStatus }
   );
   return NextResponse.json({ success: true, proposals });
 }
@@ -62,6 +62,23 @@ export async function POST(request: NextRequest) {
       ? (String(body.modifiedPaymentStatus).trim() as EquipmentPaymentStatus)
       : null;
 
+    let opening: OpeningAcceptFields | undefined;
+    if (body.opening && typeof body.opening === 'object') {
+      const o = body.opening;
+      const securityStatus = String(o.securityStatus || '').trim() as OpeningSecurityStatus;
+      opening = {
+        motorcycleBagHeld: Boolean(o.motorcycleBagHeld),
+        bicycleBagHeld: Boolean(o.bicycleBagHeld),
+        tshirtQuantity: Math.trunc(Number(o.tshirtQuantity) || 0),
+        jacketQuantity: Math.trunc(Number(o.jacketQuantity) || 0),
+        helmetQuantity: Math.trunc(Number(o.helmetQuantity) || 0),
+        securityStatus,
+        historicalPaidEgp: Number(o.historicalPaidEgp) || 0,
+        operatorConfirmation: Boolean(o.operatorConfirmation),
+        zoneSnapshot: String(o.zoneSnapshot || '').trim(),
+      };
+    }
+
     if (!proposalId) {
       return NextResponse.json({ success: false, error: 'معرّف الاقتراح مطلوب' }, { status: 400 });
     }
@@ -77,6 +94,7 @@ export async function POST(request: NextRequest) {
       reviewerNote,
       modifiedSettlementPaidEgp,
       modifiedPaymentStatus,
+      opening,
     });
 
     if (!result.ok) {

@@ -150,8 +150,9 @@ export default function EquipmentActualReconcilePage() {
         <div className="border rounded-lg bg-white p-4 space-y-3">
           <h2 className="font-semibold">رفع ملف محفظة/رواتب Talabat (خميس/جمعة)</h2>
           <p className="text-xs text-slate-600">
-            يقرأ Rider ID + 3Pl Internal Deductions + Applaied Deduction on Wallet، يطبّق الفعلي فقط، ثم
-            يجهّز طلب الدورة التالية تلقائيًا للمتبقي.
+            يقرأ Rider ID + 3Pl Internal Deductions + Applaied Deduction on Wallet، يطبّق الفعلي فقط على
+            العهدة والـ REQUEST، ثم <strong>يجهّز تلقائياً طلبات استقطاع الدورة التالية</strong> للمتبقي
+            (open remainder / القسط التالي). لا ينفّذ خصم محفظة من الداشبورد (FA OFF).
           </p>
           <div className="grid md:grid-cols-2 gap-3">
             <label className="text-sm">
@@ -209,7 +210,9 @@ export default function EquipmentActualReconcilePage() {
           )}
           {walletResult?.nextCyclePrep && walletResult.nextCyclePrep.length > 0 && (
             <div className="border border-slate-200 rounded p-2 text-sm overflow-x-auto">
-              <div className="font-semibold mb-1">تحضير الدورة التالية</div>
+              <div className="font-semibold mb-1">
+                تحضير الدورة التالية (REQUEST على الاستقطاعات — جاهز للقبض القادم)
+              </div>
               <table className="min-w-full text-xs">
                 <thead>
                   <tr className="text-right">

@@ -6,6 +6,7 @@ import { assertSupervisorRider } from '@/lib/riderValidation';
 import {
   createEquipmentPaymentProposal,
   listEquipmentPaymentProposals,
+  type ProposalKind,
 } from '@/lib/equipmentLiability/paymentProposals';
 import { getById } from '@/lib/equipmentLiability/store';
 import type { EquipmentPaymentStatus } from '@/lib/equipmentLiability/paymentStatus';
@@ -53,40 +54,64 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
+    const proposalKind = (String(body.proposalKind || 'payment_update').trim() ||
+      'payment_update') as ProposalKind;
     const equipmentIssueId = String(body.equipmentIssueId || '').trim();
-    const proposedPaymentStatus = String(body.proposedPaymentStatus || '').trim() as EquipmentPaymentStatus;
+    const riderCode = String(body.riderCode || '').trim();
+    const riderName = String(body.riderName || '').trim();
+    const proposedPaymentStatus = String(
+      body.proposedPaymentStatus || ''
+    ).trim() as EquipmentPaymentStatus;
     const proposedOutstandingNote = String(body.proposedOutstandingNote || '').trim();
     const proposedSettlementPaidEgp =
       body.proposedSettlementPaidEgp == null || body.proposedSettlementPaidEgp === ''
         ? null
         : Number(body.proposedSettlementPaidEgp);
 
-    if (!equipmentIssueId) {
-      return NextResponse.json({ success: false, error: 'معرّف العهدة مطلوب' }, { status: 400 });
-    }
     if (!STATUSES.includes(proposedPaymentStatus)) {
-      return NextResponse.json({ success: false, error: 'حالة السداد المقترحة غير صالحة' }, { status: 400 });
-    }
-
-    const issue = await getById(equipmentIssueId);
-    if (!issue) {
-      return NextResponse.json({ success: false, error: 'عهدة المعدات غير موجودة' }, { status: 404 });
-    }
-
-    const ownership = await assertSupervisorRider(
-      issue.riderCode,
-      issue.riderNameSnapshot,
-      decoded.code || ''
-    );
-    if (!ownership.ok) {
       return NextResponse.json(
-        { success: false, error: ownership.error || 'المندوب غير تابع لك' },
-        { status: 403 }
+        { success: false, error: 'حالة السداد المقترحة غير صالحة' },
+        { status: 400 }
       );
     }
 
+    if (proposalKind === 'opening_report') {
+      if (!riderCode) {
+        return NextResponse.json({ success: false, error: 'كود المندوب مطلوب' }, { status: 400 });
+      }
+      const ownership = await assertSupervisorRider(riderCode, riderName, decoded.code || '');
+      if (!ownership.ok) {
+        return NextResponse.json(
+          { success: false, error: ownership.error || 'المندوب غير تابع لك' },
+          { status: 403 }
+        );
+      }
+    } else {
+      if (!equipmentIssueId) {
+        return NextResponse.json({ success: false, error: 'معرّف العهدة مطلوب' }, { status: 400 });
+      }
+      const issue = await getById(equipmentIssueId);
+      if (!issue) {
+        return NextResponse.json({ success: false, error: 'عهدة المعدات غير موجودة' }, { status: 404 });
+      }
+      const ownership = await assertSupervisorRider(
+        issue.riderCode,
+        issue.riderNameSnapshot,
+        decoded.code || ''
+      );
+      if (!ownership.ok) {
+        return NextResponse.json(
+          { success: false, error: ownership.error || 'المندوب غير تابع لك' },
+          { status: 403 }
+        );
+      }
+    }
+
     const result = await createEquipmentPaymentProposal({
-      equipmentIssueId,
+      proposalKind,
+      equipmentIssueId: equipmentIssueId || undefined,
+      riderCode: riderCode || undefined,
+      riderName: riderName || undefined,
       proposedPaymentStatus,
       proposedSettlementPaidEgp,
       proposedOutstandingNote,

@@ -81,6 +81,8 @@ Supervisors must **not** need Excel for *new* equipment deduction **requests**. 
 | `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED` | **Cron REQUEST creation only** + (separate) Manager Compare post-payroll **allocation** wiring + salary guard. Cron itself does **not** allocate ACTUAL. Enablement = separate Go. |
 | `FEATURE_EQUIPMENT_RETURNS_V2_ENABLED` | Physical return + return-settlement / waiver sheet |
 | `FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED` | Supervisor Manual Deductions V2 (REQUEST on الاستقطاعات; default OFF). Enable on Vercel: `FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED=true` after merge — do not hard-default ON in code. Excel `/deductions-upload` is hidden from supervisor nav. |
+| `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED` | Cron Auto REQUEST for معدات on `deductionGenerationDate`. Admin can also **تجهيز طلبات المعدات** from payout-cycles (`POST /api/admin/equipment-auto-request-prep`) without waiting for cron. FA stays OFF. |
+| Ops checklist (cycle REQUEST) | 1) Enable `FEATURE_PAYOUT_CYCLES_ENABLED` + configure دورات with gen dates. 2) Complete العهدة (Opening / supervisor proposals → EQ Manager). 3) Prep REQUEST via button or cron AUTO flag. 4) After Talabat wallet upload, next-cycle REQUEST is prepared automatically. 5) **Do not** enable `FEATURE_SRS014_FINANCIAL_APPLY_ENABLED` unless separate Go. |
 | `FEATURE_EQUIPMENT_INVENTORY_V2_ENABLED` | Inventory anomaly flags / extras |
 
 Pattern: `String(process.env.X||'').trim().toLowerCase()==='true'`. API → `503 { enabled:false }`. Cron → `{ skipped:true }`.

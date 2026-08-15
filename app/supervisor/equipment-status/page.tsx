@@ -1,24 +1,25 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Layout from '@/components/Layout';
 import { authFetch } from '@/lib/authFetch';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePageNotify } from '@/lib/usePageNotify';
 import { EQUIPMENT_PAYMENT_STATUS_AR } from '@/lib/equipmentLiability/paymentStatus';
 
-type IssueRow = {
-  equipmentIssueId: string;
+type DeskRow = {
   riderCode: string;
   riderName: string;
   zone: string;
+  hasLiability: boolean;
+  equipmentIssueId: string | null;
   status: string;
-  paymentStatus: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+  paymentStatus: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | null;
   paymentStatusAr: string;
-  outstandingEgp: number;
-  amountDeductedEgp: number;
-  settlementPaidEgp: number;
-  originalLiabilityEgp: number;
+  outstandingEgp: number | null;
+  amountDeductedEgp: number | null;
+  settlementPaidEgp: number | null;
+  originalLiabilityEgp: number | null;
 };
 
 const STATUS_OPTIONS = [
@@ -30,8 +31,10 @@ const STATUS_OPTIONS = [
 export default function SupervisorEquipmentStatusPage() {
   const notify = usePageNotify();
   const qc = useQueryClient();
-  const [proposeFor, setProposeFor] = useState<IssueRow | null>(null);
-  const [proposedStatus, setProposedStatus] = useState<'UNPAID' | 'PARTIALLY_PAID' | 'PAID'>('PAID');
+  const [filter, setFilter] = useState<'all' | 'with' | 'without'>('all');
+  const [q, setQ] = useState('');
+  const [proposeFor, setProposeFor] = useState<DeskRow | null>(null);
+  const [proposedStatus, setProposedStatus] = useState<'UNPAID' | 'PARTIALLY_PAID' | 'PAID'>('UNPAID');
   const [paidEgp, setPaidEgp] = useState('');
   const [note, setNote] = useState('');
 
@@ -42,21 +45,39 @@ export default function SupervisorEquipmentStatusPage() {
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل التحميل');
       return {
-        issues: (json.issues || []) as IssueRow[],
+        rows: (json.rows || []) as DeskRow[],
         rosterRiderCount: Number(json.rosterRiderCount || 0),
         liabilityCount: Number(json.liabilityCount || 0),
       };
     },
   });
 
+  const visible = useMemo(() => {
+    const rows = list.data?.rows || [];
+    const qq = q.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (filter === 'with' && !r.hasLiability) return false;
+      if (filter === 'without' && r.hasLiability) return false;
+      if (!qq) return true;
+      return (
+        r.riderCode.toLowerCase().includes(qq) ||
+        r.riderName.toLowerCase().includes(qq)
+      );
+    });
+  }, [list.data?.rows, filter, q]);
+
   const mut = useMutation({
     mutationFn: async () => {
-      if (!proposeFor) throw new Error('اختر عهدة');
+      if (!proposeFor) throw new Error('اختر مندوباً');
+      const kind = proposeFor.hasLiability ? 'payment_update' : 'opening_report';
       const res = await authFetch('/api/supervisor/equipment-payment-proposals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          equipmentIssueId: proposeFor.equipmentIssueId,
+          proposalKind: kind,
+          equipmentIssueId: proposeFor.equipmentIssueId || undefined,
+          riderCode: proposeFor.riderCode,
+          riderName: proposeFor.riderName,
           proposedPaymentStatus: proposedStatus,
           proposedSettlementPaidEgp: paidEgp === '' ? null : Number(paidEgp),
           proposedOutstandingNote: note,
@@ -78,12 +99,11 @@ export default function SupervisorEquipmentStatusPage() {
 
   return (
     <Layout>
-      <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-4" dir="rtl">
+      <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-4" dir="rtl">
         <h1 className="text-2xl font-bold text-slate-800">عهدة معدات الطيارين</h1>
         <p className="text-sm text-slate-600">
-          تظهر كل عهد معدات لمناديبك الحاليين (من شيت المناديب). اقترح تحديث السداد لمدير المعدات
-          (لم يدفع / جزئي / مسدد) حتى تُراجع العهدة قبل مسار الاستقطاع الأوتوماتيك.
-          لا يطبّق النظام خصماً مالياً أوتوماتيكياً من هذه الصفحة.
+          كل مناديبك من الروستر. إن وُجدت عهدة: اقترح تحديث السداد. إن لم توجد: اقترح فتح عهدة
+          (مسدد / جزئي / لم يسدد) لمدير المعدات. لا يطبّق النظام خصماً مالياً من هذه الصفحة.
         </p>
 
         {list.isLoading && <p className="text-slate-500">جاري التحميل…</p>}
@@ -97,17 +117,39 @@ export default function SupervisorEquipmentStatusPage() {
           <p className="text-xs text-slate-500">
             مناديبك في الروستر: {list.data.rosterRiderCount} — عهد معدات ظاهرة:{' '}
             {list.data.liabilityCount}
-            {list.data.rosterRiderCount > 0 && list.data.liabilityCount === 0
-              ? ' (لا توجد صفوف عهدة لطياريك بعد — يحتاج Opening / تسليم معدات)'
-              : ''}
           </p>
         )}
 
-        {list.data && list.data.issues.length === 0 && (
-          <p className="text-slate-500">لا توجد عهد معدات مسجّلة لطياريك الحاليين.</p>
+        <div className="flex flex-wrap gap-2 items-center">
+          <input
+            className="border rounded px-2 py-1 text-sm"
+            placeholder="بحث كود / اسم…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          {(
+            [
+              ['all', 'الكل'],
+              ['with', 'لديهم عهدة'],
+              ['without', 'بدون عهدة'],
+            ] as const
+          ).map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              className={`px-3 py-1 rounded border text-sm ${filter === k ? 'bg-slate-800 text-white' : ''}`}
+              onClick={() => setFilter(k)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {list.data && visible.length === 0 && (
+          <p className="text-slate-500">لا نتائج للعرض.</p>
         )}
 
-        {list.data && list.data.issues.length > 0 && (
+        {visible.length > 0 && (
           <div className="overflow-x-auto border rounded-lg bg-white">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-slate-700">
@@ -122,31 +164,39 @@ export default function SupervisorEquipmentStatusPage() {
                 </tr>
               </thead>
               <tbody>
-                {list.data.issues.map((row) => (
-                  <tr key={row.equipmentIssueId} className="border-t">
+                {visible.map((row) => (
+                  <tr key={row.riderCode} className="border-t">
                     <td className="px-3 py-2">
                       <div className="font-medium">{row.riderName || '—'}</div>
                       <div className="text-xs text-slate-500">{row.riderCode}</div>
                     </td>
                     <td className="px-3 py-2">{row.status}</td>
                     <td className="px-3 py-2">{row.paymentStatusAr}</td>
-                    <td className="px-3 py-2">{row.outstandingEgp.toFixed(2)}</td>
-                    <td className="px-3 py-2">{row.amountDeductedEgp.toFixed(2)}</td>
-                    <td className="px-3 py-2">{row.settlementPaidEgp.toFixed(2)}</td>
+                    <td className="px-3 py-2">
+                      {row.outstandingEgp == null ? '—' : row.outstandingEgp.toFixed(2)}
+                    </td>
+                    <td className="px-3 py-2">
+                      {row.amountDeductedEgp == null ? '—' : row.amountDeductedEgp.toFixed(2)}
+                    </td>
+                    <td className="px-3 py-2">
+                      {row.settlementPaidEgp == null ? '—' : row.settlementPaidEgp.toFixed(2)}
+                    </td>
                     <td className="px-3 py-2">
                       <button
                         type="button"
                         className="text-indigo-700 hover:underline text-xs"
                         onClick={() => {
                           setProposeFor(row);
-                          setProposedStatus(row.paymentStatus);
+                          setProposedStatus(row.paymentStatus || 'UNPAID');
                           setPaidEgp(
-                            row.settlementPaidEgp > 0 ? String(row.settlementPaidEgp) : ''
+                            row.settlementPaidEgp != null && row.settlementPaidEgp > 0
+                              ? String(row.settlementPaidEgp)
+                              : ''
                           );
                           setNote('');
                         }}
                       >
-                        اقتراح تحديث
+                        {row.hasLiability ? 'اقتراح تحديث' : 'اقتراح فتح عهدة'}
                       </button>
                     </td>
                   </tr>
@@ -159,10 +209,14 @@ export default function SupervisorEquipmentStatusPage() {
         {proposeFor && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
             <div className="bg-white rounded-lg max-w-md w-full p-4 space-y-3 shadow-lg" dir="rtl">
-              <h2 className="font-bold text-lg">اقتراح تحديث سداد</h2>
+              <h2 className="font-bold text-lg">
+                {proposeFor.hasLiability ? 'اقتراح تحديث سداد' : 'اقتراح فتح عهدة / حالة سداد'}
+              </h2>
               <p className="text-sm text-slate-600">
-                {proposeFor.riderName} ({proposeFor.riderCode}) — متبقي{' '}
-                {proposeFor.outstandingEgp.toFixed(2)} ج
+                {proposeFor.riderName} ({proposeFor.riderCode})
+                {proposeFor.hasLiability
+                  ? ` — متبقي ${proposeFor.outstandingEgp?.toFixed(2) ?? '—'} ج`
+                  : ' — لا توجد عهدة مسجّلة؛ مدير المعدات يراجع وينشئ العهدة'}
               </p>
               <label className="block text-sm">
                 الحالة المقترحة
@@ -181,7 +235,7 @@ export default function SupervisorEquipmentStatusPage() {
                 </select>
               </label>
               <label className="block text-sm">
-                مبلغ السداد الإجمالي المقترح (جنيه) — اختياري
+                مبلغ مسدد (جنيه) — إن وُجد
                 <input
                   type="number"
                   min="0"
@@ -192,7 +246,7 @@ export default function SupervisorEquipmentStatusPage() {
                 />
               </label>
               <label className="block text-sm">
-                ملاحظة / المتبقي
+                ملاحظة
                 <textarea
                   className="mt-1 w-full border rounded px-2 py-1"
                   rows={2}

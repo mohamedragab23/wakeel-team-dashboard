@@ -99,6 +99,25 @@ export default function PayoutCyclesPage() {
     onError: (e: Error) => notify.error(e.message),
   });
 
+  const prepMut = useMutation({
+    mutationFn: async (cycleId: string) => {
+      const res = await authFetch('/api/admin/equipment-auto-request-prep', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cycleId, operatorConfirmation: true }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'فشل تجهيز الطلبات');
+      return json;
+    },
+    onSuccess: (json) => {
+      notify.success(
+        `تم تجهيز REQUEST: جديد ${json.result?.requested ?? 0} · ترحيل ${json.result?.queued ?? 0} (بدون FA)`
+      );
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
   const cycles = list.data || [];
   const title = useMemo(() => `دورات القبض — ${monthFilter}/${yearFilter}`, [monthFilter, yearFilter]);
 
@@ -106,6 +125,11 @@ export default function PayoutCyclesPage() {
     <Layout>
       <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-6" dir="rtl">
         <h1 className="text-2xl font-bold text-slate-800">{title}</h1>
+        <p className="text-sm text-slate-600">
+          عيّن <strong>تاريخ توليد الاستقطاع</strong> لكل دورة. زر «تجهيز طلبات المعدات» يكتب REQUEST على
+          شيت الاستقطاعات (معدات) — بدون خصم محفظة. الخصم اليدوي V2 من المشرف يُضاف لنفس الشيت.
+          بعد رفع محفظة Talabat تُحضَّر طلبات الدورة التالية تلقائياً.
+        </p>
 
         {capability.isLoading ? (
           <p className="text-slate-600">جاري التحقق…</p>
@@ -226,7 +250,25 @@ export default function PayoutCyclesPage() {
                       <td className="p-2">{c.isClosing ? 'نعم' : 'لا'}</td>
                       <td className="p-2">{c.equipmentDeductionEnabled ? 'نعم' : 'لا'}</td>
                       <td className="p-2">{c.status}</td>
-                      <td className="p-2">
+                      <td className="p-2 space-x-2 space-x-reverse">
+                        {c.status !== 'finalized' && c.equipmentDeductionEnabled && !c.isClosing ? (
+                          <button
+                            type="button"
+                            className="text-emerald-800 underline ml-2"
+                            disabled={prepMut.isPending}
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  'تجهيز طلبات استقطاع المعدات (REQUEST) لهذه الدورة على شيت الاستقطاعات؟ بدون خصم محفظة.'
+                                )
+                              ) {
+                                prepMut.mutate(c.cycleId);
+                              }
+                            }}
+                          >
+                            تجهيز طلبات المعدات
+                          </button>
+                        ) : null}
                         {c.status !== 'finalized' ? (
                           <button
                             type="button"
@@ -236,7 +278,7 @@ export default function PayoutCyclesPage() {
                             تقفيل
                           </button>
                         ) : (
-                          '—'
+                          !c.equipmentDeductionEnabled || c.isClosing ? '—' : null
                         )}
                       </td>
                     </tr>

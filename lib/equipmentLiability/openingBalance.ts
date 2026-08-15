@@ -384,18 +384,36 @@ export async function createOpeningLiability(
   input: OpeningReconciliationInput,
   catalog: OpeningCatalogPricesMilli,
   deps: CreateOpeningLiabilityDeps,
-  opts?: { persist?: boolean; equipmentIssueId?: string }
+  opts?: {
+    persist?: boolean;
+    equipmentIssueId?: string;
+    /**
+     * Equipment Manager accept of supervisor opening_report — skips pilot allowlist
+     * and Opening write flag; still no FA; still requires persistIssue + confirmation.
+     */
+    fromEquipmentManagerProposal?: boolean;
+  }
 ): Promise<CreateOpeningLiabilityResult> {
   if (isSrs014FinancialApplyEnabled()) {
     // Even if somehow ON, opening create still refuses money path coupling.
   }
 
   const wantPersist = opts?.persist === true;
-  if (wantPersist) {
+  const fromProposal = opts?.fromEquipmentManagerProposal === true;
+
+  if (wantPersist && !fromProposal) {
     const allow = assertOpeningPilotPersistAllowed(input.riderCode);
     if (!allow.ok) {
       return { ok: false, code: allow.code, error: allow.error };
     }
+  }
+
+  if (wantPersist && fromProposal && !input.operatorConfirmation) {
+    return {
+      ok: false,
+      code: 'OPERATOR_CONFIRMATION_REQUIRED',
+      error: 'تأكيد مسؤول المعدات مطلوب لإنشاء العهدة من الاقتراح',
+    };
   }
 
   const exists = await deps.liveRiderExists(input.riderCode);
@@ -419,9 +437,8 @@ export async function createOpeningLiability(
       return {
         ok: true,
         created: false,
-        // Idempotent hit: report PERSISTED when a persist was requested and write flag is on.
         mode:
-          wantPersist && isSrs014OpeningBalanceWriteEnabled()
+          wantPersist && (fromProposal || isSrs014OpeningBalanceWriteEnabled())
             ? 'PERSISTED'
             : 'DRY_RUN',
         issue: existing,
@@ -447,8 +464,8 @@ export async function createOpeningLiability(
 
   const canPersist =
     wantPersist &&
-    isSrs014OpeningBalanceWriteEnabled() &&
-    typeof deps.persistIssue === 'function';
+    typeof deps.persistIssue === 'function' &&
+    (fromProposal || isSrs014OpeningBalanceWriteEnabled());
 
   if (wantPersist && !canPersist) {
     return {

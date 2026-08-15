@@ -1,5 +1,5 @@
 /**
- * Equipment payment proposals — RBAC menu + pure view helpers + no pilot auto-mutation.
+ * Equipment payment proposals — roster desk, opening_report, RBAC, FA OFF.
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -13,7 +13,10 @@ import {
   adminFeatureAllowed,
   filterAdminMenuForPermissions,
 } from '@/lib/adminFeatureAccess';
-import { issueToSupervisorView, issueMatchesSupervisorScope } from '@/lib/equipmentLiability/paymentProposals';
+import {
+  issueToSupervisorView,
+  issueMatchesSupervisorScope,
+} from '@/lib/equipmentLiability/paymentProposals';
 import type { EquipmentLiabilityIssue } from '@/lib/equipmentLiability/store';
 import { isSrs014FinancialApplyEnabled } from '@/lib/srs014Flags';
 import { egpToMilliemes } from '@/lib/money';
@@ -56,7 +59,6 @@ describe('Equipment payment proposals — RBAC', () => {
       true
     );
 
-    // Recruitment uses sentinel role (not admin) + no equipment_liability feature.
     assert.equal(roleAllowsFeature('RECRUITMENT_MANAGER', 'equipment_liability'), false);
     assert.equal(
       adminFeatureAllowed(
@@ -120,7 +122,7 @@ describe('Equipment payment proposals — supervisor view + safety', () => {
     );
   });
 
-  it('FA remains OFF; proposal module does not enable FA or bulk-mutate pilots', () => {
+  it('FA remains OFF; modules support opening_report + roster desk + cycle prep without FA', () => {
     delete process.env.FEATURE_SRS014_FINANCIAL_APPLY_ENABLED;
     assert.equal(isSrs014FinancialApplyEnabled(), false);
 
@@ -128,9 +130,24 @@ describe('Equipment payment proposals — supervisor view + safety', () => {
       join(process.cwd(), 'lib/equipmentLiability/paymentProposals.ts'),
       'utf8'
     );
-    assert.ok(mod.includes('applySettlementPayment'));
+    assert.ok(mod.includes('listSupervisorEquipmentDesk'));
+    assert.ok(mod.includes('opening_report'));
+    assert.ok(mod.includes('fromEquipmentManagerProposal'));
     assert.ok(mod.includes('getSupervisorRiders'));
-    assert.ok(mod.includes('issueMatchesSupervisorScope'));
-    assert.ok(!mod.includes('FEATURE_SRS014_FINANCIAL_APPLY'));
+    assert.ok(!mod.includes('FEATURE_SRS014_FINANCIAL_APPLY_ENABLED=true'));
+
+    const prep = readFileSync(
+      join(process.cwd(), 'app/api/admin/equipment-auto-request-prep/route.ts'),
+      'utf8'
+    );
+    assert.ok(prep.includes('runEquipmentAutoRequestsForDate'));
+    assert.ok(prep.includes('isSrs014FinancialApplyEnabled'));
+    assert.ok(prep.includes("assertAdminApiAccess(decoded, 'equipment_liability')"));
+
+    const opening = readFileSync(
+      join(process.cwd(), 'lib/equipmentLiability/openingBalance.ts'),
+      'utf8'
+    );
+    assert.ok(opening.includes('fromEquipmentManagerProposal'));
   });
 });

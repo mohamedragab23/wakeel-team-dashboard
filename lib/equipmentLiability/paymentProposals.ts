@@ -1,20 +1,25 @@
 /**
- * Supervisor → Equipment Manager payment-status proposals for rider liabilities.
- * Accept applies settlement/outstanding carefully. No Financial Apply.
+ * Supervisor → Equipment Manager payment-status / opening-report proposals.
+ * Accept updates settlement or creates Opening via createOpeningLiability.
+ * No Financial Apply.
  */
 import {
   appendToSheet,
   ensureHeaderRow,
   ensureSheetExists,
+  getSheetData,
   getSheetDataOrThrow,
   updateSheetRow,
 } from '@/lib/googleSheets';
 import { appendAuditLog } from '@/lib/auditLog';
 import { egpToMilliemes, milliemesToEgp } from '@/lib/money';
 import {
+  appendLiabilityIssue,
   applySettlementPayment,
+  getByDeliveryRowRef,
   getById,
   listIssues,
+  listOpenIssues,
   type EquipmentLiabilityIssue,
 } from '@/lib/equipmentLiability/store';
 import {
@@ -28,6 +33,14 @@ import {
 } from '@/lib/dataFilter';
 import { getSupervisorRiders } from '@/lib/dataService';
 import { sendAdminTelegramNotificationSafe } from '@/lib/adminTelegramNotifier';
+import {
+  createOpeningLiability,
+  defaultOpeningCatalogFromApprovedDefaults,
+  openingMigrationKey,
+  type OpeningReconciliationInput,
+  type OpeningSecurityStatus,
+} from '@/lib/equipmentLiability/openingBalance';
+import { loadAdminEquipmentPricingFromSheets } from '@/lib/equipmentPricing/loadAdminPricing';
 
 export const SHEET_EQUIPMENT_PAYMENT_PROPOSALS = 'اقتراحات_سداد_المعدات';
 
@@ -51,9 +64,11 @@ export const EQUIPMENT_PAYMENT_PROPOSAL_HEADERS = [
   'beforeSettlementPaidMilli',
   'afterOutstandingMilli',
   'afterSettlementPaidMilli',
+  'proposalKind',
 ] as const;
 
 export type ProposalWorkflowStatus = 'pending' | 'accepted' | 'rejected' | 'modified_accepted';
+export type ProposalKind = 'payment_update' | 'opening_report';
 
 export type EquipmentPaymentProposal = {
   proposalId: string;
@@ -75,7 +90,23 @@ export type EquipmentPaymentProposal = {
   beforeSettlementPaidMilli: number;
   afterOutstandingMilli: number | null;
   afterSettlementPaidMilli: number | null;
+  proposalKind: ProposalKind;
   sheetRow?: number;
+};
+
+export type SupervisorEquipmentDeskRow = {
+  riderCode: string;
+  riderName: string;
+  zone: string;
+  hasLiability: boolean;
+  equipmentIssueId: string | null;
+  status: string;
+  paymentStatus: EquipmentPaymentStatus | null;
+  paymentStatusAr: string;
+  outstandingEgp: number | null;
+  amountDeductedEgp: number | null;
+  settlementPaidEgp: number | null;
+  originalLiabilityEgp: number | null;
 };
 
 function cell(row: unknown[], i: number): string {
@@ -96,6 +127,10 @@ async function ensureProposalsSheet(): Promise<void> {
   await ensureHeaderRow(SHEET_EQUIPMENT_PAYMENT_PROPOSALS, [
     ...EQUIPMENT_PAYMENT_PROPOSAL_HEADERS,
   ]);
+}
+
+function parseProposalKind(raw: string): ProposalKind {
+  return raw === 'opening_report' ? 'opening_report' : 'payment_update';
 }
 
 function rowToProposal(row: unknown[], sheetRow: number): EquipmentPaymentProposal | null {
@@ -134,6 +169,7 @@ function rowToProposal(row: unknown[], sheetRow: number): EquipmentPaymentPropos
     afterOutstandingMilli: cell(row, 17) === '' ? null : Math.trunc(Number(cell(row, 17)) || 0),
     afterSettlementPaidMilli:
       cell(row, 18) === '' ? null : Math.trunc(Number(cell(row, 18)) || 0),
+    proposalKind: parseProposalKind(cell(row, 19)),
     sheetRow,
   };
 }
@@ -159,6 +195,7 @@ function proposalToRow(p: EquipmentPaymentProposal): unknown[] {
     p.beforeSettlementPaidMilli,
     p.afterOutstandingMilli == null ? '' : p.afterOutstandingMilli,
     p.afterSettlementPaidMilli == null ? '' : p.afterSettlementPaidMilli,
+    p.proposalKind,
   ];
 }
 
@@ -229,40 +266,114 @@ export function issueMatchesSupervisorScope(params: {
   );
 }
 
-/**
- * Scope by roster ownership (شيت المناديب), not only liability snapshot.
- * Many Opening rows have stale/wrong supervisorCodeSnapshot — supervisors still
- * need every liability for their current riders to propose payment updates.
- */
+/** @deprecated Prefer listSupervisorEquipmentDesk — kept for callers expecting issues-only. */
 export async function listLiabilitiesForSupervisor(
   supervisorCode: string
 ): Promise<{
   issues: ReturnType<typeof issueToSupervisorView>[];
   rosterRiderCount: number;
 }> {
+  const desk = await listSupervisorEquipmentDesk(supervisorCode);
+  return {
+    issues: desk.rows
+      .filter((r) => r.hasLiability && r.equipmentIssueId)
+      .map((r) => ({
+        equipmentIssueId: r.equipmentIssueId!,
+        riderCode: r.riderCode,
+        riderName: r.riderName,
+        zone: r.zone,
+        status: r.status,
+        paymentStatus: r.paymentStatus || 'UNPAID',
+        paymentStatusAr: r.paymentStatusAr,
+        outstandingEgp: r.outstandingEgp ?? 0,
+        amountDeductedEgp: r.amountDeductedEgp ?? 0,
+        settlementPaidEgp: r.settlementPaidEgp ?? 0,
+        originalLiabilityEgp: r.originalLiabilityEgp ?? 0,
+        deliveryRowRef: '',
+      })),
+    rosterRiderCount: desk.rosterRiderCount,
+  };
+}
+
+/** Full roster + optional liability join for supervisor desk. */
+export async function listSupervisorEquipmentDesk(
+  supervisorCode: string
+): Promise<{
+  rows: SupervisorEquipmentDeskRow[];
+  rosterRiderCount: number;
+  liabilityCount: number;
+}> {
   const riders = await getSupervisorRiders(supervisorCode, false);
   const rosterCodes = riders.map((r) => r.code);
-
   const all = await listIssues();
-  const issues = all
-    .filter((i) =>
-      issueMatchesSupervisorScope({
-        riderCode: i.riderCode,
-        supervisorCodeSnapshot: i.supervisorCodeSnapshot,
+  const byRider = new Map<string, EquipmentLiabilityIssue>();
+  for (const issue of all) {
+    if (
+      !issueMatchesSupervisorScope({
+        riderCode: issue.riderCode,
+        supervisorCodeSnapshot: issue.supervisorCodeSnapshot,
         supervisorCode,
         rosterRiderCodes: rosterCodes,
       })
-    )
-    .map(issueToSupervisorView)
-    .sort((a, b) => {
-      const rank = (p: string) =>
-        p === 'UNPAID' ? 0 : p === 'PARTIALLY_PAID' ? 1 : 2;
-      const byPay = rank(a.paymentStatus) - rank(b.paymentStatus);
-      if (byPay !== 0) return byPay;
-      return b.outstandingEgp - a.outstandingEgp;
-    });
+    ) {
+      continue;
+    }
+    const key = normalizeRiderCodeForPerformance(issue.riderCode);
+    const prev = byRider.get(key);
+    if (!prev || (issue.status === 'open' && prev.status !== 'open')) {
+      byRider.set(key, issue);
+    }
+  }
 
-  return { issues, rosterRiderCount: riders.length };
+  const rows: SupervisorEquipmentDeskRow[] = riders.map((r) => {
+    const issue = byRider.get(normalizeRiderCodeForPerformance(r.code));
+    if (!issue) {
+      return {
+        riderCode: r.code,
+        riderName: r.name,
+        zone: r.region || '',
+        hasLiability: false,
+        equipmentIssueId: null,
+        status: 'لا توجد عهدة',
+        paymentStatus: null,
+        paymentStatusAr: '—',
+        outstandingEgp: null,
+        amountDeductedEgp: null,
+        settlementPaidEgp: null,
+        originalLiabilityEgp: null,
+      };
+    }
+    const view = issueToSupervisorView(issue);
+    return {
+      riderCode: r.code,
+      riderName: r.name || view.riderName,
+      zone: r.region || view.zone,
+      hasLiability: true,
+      equipmentIssueId: view.equipmentIssueId,
+      status: view.status,
+      paymentStatus: view.paymentStatus,
+      paymentStatusAr: view.paymentStatusAr,
+      outstandingEgp: view.outstandingEgp,
+      amountDeductedEgp: view.amountDeductedEgp,
+      settlementPaidEgp: view.settlementPaidEgp,
+      originalLiabilityEgp: view.originalLiabilityEgp,
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (a.hasLiability !== b.hasLiability) return a.hasLiability ? -1 : 1;
+    const rank = (p: EquipmentPaymentStatus | null) =>
+      p === 'UNPAID' ? 0 : p === 'PARTIALLY_PAID' ? 1 : p === 'PAID' ? 2 : 3;
+    const byPay = rank(a.paymentStatus) - rank(b.paymentStatus);
+    if (byPay !== 0) return byPay;
+    return (b.outstandingEgp ?? 0) - (a.outstandingEgp ?? 0);
+  });
+
+  return {
+    rows,
+    rosterRiderCount: riders.length,
+    liabilityCount: rows.filter((r) => r.hasLiability).length,
+  };
 }
 
 async function supervisorOwnsRider(
@@ -272,13 +383,14 @@ async function supervisorOwnsRider(
   const riders = await getSupervisorRiders(supervisorCode, false);
   const want = normalizeRiderCodeForPerformance(riderCode);
   if (!want) return false;
-  return riders.some(
-    (r) => normalizeRiderCodeForPerformance(r.code) === want
-  );
+  return riders.some((r) => normalizeRiderCodeForPerformance(r.code) === want);
 }
 
 export async function createEquipmentPaymentProposal(input: {
-  equipmentIssueId: string;
+  proposalKind?: ProposalKind;
+  equipmentIssueId?: string;
+  riderCode?: string;
+  riderName?: string;
   proposedPaymentStatus: EquipmentPaymentStatus;
   proposedSettlementPaidEgp?: number | null;
   proposedOutstandingNote?: string;
@@ -288,24 +400,53 @@ export async function createEquipmentPaymentProposal(input: {
   | { ok: true; proposal: EquipmentPaymentProposal }
   | { ok: false; error: string }
 > {
-  const issue = await getById(input.equipmentIssueId);
-  if (!issue) return { ok: false, error: 'عهدة المعدات غير موجودة' };
-  const owns = await supervisorOwnsRider(input.supervisorCode, issue.riderCode);
-  if (!owns) {
-    // Fallback: snapshot match (same as list) if roster miss
-    if (
-      normalizeSupervisorCodeForMatch(issue.supervisorCodeSnapshot) !==
-      normalizeSupervisorCodeForMatch(input.supervisorCode)
-    ) {
-      return { ok: false, error: 'هذه العهدة ليست ضمن طياريك' };
+  const kind: ProposalKind =
+    input.proposalKind === 'opening_report' ? 'opening_report' : 'payment_update';
+
+  let equipmentIssueId = '';
+  let riderCode = '';
+  let riderName = '';
+  let beforeOutstanding = 0;
+  let beforeSettlement = 0;
+
+  if (kind === 'payment_update') {
+    equipmentIssueId = String(input.equipmentIssueId || '').trim();
+    if (!equipmentIssueId) return { ok: false, error: 'معرّف العهدة مطلوب' };
+    const issue = await getById(equipmentIssueId);
+    if (!issue) return { ok: false, error: 'عهدة المعدات غير موجودة' };
+    const owns = await supervisorOwnsRider(input.supervisorCode, issue.riderCode);
+    if (!owns) {
+      if (
+        normalizeSupervisorCodeForMatch(issue.supervisorCodeSnapshot) !==
+        normalizeSupervisorCodeForMatch(input.supervisorCode)
+      ) {
+        return { ok: false, error: 'هذه العهدة ليست ضمن طياريك' };
+      }
+    }
+    riderCode = issue.riderCode;
+    riderName = issue.riderNameSnapshot;
+    beforeOutstanding = issue.outstandingMilli;
+    beforeSettlement = issue.settlementPaidMilli || 0;
+  } else {
+    riderCode = String(input.riderCode || '').trim();
+    riderName = String(input.riderName || '').trim();
+    if (!riderCode) return { ok: false, error: 'كود المندوب مطلوب' };
+    const owns = await supervisorOwnsRider(input.supervisorCode, riderCode);
+    if (!owns) return { ok: false, error: 'المندوب غير تابع لك' };
+    const existing = await listIssues({ riderCode });
+    if (existing.some((i) => i.status === 'open')) {
+      return {
+        ok: false,
+        error: 'المندوب لديه عهدة مفتوحة — استخدم اقتراح تحديث السداد',
+      };
     }
   }
 
   const proposal: EquipmentPaymentProposal = {
     proposalId: newProposalId(),
-    equipmentIssueId: issue.equipmentIssueId,
-    riderCode: issue.riderCode,
-    riderName: issue.riderNameSnapshot,
+    equipmentIssueId,
+    riderCode,
+    riderName,
     supervisorCode: input.supervisorCode,
     supervisorName: input.supervisorName,
     proposedPaymentStatus: input.proposedPaymentStatus,
@@ -321,10 +462,11 @@ export async function createEquipmentPaymentProposal(input: {
     reviewerNote: '',
     createdAt: new Date().toISOString(),
     reviewedAt: '',
-    beforeOutstandingMilli: issue.outstandingMilli,
-    beforeSettlementPaidMilli: issue.settlementPaidMilli || 0,
+    beforeOutstandingMilli: beforeOutstanding,
+    beforeSettlementPaidMilli: beforeSettlement,
     afterOutstandingMilli: null,
     afterSettlementPaidMilli: null,
+    proposalKind: kind,
   };
 
   await ensureProposalsSheet();
@@ -337,12 +479,16 @@ export async function createEquipmentPaymentProposal(input: {
 
   void appendAuditLog({
     domain: 'equipment',
-    action: 'equipment_payment_proposal_created',
+    action:
+      kind === 'opening_report'
+        ? 'equipment_opening_report_proposed'
+        : 'equipment_payment_proposal_created',
     entityType: 'equipment_payment_proposal',
     entityCode: proposal.proposalId,
     actorCode: input.supervisorCode,
     actorName: input.supervisorName,
     after: {
+      proposalKind: kind,
       equipmentIssueId: proposal.equipmentIssueId,
       riderCode: proposal.riderCode,
       proposedPaymentStatus: proposal.proposedPaymentStatus,
@@ -351,7 +497,10 @@ export async function createEquipmentPaymentProposal(input: {
 
   void sendAdminTelegramNotificationSafe({
     type: 'system_alert',
-    alertTitle: 'اقتراح سداد معدات من مشرف',
+    alertTitle:
+      kind === 'opening_report'
+        ? 'اقتراح فتح عهدة معدات من مشرف'
+        : 'اقتراح سداد معدات من مشرف',
     alertMessage: `${input.supervisorName} (${input.supervisorCode}) — مندوب ${proposal.riderCode}: ${EQUIPMENT_PAYMENT_STATUS_AR[proposal.proposedPaymentStatus]}`,
     supervisorName: input.supervisorName,
     supervisorCode: input.supervisorCode,
@@ -362,10 +511,147 @@ export async function createEquipmentPaymentProposal(input: {
   return { ok: true, proposal };
 }
 
+export type OpeningAcceptFields = {
+  motorcycleBagHeld: boolean;
+  bicycleBagHeld: boolean;
+  tshirtQuantity: number;
+  jacketQuantity: number;
+  helmetQuantity: number;
+  securityStatus: OpeningSecurityStatus;
+  historicalPaidEgp: number;
+  operatorConfirmation: boolean;
+  zoneSnapshot?: string;
+};
+
+async function loadOpeningCatalog() {
+  const loaded = await loadAdminEquipmentPricingFromSheets();
+  if (loaded.ok) {
+    return {
+      motorcycleBagMilli: loaded.pricing.motorcycleBagMilli,
+      bicycleBagMilli: loaded.pricing.bicycleBagMilli,
+      shirtMilli: loaded.pricing.shirtMilli,
+      securityFeeMilli: loaded.pricing.securityFeeMilli,
+      jacketMilli: loaded.pricing.jacketMilli,
+      helmetMilli: loaded.pricing.helmetMilli,
+    };
+  }
+  return defaultOpeningCatalogFromApprovedDefaults();
+}
+
+async function acceptOpeningReport(
+  proposal: EquipmentPaymentProposal,
+  input: {
+    reviewerCode: string;
+    reviewerName: string;
+    reviewerNote: string;
+    opening: OpeningAcceptFields;
+    action: 'accept' | 'modify_accept';
+  }
+): Promise<
+  | { ok: true; proposal: EquipmentPaymentProposal; issue: EquipmentLiabilityIssue }
+  | { ok: false; error: string }
+> {
+  if (!input.opening?.operatorConfirmation) {
+    return { ok: false, error: 'يلزم تأكيد مسؤول المعدات لإنشاء العهدة' };
+  }
+
+  const historicalPaidMilli = egpToMilliemes(
+    Number.isFinite(input.opening.historicalPaidEgp)
+      ? input.opening.historicalPaidEgp
+      : proposal.proposedSettlementPaidEgp ?? 0
+  );
+
+  const openingInput: OpeningReconciliationInput = {
+    riderCode: proposal.riderCode,
+    motorcycleBagHeld: Boolean(input.opening.motorcycleBagHeld),
+    bicycleBagHeld: Boolean(input.opening.bicycleBagHeld),
+    tshirtQuantity: Math.trunc(Number(input.opening.tshirtQuantity) || 0),
+    jacketQuantity: Math.trunc(Number(input.opening.jacketQuantity) || 0),
+    helmetQuantity: Math.trunc(Number(input.opening.helmetQuantity) || 0),
+    securityStatus: input.opening.securityStatus,
+    historicalPaidMilli,
+    operatorConfirmation: true,
+    notes: [proposal.proposedOutstandingNote, input.reviewerNote]
+      .filter(Boolean)
+      .join(' | '),
+    riderNameSnapshot: proposal.riderName,
+    zoneSnapshot: String(input.opening.zoneSnapshot || '').trim(),
+    supervisorCodeSnapshot: proposal.supervisorCode,
+    supervisorNameSnapshot: proposal.supervisorName,
+    actorCode: input.reviewerCode,
+    actorName: input.reviewerName,
+  };
+
+  const liveData = await getSheetData('المناديب', false);
+  const liveSet = new Set<string>();
+  for (let i = 1; i < liveData.length; i++) {
+    const code = normalizeRiderCodeForPerformance(String(liveData[i]?.[0] ?? ''));
+    if (code) liveSet.add(code);
+  }
+
+  const catalog = await loadOpeningCatalog();
+  const created = await createOpeningLiability(
+    openingInput,
+    catalog,
+    {
+      liveRiderExists: (rc) => liveSet.has(normalizeRiderCodeForPerformance(rc)),
+      findByMigrationKey: async (key) => getByDeliveryRowRef(key),
+      hasOpenAssignmentLiability: async (rc) => {
+        const open = await listOpenIssues();
+        const want = normalizeRiderCodeForPerformance(rc);
+        return open.some((i) => normalizeRiderCodeForPerformance(i.riderCode) === want);
+      },
+      persistIssue: appendLiabilityIssue,
+    },
+    { persist: true, fromEquipmentManagerProposal: true }
+  );
+
+  if (!created.ok) {
+    return { ok: false, error: created.error || created.code || 'فشل إنشاء العهدة' };
+  }
+
+  const now = new Date().toISOString();
+  const updated: EquipmentPaymentProposal = {
+    ...proposal,
+    equipmentIssueId: created.issue.equipmentIssueId,
+    status: input.action === 'modify_accept' ? 'modified_accepted' : 'accepted',
+    reviewerCode: input.reviewerCode,
+    reviewerName: input.reviewerName,
+    reviewerNote: input.reviewerNote,
+    reviewedAt: now,
+    afterOutstandingMilli: created.issue.outstandingMilli,
+    afterSettlementPaidMilli: created.issue.settlementPaidMilli || 0,
+    proposedSettlementPaidEgp: milliemesToEgp(created.issue.settlementPaidMilli || 0),
+  };
+  await updateSheetRow(
+    SHEET_EQUIPMENT_PAYMENT_PROPOSALS,
+    proposal.sheetRow!,
+    proposalToRow(updated)
+  );
+
+  void appendAuditLog({
+    domain: 'equipment',
+    action: 'equipment_opening_report_accepted',
+    entityType: 'equipment_payment_proposal',
+    entityCode: proposal.proposalId,
+    actorCode: input.reviewerCode,
+    actorName: input.reviewerName,
+    after: {
+      equipmentIssueId: created.issue.equipmentIssueId,
+      riderCode: created.issue.riderCode,
+      outstandingMilli: created.issue.outstandingMilli,
+      mode: created.mode,
+      migrationKey: openingMigrationKey(created.issue.riderCode),
+    },
+  }).catch(() => undefined);
+
+  return { ok: true, proposal: updated, issue: created.issue };
+}
+
 /**
- * Accept / modify-accept: apply incremental settlement toward proposed paid total when provided.
- * PAID with null amount → settle remaining outstanding via applySettlementPayment.
- * Reject: status only.
+ * Accept / modify-accept / reject.
+ * opening_report → create Opening (EQ fields required).
+ * payment_update → settlement apply path.
  */
 export async function reviewEquipmentPaymentProposal(input: {
   proposalId: string;
@@ -373,9 +659,9 @@ export async function reviewEquipmentPaymentProposal(input: {
   reviewerCode: string;
   reviewerName: string;
   reviewerNote?: string;
-  /** Required for modify_accept — settlement EGP to apply as payment delta or absolute paid target */
   modifiedSettlementPaidEgp?: number | null;
   modifiedPaymentStatus?: EquipmentPaymentStatus | null;
+  opening?: OpeningAcceptFields;
 }): Promise<
   | { ok: true; proposal: EquipmentPaymentProposal; issue?: EquipmentLiabilityIssue }
   | { ok: false; error: string }
@@ -414,9 +700,25 @@ export async function reviewEquipmentPaymentProposal(input: {
       actorCode: input.reviewerCode,
       actorName: input.reviewerName,
       before: { status: 'pending' },
-      after: { status: 'rejected', note },
+      after: { status: 'rejected', note, proposalKind: proposal.proposalKind },
     }).catch(() => undefined);
     return { ok: true, proposal: updated };
+  }
+
+  if (proposal.proposalKind === 'opening_report') {
+    if (!input.opening) {
+      return {
+        ok: false,
+        error: 'قبول فتح العهدة يتطلب بيانات المعدات (شنطة/تيشرت/جاكيت/خوذة/استعلام أمني/مدفوع تاريخي)',
+      };
+    }
+    return acceptOpeningReport(proposal, {
+      reviewerCode: input.reviewerCode,
+      reviewerName: input.reviewerName,
+      reviewerNote: note,
+      opening: input.opening,
+      action: input.action,
+    });
   }
 
   const issue = await getById(proposal.equipmentIssueId);
@@ -439,7 +741,6 @@ export async function reviewEquipmentPaymentProposal(input: {
     settlementTargetEgp = milliemesToEgp(issue.outstandingMilli + (issue.settlementPaidMilli || 0));
   }
   if (targetStatus === 'UNPAID') {
-    // No mutation of balances — acknowledge supervisor view only.
     const updated: EquipmentPaymentProposal = {
       ...proposal,
       status: input.action === 'modify_accept' ? 'modified_accepted' : 'accepted',

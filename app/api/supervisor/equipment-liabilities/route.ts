@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { isEquipmentLedgerEnabled, SRS014_FLAG_OFF_BODY } from '@/lib/srs014Flags';
-import { listLiabilitiesForSupervisor } from '@/lib/equipmentLiability/paymentProposals';
+import { listSupervisorEquipmentDesk } from '@/lib/equipmentLiability/paymentProposals';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,14 +18,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { issues, rosterRiderCount } = await listLiabilitiesForSupervisor(
-      decoded.code || ''
-    );
+    const desk = await listSupervisorEquipmentDesk(decoded.code || '');
     return NextResponse.json({
       success: true,
-      issues,
-      rosterRiderCount,
-      liabilityCount: issues.length,
+      rows: desk.rows,
+      /** @deprecated use rows */
+      issues: desk.rows.filter((r) => r.hasLiability),
+      rosterRiderCount: desk.rosterRiderCount,
+      liabilityCount: desk.liabilityCount,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'حدث خطأ';
