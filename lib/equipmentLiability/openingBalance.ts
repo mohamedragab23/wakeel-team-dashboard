@@ -11,7 +11,7 @@
 import { egpToMilliemes } from '@/lib/money';
 import { normalizeAndValidateRiderCode } from '@/lib/equipmentLiability/phaseCGates';
 import { scheduleFromPersistedOriginalMilli } from '@/lib/equipmentPricing/computeFromPricing';
-import type { EquipmentPricingMilli, EquipmentPricingSource } from '@/lib/equipmentPricing/types';
+import type { EquipmentPricingMilli } from '@/lib/equipmentPricing/types';
 import { APPROVED_ADMIN_EQUIPMENT_PRICING_EGP } from '@/lib/equipmentPricing/approvedDefaults';
 import type { EquipmentBagType, EquipmentLiabilityStatus } from '@/lib/equipmentLiability/constants';
 import type { EquipmentLiabilityIssue } from '@/lib/equipmentLiability/store';
@@ -21,7 +21,8 @@ import {
   isSrs014OpeningBalanceWriteEnabled,
 } from '@/lib/equipmentLiability/openingPilotAllowlist';
 
-export const OPENING_PRICING_SOURCE: EquipmentPricingSource = 'OPENING_MIGRATION';
+/** FLOW A always persists this literal — never Admin / legacy reprice labels. */
+export const OPENING_PRICING_SOURCE = 'OPENING_MIGRATION' as const;
 
 export function openingMigrationKey(riderCode: string): string {
   const n = normalizeAndValidateRiderCode(riderCode);

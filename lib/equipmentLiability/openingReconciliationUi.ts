@@ -161,7 +161,8 @@ export function buildOpeningPreview(
   if ('ok' in mapped && mapped.ok === false) return mapped;
   const input = mapped as OpeningReconciliationInput;
   const calc = calculateOpeningLiability(input, catalog);
-  if ('ok' in calc && calc.ok === false) return calc;
+  // OpeningValidationError always has `ok`; success calculation never does.
+  if ('ok' in calc) return calc;
 
   return {
     ok: true,
