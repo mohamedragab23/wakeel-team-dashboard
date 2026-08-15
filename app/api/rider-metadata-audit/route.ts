@@ -3,7 +3,7 @@ import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { getAllRiders, getAllSupervisors, updateRider } from '@/lib/adminService';
 import { buildMetadataCompletionAudit } from '@/lib/strategicOps/metadataCompletionAudit';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
 import { validateAssignmentMetadata } from '@/lib/riderMetadata';
 import { riderCodesMatch } from '@/lib/riderCodeUtils';

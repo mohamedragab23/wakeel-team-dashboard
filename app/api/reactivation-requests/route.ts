@@ -9,7 +9,7 @@ import {
   filterRowsBySupervisorInZoneScope,
 } from '@/lib/adminZoneScope';
 import { normalizeRiderCodeForPerformance } from '@/lib/dataFilter';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import { invalidateRiderWorkflowCaches } from '@/lib/cacheInvalidation';
 import { validateAssignmentMetadata } from '@/lib/riderMetadata';
 import {

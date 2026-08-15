@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { getAllSupervisors, addSupervisor, updateSupervisor, deleteSupervisor } from '@/lib/adminService';
-import { assertAdminApiAccess, assertAdminSupervisorsReadAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess, assertAdminSupervisorsReadAccess } from '@/lib/adminApiAccess';
 import {
   assertLimitedAdminSupervisorZoneAccess,
   filterSupervisorsForAdminDataScope,

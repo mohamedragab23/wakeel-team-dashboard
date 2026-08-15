@@ -10,7 +10,7 @@ import { getSheetData, appendToSheet, updateSheetRow, ensureSheetExists } from '
 import { updateRider, addRider, getAllSupervisors } from '@/lib/adminService';
 import { isAllowedZone, ZONE_OPTIONS } from '@/lib/zones';
 import { assertLimitedAdminSupervisorZoneAccess, filterRowsBySupervisorInZoneScope } from '@/lib/adminZoneScope';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import { invalidateRiderWorkflowCaches } from '@/lib/cacheInvalidation';
 import { findRiderInSheet } from '@/lib/riderCodeUtils';
 import { validateAssignmentMetadata } from '@/lib/riderMetadata';

@@ -8,7 +8,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { adminFeatureAllowed, assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { adminFeatureAllowed } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import {
   buildOpeningLiabilityIssue,
   calculateOpeningLiability,

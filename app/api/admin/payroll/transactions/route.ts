@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import { assertLimitedAdminSupervisorZoneAccess, assertLimitedAdminRiderZoneAccess } from '@/lib/adminZoneScope';
 import { getAllSupervisors, getAllRiders } from '@/lib/adminService';
 import {

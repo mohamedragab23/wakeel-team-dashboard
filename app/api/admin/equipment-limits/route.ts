@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import { getAllSupervisors } from '@/lib/adminService';
 import { assertLimitedAdminSupervisorZoneAccess, filterSupervisorsForAdminDataScope } from '@/lib/adminZoneScope';
 import { redactSupervisorRowForViewer } from '@/lib/adminSalaryRedaction';

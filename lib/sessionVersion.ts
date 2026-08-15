@@ -2,21 +2,28 @@
  * Session version / revocation for JWT invalidation on password/role/security changes.
  * Redis when configured; in-memory fallback (tests + local without Redis).
  * Tokens carry `sv`; mismatch ⇒ session invalid.
+ *
+ * Keep this module free of googleSheets / next/headers so it never enters client bundles.
  */
 
 import { redisGet, redisIncr, redisSet } from '@/lib/upstashRest';
-import { normalizeSupervisorCodeForMatch } from '@/lib/dataFilter';
 
 const memoryStore = new Map<string, number>();
 
 export type SessionPrincipalRole = 'admin' | 'supervisor' | 'recruitment_manager';
 
+function normalizeLoginCode(role: SessionPrincipalRole, code: string): string {
+  const raw = String(code || '')
+    .replace(/\uFEFF/g, '')
+    .trim();
+  if (role === 'supervisor') {
+    return raw.replace(/^0+(?=\d)/, '');
+  }
+  return raw.toLowerCase();
+}
+
 export function sessionVersionKey(role: SessionPrincipalRole, code: string): string {
-  const c =
-    role === 'supervisor'
-      ? normalizeSupervisorCodeForMatch(code)
-      : String(code || '').trim().toLowerCase();
-  return `wakeel:session_version:${role}:${c}`;
+  return `wakeel:session_version:${role}:${normalizeLoginCode(role, code)}`;
 }
 
 export function __resetSessionVersionMemoryForTests() {

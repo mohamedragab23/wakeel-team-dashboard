@@ -9,7 +9,7 @@ import { verifyToken } from '@/lib/auth';
 import { getAllSupervisors } from '@/lib/adminService';
 import { getSupervisorRiders } from '@/lib/dataService';
 import { aggregateSupervisorDailyPerformance } from '@/lib/dataFilter';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import { adminScopeHasSupervisorCode, getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
 import { getSheetData } from '@/lib/googleSheets';
 

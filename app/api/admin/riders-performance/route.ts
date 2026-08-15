@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminRidersPerformanceReadAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminRidersPerformanceReadAccess } from '@/lib/adminApiAccess';
 import { getAllRiders } from '@/lib/adminService';
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { aggregateRidersInDateRange, type RiderSeed } from '@/lib/riderPerformanceAggregate';

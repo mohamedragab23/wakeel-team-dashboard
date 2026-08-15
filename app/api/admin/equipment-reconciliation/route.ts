@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import { getSheetData } from '@/lib/googleSheets';
 import {
   appendLiabilityIssue,
@@ -59,7 +59,7 @@ async function loadCatalogMilli() {
   };
 }
 
-function auth(request: NextRequest) {
+async function auth(request: NextRequest) {
   const token = extractBearerToken(request);
   if (!token) {
     return { error: NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 }) };
@@ -86,7 +86,7 @@ function safetyFlags() {
 }
 
 export async function GET(request: NextRequest) {
-  const a = auth(request);
+  const a = await auth(request);
   if ('error' in a && a.error) return a.error;
 
   try {
@@ -174,7 +174,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const a = auth(request);
+  const a = await auth(request);
   if ('error' in a && a.error) return a.error;
   const actor = a.decoded!;
 

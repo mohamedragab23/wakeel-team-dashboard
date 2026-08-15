@@ -6,11 +6,8 @@
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach } from 'node:test';
 import { NextResponse } from 'next/server';
-import {
-  assertAdminApiAccess,
-  isGrantingAdmin,
-  adminFeatureAllowed,
-} from '@/lib/adminFeatureAccess';
+import { isGrantingAdmin, adminFeatureAllowed } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import { buildPermissionsForOperationalRole } from '@/lib/operationalRoles';
 import {
   assertRecruitmentApiAccess,

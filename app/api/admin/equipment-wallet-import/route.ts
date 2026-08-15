@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import {
   appendToSheet,
   ensureHeaderRow,
@@ -32,7 +32,7 @@ import {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-function auth(request: NextRequest) {
+async function auth(request: NextRequest) {
   const token = extractBearerToken(request);
   if (!token) {
     return { error: NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 }) };
@@ -68,7 +68,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const a = auth(request);
+  const a = await auth(request);
   if ('error' in a && a.error) return a.error;
   const decoded = a.decoded!;
 

@@ -15,7 +15,7 @@ import {
   assertLimitedAdminSupervisorZoneAccess,
   filterRowsBySupervisorInZoneScope,
 } from '@/lib/adminZoneScope';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import { invalidateRiderWorkflowCaches } from '@/lib/cacheInvalidation';
 import { tryAcquireApprovalLock, releaseApprovalLock } from '@/lib/approvalLock';
 import { terminationPostSchema, terminationPutSchema } from '@/lib/validators/common';

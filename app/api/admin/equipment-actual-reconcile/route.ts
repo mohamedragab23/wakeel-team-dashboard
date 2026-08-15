@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import {
   appendToSheet,
   ensureHeaderRow,
@@ -34,7 +34,7 @@ import {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-function auth(request: NextRequest) {
+async function auth(request: NextRequest) {
   const token = extractBearerToken(request);
   if (!token) {
     return { error: NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 }) };
@@ -90,7 +90,7 @@ async function buildDeps() {
 
 /** GET — export REQUEST vs ACTUAL rows (CSV or JSON). */
 export async function GET(request: NextRequest) {
-  const a = auth(request);
+  const a = await auth(request);
   if ('error' in a && a.error) return a.error;
 
   try {
@@ -151,7 +151,7 @@ export async function GET(request: NextRequest) {
 
 /** POST — apply Actual payroll reconcile (liability only). */
 export async function POST(request: NextRequest) {
-  const a = auth(request);
+  const a = await auth(request);
   if ('error' in a && a.error) return a.error;
   const decoded = a.decoded!;
 

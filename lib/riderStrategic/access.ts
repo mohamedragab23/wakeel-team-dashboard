@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { extractBearerToken } from '@/lib/requestAuth';
-import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
 
 export type StrategicProfileActor = {
