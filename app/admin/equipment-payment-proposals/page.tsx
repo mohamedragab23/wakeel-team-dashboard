@@ -119,9 +119,9 @@ export default function EquipmentPaymentProposalsAdminPage() {
 
   return (
     <Layout>
-      <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-4" dir="rtl">
-        <h1 className="text-2xl font-bold text-slate-800">اقتراحات سداد / فتح عهدة المعدات</h1>
-        <p className="text-sm text-slate-600">
+      <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-4 text-[#EAF0FF]" dir="rtl">
+        <h1 className="text-2xl font-bold text-[#EAF0FF]">اقتراحات سداد / فتح عهدة المعدات</h1>
+        <p className="text-sm text-[rgba(234,240,255,0.75)]">
           Incoming من المشرفين: تحديث سداد على عهدة موجودة، أو فتح عهدة للمناديب بدون سجل. القبول
           يحدّث العهدة أو ينشئ Opening — بدون Financial Apply. للفتح الجماعي راجع أيضاً مطابقة العهدة.
         </p>
@@ -129,70 +129,70 @@ export default function EquipmentPaymentProposalsAdminPage() {
         <div className="flex gap-2">
           <button
             type="button"
-            className={`px-3 py-1.5 rounded border text-sm ${filter === 'pending' ? 'bg-slate-800 text-white' : ''}`}
+            className={`px-3 py-1.5 rounded-md border text-sm ${filter === 'pending' ? 'bg-cyan-600 border-cyan-500 text-white' : 'border-white/20 bg-white/5 text-[#EAF0FF]'}`}
             onClick={() => setFilter('pending')}
           >
             معلّق
           </button>
           <button
             type="button"
-            className={`px-3 py-1.5 rounded border text-sm ${filter === 'all' ? 'bg-slate-800 text-white' : ''}`}
+            className={`px-3 py-1.5 rounded-md border text-sm ${filter === 'all' ? 'bg-cyan-600 border-cyan-500 text-white' : 'border-white/20 bg-white/5 text-[#EAF0FF]'}`}
             onClick={() => setFilter('all')}
           >
             الكل
           </button>
         </div>
 
-        {list.isLoading && <p className="text-slate-500">جاري التحميل…</p>}
+        {list.isLoading && <p className="text-[rgba(234,240,255,0.6)]">جاري التحميل…</p>}
         {list.isError && (
-          <div className="rounded border border-rose-200 bg-rose-50 p-3 text-rose-800">
+          <div className="rounded-lg border border-rose-400/50 bg-rose-950/80 p-3 text-rose-100">
             {(list.error as Error).message}
           </div>
         )}
 
         {list.data && list.data.length === 0 && (
-          <p className="text-slate-500">لا توجد اقتراحات.</p>
+          <p className="text-[rgba(234,240,255,0.6)]">لا توجد اقتراحات.</p>
         )}
 
         {list.data && list.data.length > 0 && (
-          <div className="overflow-x-auto border rounded-lg bg-white">
+          <div className="overflow-x-auto rounded-xl border border-white/15 bg-[#12182B]">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-50">
+              <thead className="bg-[#1C2440] text-[#EAF0FF]">
                 <tr>
-                  <th className="px-3 py-2 text-right">النوع</th>
-                  <th className="px-3 py-2 text-right">المندوب</th>
-                  <th className="px-3 py-2 text-right">المشرف</th>
-                  <th className="px-3 py-2 text-right">المقترح</th>
-                  <th className="px-3 py-2 text-right">قبل</th>
-                  <th className="px-3 py-2 text-right">الحالة</th>
-                  <th className="px-3 py-2 text-right">إجراء</th>
+                  <th className="px-3 py-2 text-right font-semibold text-[#EAF0FF]">النوع</th>
+                  <th className="px-3 py-2 text-right font-semibold text-[#EAF0FF]">المندوب</th>
+                  <th className="px-3 py-2 text-right font-semibold text-[#EAF0FF]">المشرف</th>
+                  <th className="px-3 py-2 text-right font-semibold text-[#EAF0FF]">المقترح</th>
+                  <th className="px-3 py-2 text-right font-semibold text-[#EAF0FF]">قبل</th>
+                  <th className="px-3 py-2 text-right font-semibold text-[#EAF0FF]">الحالة</th>
+                  <th className="px-3 py-2 text-right font-semibold text-[#EAF0FF]">إجراء</th>
                 </tr>
               </thead>
               <tbody>
                 {list.data.map((p) => {
                   const kind = p.proposalKind || 'payment_update';
                   return (
-                    <tr key={p.proposalId} className="border-t">
+                    <tr key={p.proposalId} className="border-t border-white/10">
                       <td className="px-3 py-2 text-xs">
                         {kind === 'opening_report' ? 'فتح عهدة' : 'تحديث سداد'}
                       </td>
                       <td className="px-3 py-2">
                         <div className="font-medium">{p.riderName}</div>
-                        <div className="text-xs text-slate-500">{p.riderCode}</div>
+                        <div className="text-xs text-[rgba(234,240,255,0.55)]">{p.riderCode}</div>
                       </td>
                       <td className="px-3 py-2">
                         {p.supervisorName}{' '}
-                        <span className="text-xs text-slate-500">({p.supervisorCode})</span>
+                        <span className="text-xs text-[rgba(234,240,255,0.55)]">({p.supervisorCode})</span>
                       </td>
                       <td className="px-3 py-2">
                         {EQUIPMENT_PAYMENT_STATUS_AR[p.proposedPaymentStatus]}
                         {p.proposedSettlementPaidEgp != null && (
-                          <div className="text-xs text-slate-500">
+                          <div className="text-xs text-[rgba(234,240,255,0.55)]">
                             {p.proposedSettlementPaidEgp} ج
                           </div>
                         )}
                         {p.proposedOutstandingNote && (
-                          <div className="text-xs text-slate-500">{p.proposedOutstandingNote}</div>
+                          <div className="text-xs text-[rgba(234,240,255,0.55)]">{p.proposedOutstandingNote}</div>
                         )}
                       </td>
                       <td className="px-3 py-2">
@@ -205,7 +205,7 @@ export default function EquipmentPaymentProposalsAdminPage() {
                         {p.status === 'pending' && (
                           <button
                             type="button"
-                            className="text-indigo-700 hover:underline text-xs"
+                            className="text-cyan-300 hover:text-cyan-200 underline text-xs"
                             onClick={() => {
                               setActive(p);
                               setModStatus(p.proposedPaymentStatus);
@@ -237,10 +237,10 @@ export default function EquipmentPaymentProposalsAdminPage() {
         )}
 
         {active && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-y-auto">
-            <div className="bg-white rounded-lg max-w-lg w-full p-4 space-y-3 shadow-lg my-8" dir="rtl">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 overflow-y-auto backdrop-blur-[2px]">
+            <div className="w-full max-w-lg rounded-xl border border-white/20 bg-[#12182B] p-5 text-[#EAF0FF] shadow-2xl space-y-3 my-8" dir="rtl">
               <h2 className="font-bold text-lg">مراجعة الاقتراح</h2>
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-[rgba(234,240,255,0.75)]">
                 {(active.proposalKind || 'payment_update') === 'opening_report'
                   ? 'فتح عهدة'
                   : 'تحديث سداد'}{' '}
@@ -250,7 +250,7 @@ export default function EquipmentPaymentProposalsAdminPage() {
               <label className="block text-sm">
                 ملاحظة المراجع
                 <textarea
-                  className="mt-1 w-full border rounded px-2 py-1"
+                  className="mt-1 w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5"
                   rows={2}
                   value={reviewerNote}
                   onChange={(e) => setReviewerNote(e.target.value)}
@@ -258,7 +258,7 @@ export default function EquipmentPaymentProposalsAdminPage() {
               </label>
 
               {(active.proposalKind || 'payment_update') === 'opening_report' ? (
-                <div className="border rounded p-3 space-y-2 bg-slate-50 text-sm">
+                <div className="rounded-lg border border-white/15 bg-[#0B1020] p-3 space-y-2 text-sm text-[#EAF0FF]">
                   <p className="font-medium">بيانات Opening (مطلوبة للقبول)</p>
                   <div className="flex gap-4">
                     <label className="flex items-center gap-1">
@@ -303,7 +303,7 @@ export default function EquipmentPaymentProposalsAdminPage() {
                         <input
                           type="number"
                           min={0}
-                          className="mt-1 w-full border rounded px-2 py-1"
+                          className="mt-1 w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5"
                           value={opening[key]}
                           onChange={(e) =>
                             setOpening((o) => ({
@@ -318,7 +318,7 @@ export default function EquipmentPaymentProposalsAdminPage() {
                   <label className="block">
                     الاستعلام الأمني
                     <select
-                      className="mt-1 w-full border rounded px-2 py-1"
+                      className="mt-1 w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5"
                       value={opening.securityStatus}
                       onChange={(e) =>
                         setOpening((o) => ({
@@ -337,7 +337,7 @@ export default function EquipmentPaymentProposalsAdminPage() {
                       type="number"
                       min={0}
                       step="0.01"
-                      className="mt-1 w-full border rounded px-2 py-1"
+                      className="mt-1 w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5"
                       value={opening.historicalPaidEgp}
                       onChange={(e) =>
                         setOpening((o) => ({ ...o, historicalPaidEgp: e.target.value }))
@@ -359,12 +359,12 @@ export default function EquipmentPaymentProposalsAdminPage() {
                   </label>
                 </div>
               ) : (
-                <div className="border rounded p-2 space-y-2 bg-slate-50">
-                  <p className="text-xs font-medium text-slate-700">تعديل ثم قبول</p>
+                <div className="rounded-lg border border-white/15 bg-[#0B1020] p-2 space-y-2 text-[#EAF0FF]">
+                  <p className="text-xs font-medium text-[rgba(234,240,255,0.85)]">تعديل ثم قبول</p>
                   <label className="block text-sm">
                     الحالة
                     <select
-                      className="mt-1 w-full border rounded px-2 py-1"
+                      className="mt-1 w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5"
                       value={modStatus}
                       onChange={(e) => setModStatus(e.target.value as typeof modStatus)}
                     >
@@ -381,7 +381,7 @@ export default function EquipmentPaymentProposalsAdminPage() {
                       type="number"
                       min="0"
                       step="0.01"
-                      className="mt-1 w-full border rounded px-2 py-1"
+                      className="mt-1 w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5"
                       value={modPaid}
                       onChange={(e) => setModPaid(e.target.value)}
                     />
@@ -392,7 +392,7 @@ export default function EquipmentPaymentProposalsAdminPage() {
               <div className="flex flex-wrap gap-2 justify-end">
                 <button
                   type="button"
-                  className="px-3 py-1.5 rounded border"
+                  className="px-3 py-1.5 rounded-md border border-white/25 text-[#EAF0FF] hover:bg-white/10"
                   onClick={() => setActive(null)}
                 >
                   إغلاق
@@ -400,7 +400,7 @@ export default function EquipmentPaymentProposalsAdminPage() {
                 <button
                   type="button"
                   disabled={mut.isPending}
-                  className="px-3 py-1.5 rounded border border-rose-300 text-rose-800"
+                  className="px-3 py-1.5 rounded border border-rose-400/60 text-rose-200"
                   onClick={() => mut.mutate('reject')}
                 >
                   رفض

@@ -56,13 +56,13 @@ const emptyForm = {
 function statusBadgeClass(s: ListRider['reconciliationStatus']) {
   switch (s) {
     case 'MIGRATED':
-      return 'bg-emerald-100 text-emerald-800';
+      return 'bg-emerald-500/25 text-emerald-100';
     case 'READY':
-      return 'bg-sky-100 text-sky-800';
+      return 'bg-sky-500/25 text-sky-100';
     case 'CONFLICT':
-      return 'bg-rose-100 text-rose-800';
+      return 'bg-rose-500/25 text-rose-100';
     default:
-      return 'bg-slate-100 text-slate-700';
+      return 'bg-white/10 text-[#EAF0FF]';
   }
 }
 
@@ -226,45 +226,45 @@ export default function EquipmentReconciliationPage() {
 
   return (
     <Layout>
-      <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-4" dir="rtl">
+      <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-4 text-[#EAF0FF]" dir="rtl">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">
+          <h1 className="text-2xl font-bold text-[#EAF0FF]">
             تسوية افتتاحية للمعدات (مرة واحدة)
           </h1>
-          <p className="text-sm text-slate-600 mt-1">
+          <p className="text-sm text-[rgba(234,240,255,0.75)] mt-1">
             FLOW A — تسوية افتتاحية للمناديب الحاليين قبل تشغيل الاستقطاع الأوتوماتيك (مين سدد /
             المتبقي كام). الحفظ مقصور على قائمة طيار صريحة للمسار التجريبي، أو عبر قبول اقتراحات
             المشرفين في «اقتراحات سداد المعدات». لا يفعّل Financial Apply.
           </p>
-          <ul className="mt-2 text-xs text-slate-600 list-disc pr-5 space-y-0.5">
+          <ul className="mt-2 text-xs text-[rgba(234,240,255,0.7)] list-disc pr-5 space-y-0.5">
             <li>Snapshot: الأسعار تُثبَّت على العهدة عند الإنشاء.</li>
             <li>Idempotency: مفتاح OPENING لكود المندوب يمنع تكرار Opening لنفس المندوب.</li>
             <li>بعد اكتمال Opening → جهّز طلبات الدورة من «دورات القبض».</li>
           </ul>
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
-            <span className="rounded px-2 py-1 bg-amber-50 text-amber-900 border border-amber-200">
+            <span className="rounded px-2 py-1 bg-amber-950/80 text-amber-100 border border-amber-500/40">
               FINANCIAL_APPLY ={' '}
               {listQ.data?.financialApplyEnabled ? 'ON' : 'OFF'}
             </span>
-            <span className="rounded px-2 py-1 bg-amber-50 text-amber-900 border border-amber-200">
+            <span className="rounded px-2 py-1 bg-amber-950/80 text-amber-100 border border-amber-500/40">
               AUTO_REQUEST = {listQ.data?.autoRequestEnabled ? 'ON' : 'OFF'}
             </span>
-            <span className="rounded px-2 py-1 bg-amber-50 text-amber-900 border border-amber-200">
+            <span className="rounded px-2 py-1 bg-amber-950/80 text-amber-100 border border-amber-500/40">
               OPENING_WRITE ={' '}
               {listQ.data?.openingBalanceWriteEnabled ? 'ON' : 'OFF'}
             </span>
-            <span className="rounded px-2 py-1 bg-slate-50 text-slate-700 border">
+            <span className="rounded px-2 py-1 bg-[#1C2440] text-[#EAF0FF] border border-white/20">
               pilot = {(listQ.data?.pilotAllowlist || []).join(', ') || '(فارغ)'}
             </span>
           </div>
         </div>
 
         {diag ? (
-          <div className="rounded border border-slate-200 bg-white p-3 text-sm">
-            <div className="font-semibold text-slate-800">
+          <div className="rounded-xl border border-white/15 bg-[#12182B] p-3 text-sm text-[#EAF0FF]">
+            <div className="font-semibold text-[#EAF0FF]">
               تشخيص قراءة فقط — 4811093
             </div>
-            <div className="mt-1 grid sm:grid-cols-2 gap-1 text-slate-700">
+            <div className="mt-1 grid sm:grid-cols-2 gap-1 text-[rgba(234,240,255,0.85)]">
               <div>
                 IDENTITY_READY = {diag.identityReady ? 'YES' : 'NO'}
               </div>
@@ -278,7 +278,7 @@ export default function EquipmentReconciliationPage() {
                 OPENING_LIABILITY = {diag.openingLiability || 'NONE'}
               </div>
             </div>
-            <p className="text-xs text-slate-500 mt-2">
+            <p className="text-xs text-[rgba(234,240,255,0.55)] mt-2">
               لا يتم تعبئة المعدات أو المبالغ المدفوعة تلقائيًا لهذا المندوب.
             </p>
           </div>
@@ -288,7 +288,7 @@ export default function EquipmentReconciliationPage() {
           <label className="text-sm">
             بحث
             <input
-              className="block border rounded px-2 py-1 mt-1 min-w-[220px]"
+              className="block rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5 mt-1 min-w-[220px] placeholder:text-white/40"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="كود / اسم / منطقة / مشرف"
@@ -299,30 +299,30 @@ export default function EquipmentReconciliationPage() {
         {listQ.isLoading ? (
           <p>جاري التحميل…</p>
         ) : listQ.data?.success === false ? (
-          <div className="rounded border border-amber-200 bg-amber-50 p-4 text-amber-900">
+          <div className="rounded-lg border border-amber-500/40 bg-amber-950/80 p-4 text-amber-100">
             {listQ.data.error || 'تعذر التحميل'}
           </div>
         ) : (
           <div className="grid lg:grid-cols-2 gap-4">
-            <div className="border rounded-lg bg-white overflow-x-auto max-h-[70vh] overflow-y-auto">
+            <div className="rounded-xl border border-white/15 bg-[#12182B] overflow-x-auto max-h-[70vh] overflow-y-auto">
               <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 sticky top-0">
+                <thead className="bg-[#1C2440] text-[#EAF0FF] sticky top-0">
                   <tr>
-                    <th className="p-2 text-right">كود</th>
-                    <th className="p-2 text-right">الاسم</th>
-                    <th className="p-2 text-right">منطقة</th>
-                    <th className="p-2 text-right">مشرف</th>
-                    <th className="p-2 text-right">انضمام</th>
-                    <th className="p-2 text-right">حالة</th>
-                    <th className="p-2 text-right">تسوية</th>
+                    <th className="p-2 text-right font-semibold text-[#EAF0FF]">كود</th>
+                    <th className="p-2 text-right font-semibold text-[#EAF0FF]">الاسم</th>
+                    <th className="p-2 text-right font-semibold text-[#EAF0FF]">منطقة</th>
+                    <th className="p-2 text-right font-semibold text-[#EAF0FF]">مشرف</th>
+                    <th className="p-2 text-right font-semibold text-[#EAF0FF]">انضمام</th>
+                    <th className="p-2 text-right font-semibold text-[#EAF0FF]">حالة</th>
+                    <th className="p-2 text-right font-semibold text-[#EAF0FF]">تسوية</th>
                   </tr>
                 </thead>
                 <tbody>
                   {riders.map((r) => (
                     <tr
                       key={r.riderCode}
-                      className={`border-t cursor-pointer hover:bg-slate-50 ${
-                        selectedCode === r.riderCode ? 'bg-sky-50' : ''
+                      className={`border-t border-white/10 cursor-pointer hover:bg-white/5 ${
+                        selectedCode === r.riderCode ? 'bg-cyan-500/20' : ''
                       }`}
                       onClick={() => selectRider(r)}
                     >
@@ -349,22 +349,22 @@ export default function EquipmentReconciliationPage() {
               </table>
             </div>
 
-            <div className="border rounded-lg bg-white p-4 space-y-3">
+            <div className="rounded-xl border border-white/15 bg-[#12182B] p-4 space-y-3 text-[#EAF0FF]">
               {!selected ? (
-                <p className="text-slate-500 text-sm">
+                <p className="text-[rgba(234,240,255,0.6)] text-sm">
                   اختر مندوبًا من القائمة لإدخال واقع المعدات الحالي يدويًا.
                 </p>
               ) : (
                 <>
                   <div>
-                    <div className="font-semibold text-slate-800">
+                    <div className="font-semibold text-[#EAF0FF]">
                       {selected.name} ({selected.riderCode})
                     </div>
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-[rgba(234,240,255,0.55)]">
                       {selected.migrationKey} · {selected.reconciliationStatus}
                     </div>
                     {migratedLocked ? (
-                      <div className="mt-2 text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded p-2">
+                      <div className="mt-2 text-sm text-rose-100 bg-rose-950/80 border border-rose-400/40 rounded p-2">
                         {selected.reconciliationStatus === 'MIGRATED'
                           ? 'مُرحَّل بالفعل — لا يُسمح بإنشاء Opening جديد.'
                           : 'CONFLICT — توجد عهدة مفتوحة أخرى. لا تُنشأ Opening هنا.'}
@@ -417,7 +417,7 @@ export default function EquipmentReconciliationPage() {
                         <input
                           type="number"
                           min={0}
-                          className="block border rounded w-full px-2 py-1 mt-1"
+                          className="block w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5 mt-1"
                           value={form.tshirtQuantity}
                           onChange={(e) =>
                             setForm((f) => ({
@@ -432,7 +432,7 @@ export default function EquipmentReconciliationPage() {
                         <input
                           type="number"
                           min={0}
-                          className="block border rounded w-full px-2 py-1 mt-1"
+                          className="block w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5 mt-1"
                           value={form.jacketQuantity}
                           onChange={(e) =>
                             setForm((f) => ({
@@ -447,7 +447,7 @@ export default function EquipmentReconciliationPage() {
                         <input
                           type="number"
                           min={0}
-                          className="block border rounded w-full px-2 py-1 mt-1"
+                          className="block w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5 mt-1"
                           value={form.helmetQuantity}
                           onChange={(e) =>
                             setForm((f) => ({
@@ -462,7 +462,7 @@ export default function EquipmentReconciliationPage() {
                     <label className="block text-sm">
                       حالة الاستعلام الأمني (إلزامي)
                       <select
-                        className="block border rounded w-full px-2 py-1 mt-1"
+                        className="block w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5 mt-1"
                         value={form.securityStatus}
                         onChange={(e) =>
                           setForm((f) => ({
@@ -486,7 +486,7 @@ export default function EquipmentReconciliationPage() {
                         type="number"
                         min={0}
                         step="0.01"
-                        className="block border rounded w-full px-2 py-1 mt-1"
+                        className="block w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5 mt-1"
                         value={form.historicalPaidEgp}
                         onChange={(e) =>
                           setForm((f) => ({
@@ -500,7 +500,7 @@ export default function EquipmentReconciliationPage() {
                     <label className="block text-sm">
                       مرجع / دليل (اختياري)
                       <input
-                        className="block border rounded w-full px-2 py-1 mt-1"
+                        className="block w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5 mt-1"
                         value={form.evidenceReference}
                         onChange={(e) =>
                           setForm((f) => ({
@@ -514,7 +514,7 @@ export default function EquipmentReconciliationPage() {
                     <label className="block text-sm">
                       ملاحظة (اختياري)
                       <textarea
-                        className="block border rounded w-full px-2 py-1 mt-1"
+                        className="block w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-1.5 mt-1"
                         rows={2}
                         value={form.notes}
                         onChange={(e) =>
@@ -541,7 +541,7 @@ export default function EquipmentReconciliationPage() {
 
                     <button
                       type="button"
-                      className="rounded bg-slate-800 text-white px-4 py-2 text-sm disabled:opacity-50"
+                      className="rounded-md bg-cyan-600 text-white px-4 py-2 text-sm hover:bg-cyan-500 disabled:opacity-50"
                       disabled={previewMut.isPending || migratedLocked}
                       onClick={() => previewMut.mutate()}
                     >
@@ -574,23 +574,23 @@ export default function EquipmentReconciliationPage() {
                   </fieldset>
 
                   {persistResult ? (
-                    <div className="text-sm text-emerald-900 bg-emerald-50 border border-emerald-100 rounded p-2">
+                    <div className="text-sm text-emerald-100 bg-emerald-950/80 border border-emerald-400/40 rounded-lg p-2">
                       {persistResult}
                     </div>
                   ) : null}
 
                   {previewError ? (
-                    <div className="text-sm text-rose-800 bg-rose-50 border border-rose-100 rounded p-2">
+                    <div className="text-sm text-rose-100 bg-rose-950/80 border border-rose-400/40 rounded-lg p-2">
                       {previewError}
                     </div>
                   ) : null}
                   {previewMeta ? (
-                    <div className="text-sm text-slate-700 bg-slate-50 border rounded p-2">
+                    <div className="text-sm text-[rgba(234,240,255,0.85)] bg-[#1C2440] border border-white/15 rounded-lg p-2 text-[#EAF0FF]">
                       {previewMeta}
                     </div>
                   ) : null}
                   {preview ? (
-                    <div className="rounded border border-sky-100 bg-sky-50 p-3 text-sm space-y-1">
+                    <div className="rounded-lg border border-cyan-400/30 bg-cyan-950/50 p-3 text-sm space-y-1 text-[#EAF0FF]">
                       <div className="font-semibold">معاينة الحساب</div>
                       <div>Original Liability = {preview.originalLiabilityEgp} ج.م</div>
                       <div>Historical Paid = {preview.historicalPaidEgp} ج.م</div>
@@ -598,7 +598,7 @@ export default function EquipmentReconciliationPage() {
                       <div>status = {preview.status}</div>
                       <div>migrationKey = {preview.migrationKey}</div>
                       {preview.outstandingEgp === 0 ? (
-                        <div className="font-medium text-emerald-800">
+                        <div className="font-medium text-emerald-200">
                           CREATE_SETTLED_OPENING_RECORD — لن يدخل Expected/REQUEST
                         </div>
                       ) : (
@@ -607,7 +607,7 @@ export default function EquipmentReconciliationPage() {
                           {preview.entersExpectedRequest ? 'YES' : 'NO'}
                         </div>
                       )}
-                      <div className="text-xs text-slate-500">
+                      <div className="text-xs text-[rgba(234,240,255,0.55)]">
                         productionWrite = false · لا حفظ في هذه المرحلة
                       </div>
                     </div>

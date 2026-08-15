@@ -99,28 +99,28 @@ export default function SupervisorEquipmentStatusPage() {
 
   return (
     <Layout>
-      <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-4" dir="rtl">
-        <h1 className="text-2xl font-bold text-slate-800">عهدة / تسوية معدات الطيارين</h1>
-        <p className="text-sm text-slate-600">
+      <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-4 text-[#EAF0FF]" dir="rtl">
+        <h1 className="text-2xl font-bold text-[#EAF0FF]">عهدة / تسوية معدات الطيارين</h1>
+        <p className="text-sm text-[rgba(234,240,255,0.75)]">
           دي صفحة المشرف لتسوية المعدات (مش صفحة الأدمن «تسوية افتتاحية»). تظهر{' '}
-          <strong>كل مناديبك</strong> من الروستر — اللي بدون عهدة اضغط «اقتراح فتح عهدة»، واللي
-          عنده عهدة اضغط «اقتراح تحديث». مسؤول المعدات يراجع ويقبل.
+          <strong className="text-[#EAF0FF]">كل مناديبك</strong> من الروستر — اللي بدون عهدة اضغط
+          «اقتراح فتح عهدة»، واللي عنده عهدة اضغط «اقتراح تحديث». مسؤول المعدات يراجع ويقبل.
         </p>
-        <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded p-2">
+        <p className="text-xs text-amber-100 bg-amber-950/80 border border-amber-500/40 rounded-lg p-3">
           مهم قبل الاستقطاع الأوتوماتيك: المناديب القديمة لازم تتظبط عهدتهم (Opening / اقتراح فتح) عشان
           مايتخصمش مرتين لو كانوا سددوا، أو يتقسّط عليهم المتبقي فقط. التسليم الجديد يثبت الأسعار لحظة
           التسليم ويمنع تكرار نفس القسط تلقائياً.
         </p>
 
-        {list.isLoading && <p className="text-slate-500">جاري التحميل…</p>}
+        {list.isLoading && <p className="text-[rgba(234,240,255,0.6)]">جاري التحميل…</p>}
         {list.isError && (
-          <div className="rounded border border-rose-200 bg-rose-50 p-3 text-rose-800">
+          <div className="rounded-lg border border-rose-400/50 bg-rose-950/80 p-3 text-rose-100">
             {(list.error as Error).message}
           </div>
         )}
 
         {list.data && (
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-[rgba(234,240,255,0.65)]">
             مناديبك في الروستر: {list.data.rosterRiderCount} — عهد معدات ظاهرة:{' '}
             {list.data.liabilityCount}
           </p>
@@ -128,7 +128,7 @@ export default function SupervisorEquipmentStatusPage() {
 
         <div className="flex flex-wrap gap-2 items-center">
           <input
-            className="border rounded px-2 py-1 text-sm"
+            className="rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-3 py-1.5 text-sm placeholder:text-white/40"
             placeholder="بحث كود / اسم…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -143,7 +143,11 @@ export default function SupervisorEquipmentStatusPage() {
             <button
               key={k}
               type="button"
-              className={`px-3 py-1 rounded border text-sm ${filter === k ? 'bg-slate-800 text-white' : ''}`}
+              className={`px-3 py-1.5 rounded-md border text-sm ${
+                filter === k
+                  ? 'bg-cyan-600 border-cyan-500 text-white'
+                  : 'border-white/20 bg-white/5 text-[#EAF0FF] hover:bg-white/10'
+              }`}
               onClick={() => setFilter(k)}
             >
               {label}
@@ -152,29 +156,29 @@ export default function SupervisorEquipmentStatusPage() {
         </div>
 
         {list.data && visible.length === 0 && (
-          <p className="text-slate-500">لا نتائج للعرض.</p>
+          <p className="text-[rgba(234,240,255,0.6)]">لا نتائج للعرض.</p>
         )}
 
         {visible.length > 0 && (
-          <div className="overflow-x-auto border rounded-lg bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-slate-700">
+          <div className="overflow-x-auto rounded-xl border border-white/15 bg-[#12182B]">
+            <table className="min-w-full text-sm text-[#EAF0FF]">
+              <thead className="bg-[#1C2440] text-[#EAF0FF]">
                 <tr>
-                  <th className="px-3 py-2 text-right">المندوب</th>
-                  <th className="px-3 py-2 text-right">الحالة</th>
-                  <th className="px-3 py-2 text-right">السداد</th>
-                  <th className="px-3 py-2 text-right">المتبقي</th>
-                  <th className="px-3 py-2 text-right">مخصوم</th>
-                  <th className="px-3 py-2 text-right">مسدد نقداً</th>
-                  <th className="px-3 py-2 text-right">إجراء</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">المندوب</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">الحالة</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">السداد</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">المتبقي</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">مخصوم</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">مسدد نقداً</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">إجراء</th>
                 </tr>
               </thead>
               <tbody>
                 {visible.map((row) => (
-                  <tr key={row.riderCode} className="border-t">
+                  <tr key={row.riderCode} className="border-t border-white/10 hover:bg-white/5">
                     <td className="px-3 py-2">
-                      <div className="font-medium">{row.riderName || '—'}</div>
-                      <div className="text-xs text-slate-500">{row.riderCode}</div>
+                      <div className="font-medium text-[#EAF0FF]">{row.riderName || '—'}</div>
+                      <div className="text-xs text-[rgba(234,240,255,0.55)]">{row.riderCode}</div>
                     </td>
                     <td className="px-3 py-2">{row.status}</td>
                     <td className="px-3 py-2">{row.paymentStatusAr}</td>
@@ -190,7 +194,7 @@ export default function SupervisorEquipmentStatusPage() {
                     <td className="px-3 py-2">
                       <button
                         type="button"
-                        className="text-indigo-700 hover:underline text-xs"
+                        className="text-cyan-300 hover:text-cyan-200 underline text-xs font-medium"
                         onClick={() => {
                           setProposeFor(row);
                           setProposedStatus(row.paymentStatus || 'UNPAID');
@@ -213,57 +217,62 @@ export default function SupervisorEquipmentStatusPage() {
         )}
 
         {proposeFor && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="bg-white rounded-lg max-w-md w-full p-4 space-y-3 shadow-lg" dir="rtl">
-              <h2 className="font-bold text-lg">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-[2px]">
+            <div
+              className="w-full max-w-md rounded-xl border border-white/20 bg-[#12182B] p-5 text-[#EAF0FF] shadow-2xl space-y-3"
+              dir="rtl"
+              role="dialog"
+              aria-modal="true"
+            >
+              <h2 className="font-bold text-lg text-[#EAF0FF]">
                 {proposeFor.hasLiability ? 'اقتراح تحديث سداد' : 'اقتراح فتح عهدة / حالة سداد'}
               </h2>
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-[rgba(234,240,255,0.75)]">
                 {proposeFor.riderName} ({proposeFor.riderCode})
                 {proposeFor.hasLiability
                   ? ` — متبقي ${proposeFor.outstandingEgp?.toFixed(2) ?? '—'} ج`
                   : ' — لا توجد عهدة مسجّلة؛ مدير المعدات يراجع وينشئ العهدة'}
               </p>
-              <label className="block text-sm">
+              <label className="block text-sm text-[#EAF0FF]">
                 الحالة المقترحة
                 <select
-                  className="mt-1 w-full border rounded px-2 py-1"
+                  className="mt-1 w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-2"
                   value={proposedStatus}
                   onChange={(e) =>
                     setProposedStatus(e.target.value as typeof proposedStatus)
                   }
                 >
                   {STATUS_OPTIONS.map((s) => (
-                    <option key={s.value} value={s.value}>
+                    <option key={s.value} value={s.value} className="bg-[#0B1020] text-[#EAF0FF]">
                       {s.label}
                     </option>
                   ))}
                 </select>
               </label>
-              <label className="block text-sm">
+              <label className="block text-sm text-[#EAF0FF]">
                 مبلغ مسدد (جنيه) — إن وُجد
                 <input
                   type="number"
                   min="0"
                   step="0.01"
-                  className="mt-1 w-full border rounded px-2 py-1"
+                  className="mt-1 w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-2 placeholder:text-white/40"
                   value={paidEgp}
                   onChange={(e) => setPaidEgp(e.target.value)}
                 />
               </label>
-              <label className="block text-sm">
+              <label className="block text-sm text-[#EAF0FF]">
                 ملاحظة
                 <textarea
-                  className="mt-1 w-full border rounded px-2 py-1"
+                  className="mt-1 w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-2 placeholder:text-white/40"
                   rows={2}
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                 />
               </label>
-              <div className="flex gap-2 justify-end">
+              <div className="flex gap-2 justify-end pt-1">
                 <button
                   type="button"
-                  className="px-3 py-1.5 rounded border"
+                  className="px-3 py-1.5 rounded-md border border-white/25 text-[#EAF0FF] hover:bg-white/10"
                   onClick={() => setProposeFor(null)}
                 >
                   إلغاء
@@ -271,7 +280,7 @@ export default function SupervisorEquipmentStatusPage() {
                 <button
                   type="button"
                   disabled={mut.isPending}
-                  className="px-3 py-1.5 rounded bg-slate-800 text-white disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-md bg-cyan-600 text-white hover:bg-cyan-500 disabled:opacity-50"
                   onClick={() => mut.mutate()}
                 >
                   إرسال للمراجعة
