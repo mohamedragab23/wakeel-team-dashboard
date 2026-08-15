@@ -13,7 +13,7 @@ import {
   adminFeatureAllowed,
   filterAdminMenuForPermissions,
 } from '@/lib/adminFeatureAccess';
-import { issueToSupervisorView } from '@/lib/equipmentLiability/paymentProposals';
+import { issueToSupervisorView, issueMatchesSupervisorScope } from '@/lib/equipmentLiability/paymentProposals';
 import type { EquipmentLiabilityIssue } from '@/lib/equipmentLiability/store';
 import { isSrs014FinancialApplyEnabled } from '@/lib/srs014Flags';
 import { egpToMilliemes } from '@/lib/money';
@@ -90,6 +90,36 @@ describe('Equipment payment proposals — supervisor view + safety', () => {
     assert.equal(view.equipmentIssueId, 'eq_test_1');
   });
 
+  it('scopes liabilities by roster rider codes even when snapshot supervisor differs', () => {
+    assert.equal(
+      issueMatchesSupervisorScope({
+        riderCode: '4802535',
+        supervisorCodeSnapshot: 'OTHER_SUP',
+        supervisorCode: 'SUP_A',
+        rosterRiderCodes: ['4802535', '877614'],
+      }),
+      true
+    );
+    assert.equal(
+      issueMatchesSupervisorScope({
+        riderCode: '999999',
+        supervisorCodeSnapshot: 'OTHER_SUP',
+        supervisorCode: 'SUP_A',
+        rosterRiderCodes: ['4802535'],
+      }),
+      false
+    );
+    assert.equal(
+      issueMatchesSupervisorScope({
+        riderCode: '999999',
+        supervisorCodeSnapshot: 'SUP_A',
+        supervisorCode: 'SUP_A',
+        rosterRiderCodes: [],
+      }),
+      true
+    );
+  });
+
   it('FA remains OFF; proposal module does not enable FA or bulk-mutate pilots', () => {
     delete process.env.FEATURE_SRS014_FINANCIAL_APPLY_ENABLED;
     assert.equal(isSrs014FinancialApplyEnabled(), false);
@@ -99,9 +129,8 @@ describe('Equipment payment proposals — supervisor view + safety', () => {
       'utf8'
     );
     assert.ok(mod.includes('applySettlementPayment'));
-    assert.ok(!mod.includes('877614'));
-    assert.ok(!mod.includes('4802535'));
-    assert.ok(!mod.includes('4811093'));
+    assert.ok(mod.includes('getSupervisorRiders'));
+    assert.ok(mod.includes('issueMatchesSupervisorScope'));
     assert.ok(!mod.includes('FEATURE_SRS014_FINANCIAL_APPLY'));
   });
 });

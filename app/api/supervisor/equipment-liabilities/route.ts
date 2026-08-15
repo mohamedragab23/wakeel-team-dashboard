@@ -18,8 +18,15 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const issues = await listLiabilitiesForSupervisor(decoded.code || '');
-    return NextResponse.json({ success: true, issues });
+    const { issues, rosterRiderCount } = await listLiabilitiesForSupervisor(
+      decoded.code || ''
+    );
+    return NextResponse.json({
+      success: true,
+      issues,
+      rosterRiderCount,
+      liabilityCount: issues.length,
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'حدث خطأ';
     console.error('[supervisor/equipment-liabilities GET]', error);

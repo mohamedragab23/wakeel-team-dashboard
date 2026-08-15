@@ -41,7 +41,11 @@ export default function SupervisorEquipmentStatusPage() {
       const res = await authFetch('/api/supervisor/equipment-liabilities');
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل التحميل');
-      return json.issues as IssueRow[];
+      return {
+        issues: (json.issues || []) as IssueRow[],
+        rosterRiderCount: Number(json.rosterRiderCount || 0),
+        liabilityCount: Number(json.liabilityCount || 0),
+      };
     },
   });
 
@@ -77,7 +81,8 @@ export default function SupervisorEquipmentStatusPage() {
       <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-4" dir="rtl">
         <h1 className="text-2xl font-bold text-slate-800">عهدة معدات الطيارين</h1>
         <p className="text-sm text-slate-600">
-          عرض عهدة معدات مناديبك فقط. يمكنك اقتراح تحديث حالة السداد؛ مدير المعدات يراجع ويقبل أو يرفض أو يعدّل.
+          تظهر كل عهد معدات لمناديبك الحاليين (من شيت المناديب). اقترح تحديث السداد لمدير المعدات
+          (لم يدفع / جزئي / مسدد) حتى تُراجع العهدة قبل مسار الاستقطاع الأوتوماتيك.
           لا يطبّق النظام خصماً مالياً أوتوماتيكياً من هذه الصفحة.
         </p>
 
@@ -88,11 +93,21 @@ export default function SupervisorEquipmentStatusPage() {
           </div>
         )}
 
-        {list.data && list.data.length === 0 && (
-          <p className="text-slate-500">لا توجد عهد معدات مسجّلة لطياريك.</p>
+        {list.data && (
+          <p className="text-xs text-slate-500">
+            مناديبك في الروستر: {list.data.rosterRiderCount} — عهد معدات ظاهرة:{' '}
+            {list.data.liabilityCount}
+            {list.data.rosterRiderCount > 0 && list.data.liabilityCount === 0
+              ? ' (لا توجد صفوف عهدة لطياريك بعد — يحتاج Opening / تسليم معدات)'
+              : ''}
+          </p>
         )}
 
-        {list.data && list.data.length > 0 && (
+        {list.data && list.data.issues.length === 0 && (
+          <p className="text-slate-500">لا توجد عهد معدات مسجّلة لطياريك الحاليين.</p>
+        )}
+
+        {list.data && list.data.issues.length > 0 && (
           <div className="overflow-x-auto border rounded-lg bg-white">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-slate-700">
@@ -107,7 +122,7 @@ export default function SupervisorEquipmentStatusPage() {
                 </tr>
               </thead>
               <tbody>
-                {list.data.map((row) => (
+                {list.data.issues.map((row) => (
                   <tr key={row.equipmentIssueId} className="border-t">
                     <td className="px-3 py-2">
                       <div className="font-medium">{row.riderName || '—'}</div>

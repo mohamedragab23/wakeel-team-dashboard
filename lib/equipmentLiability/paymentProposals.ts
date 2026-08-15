@@ -22,7 +22,11 @@ import {
   EQUIPMENT_PAYMENT_STATUS_AR,
   type EquipmentPaymentStatus,
 } from '@/lib/equipmentLiability/paymentStatus';
-import { normalizeSupervisorCodeForMatch } from '@/lib/dataFilter';
+import {
+  normalizeRiderCodeForPerformance,
+  normalizeSupervisorCodeForMatch,
+} from '@/lib/dataFilter';
+import { getSupervisorRiders } from '@/lib/dataService';
 import { sendAdminTelegramNotificationSafe } from '@/lib/adminTelegramNotifier';
 
 export const SHEET_EQUIPMENT_PAYMENT_PROPOSALS = 'اقتراحات_سداد_المعدات';
@@ -203,16 +207,74 @@ export function issueToSupervisorView(issue: EquipmentLiabilityIssue) {
   };
 }
 
+/**
+ * Pure roster scope helper — used by list + tests (no Sheets).
+ */
+export function issueMatchesSupervisorScope(params: {
+  riderCode: string;
+  supervisorCodeSnapshot: string;
+  supervisorCode: string;
+  rosterRiderCodes: Iterable<string>;
+}): boolean {
+  const want = normalizeRiderCodeForPerformance(params.riderCode);
+  const roster = new Set(
+    [...params.rosterRiderCodes]
+      .map((c) => normalizeRiderCodeForPerformance(c))
+      .filter(Boolean)
+  );
+  if (want && roster.size > 0 && roster.has(want)) return true;
+  return (
+    normalizeSupervisorCodeForMatch(params.supervisorCodeSnapshot) ===
+    normalizeSupervisorCodeForMatch(params.supervisorCode)
+  );
+}
+
+/**
+ * Scope by roster ownership (شيت المناديب), not only liability snapshot.
+ * Many Opening rows have stale/wrong supervisorCodeSnapshot — supervisors still
+ * need every liability for their current riders to propose payment updates.
+ */
 export async function listLiabilitiesForSupervisor(
   supervisorCode: string
-): Promise<ReturnType<typeof issueToSupervisorView>[]> {
-  const code = normalizeSupervisorCodeForMatch(supervisorCode);
+): Promise<{
+  issues: ReturnType<typeof issueToSupervisorView>[];
+  rosterRiderCount: number;
+}> {
+  const riders = await getSupervisorRiders(supervisorCode, false);
+  const rosterCodes = riders.map((r) => r.code);
+
   const all = await listIssues();
-  return all
-    .filter(
-      (i) => normalizeSupervisorCodeForMatch(i.supervisorCodeSnapshot) === code
+  const issues = all
+    .filter((i) =>
+      issueMatchesSupervisorScope({
+        riderCode: i.riderCode,
+        supervisorCodeSnapshot: i.supervisorCodeSnapshot,
+        supervisorCode,
+        rosterRiderCodes: rosterCodes,
+      })
     )
-    .map(issueToSupervisorView);
+    .map(issueToSupervisorView)
+    .sort((a, b) => {
+      const rank = (p: string) =>
+        p === 'UNPAID' ? 0 : p === 'PARTIALLY_PAID' ? 1 : 2;
+      const byPay = rank(a.paymentStatus) - rank(b.paymentStatus);
+      if (byPay !== 0) return byPay;
+      return b.outstandingEgp - a.outstandingEgp;
+    });
+
+  return { issues, rosterRiderCount: riders.length };
+}
+
+async function supervisorOwnsRider(
+  supervisorCode: string,
+  riderCode: string
+): Promise<boolean> {
+  const riders = await getSupervisorRiders(supervisorCode, false);
+  const want = normalizeRiderCodeForPerformance(riderCode);
+  if (!want) return false;
+  return riders.some(
+    (r) => normalizeRiderCodeForPerformance(r.code) === want
+  );
 }
 
 export async function createEquipmentPaymentProposal(input: {
@@ -228,11 +290,15 @@ export async function createEquipmentPaymentProposal(input: {
 > {
   const issue = await getById(input.equipmentIssueId);
   if (!issue) return { ok: false, error: 'عهدة المعدات غير موجودة' };
-  if (
-    normalizeSupervisorCodeForMatch(issue.supervisorCodeSnapshot) !==
-    normalizeSupervisorCodeForMatch(input.supervisorCode)
-  ) {
-    return { ok: false, error: 'هذه العهدة ليست ضمن طياريك' };
+  const owns = await supervisorOwnsRider(input.supervisorCode, issue.riderCode);
+  if (!owns) {
+    // Fallback: snapshot match (same as list) if roster miss
+    if (
+      normalizeSupervisorCodeForMatch(issue.supervisorCodeSnapshot) !==
+      normalizeSupervisorCodeForMatch(input.supervisorCode)
+    ) {
+      return { ok: false, error: 'هذه العهدة ليست ضمن طياريك' };
+    }
   }
 
   const proposal: EquipmentPaymentProposal = {
