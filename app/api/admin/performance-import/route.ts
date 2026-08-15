@@ -18,7 +18,7 @@ async function authAdmin(request: NextRequest) {
   if (!decoded || decoded.role !== 'admin') {
     return { error: NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 }) };
   }
-  const deny = assertAdminApiAccess(decoded, 'performance_upload');
+  const deny = await assertAdminApiAccess(decoded, 'performance_upload');
   if (deny) return { error: deny };
   return { decoded };
 }

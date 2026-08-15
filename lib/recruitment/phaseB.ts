@@ -80,34 +80,27 @@ export function validateLectureAttendancePatch(
   patch: Partial<Candidate>
 ): string | null {
   const nextAttendance = patch.lectureAttendance ?? existing.lectureAttendance;
-  const attendanceTouched = patch.lectureAttendance !== undefined;
+  const attendanceTouched =
+    patch.lectureAttendance !== undefined ||
+    patch.lectureDate !== undefined ||
+    patch.lectureAbsenceReason !== undefined;
 
-  if (attendanceTouched && nextAttendance === 'حضر') {
-    // Explicit present only — never silent
+  if (!attendanceTouched) return null;
+
+  if (nextAttendance === 'حضر') {
+    const date = String(patch.lectureDate ?? existing.lectureDate ?? '').trim();
+    if (!date) {
+      return 'تاريخ حضور المحاضرة مطلوب عند اختيار حضر';
+    }
     return null;
   }
 
   const isAbsent = nextAttendance === 'لم يحضر' || nextAttendance === 'غائب';
-  if (attendanceTouched && isAbsent) {
-    const hadPlanned =
-      Boolean((patch.lecturePlannedDate ?? existing.lecturePlannedDate).trim()) ||
-      Boolean(existing.lectureDate.trim());
-    // Require reason when recording absence after a lecture was scheduled/held
-    if (hadPlanned) {
-      const reason = (patch.lectureAbsenceReason ?? existing.lectureAbsenceReason).trim();
-      if (!reason) {
-        return 'سبب الغياب مطلوب عند تسجيل عدم الحضور';
-      }
+  if (isAbsent) {
+    const reason = String(patch.lectureAbsenceReason ?? existing.lectureAbsenceReason ?? '').trim();
+    if (!reason) {
+      return 'سبب عدم الحضور مطلوب عند اختيار لم يحضر';
     }
-  }
-
-  // Reschedule: new planned date while absent clears confirmation expectation
-  if (
-    patch.lecturePlannedDate !== undefined &&
-    patch.lecturePlannedDate !== existing.lecturePlannedDate &&
-    existing.lectureAttendance !== 'حضر'
-  ) {
-    // allowed — caller may also reset attendance
   }
 
   return null;
@@ -127,18 +120,54 @@ export function validateActivationPatch(
   const becomingRejected =
     nextStatus === 'مرفوض' && existing.activationStatus !== 'مرفوض';
 
+  const activationTouched =
+    patch.activationStatus !== undefined ||
+    patch.activationConfirmed !== undefined ||
+    patch.activationDate !== undefined ||
+    patch.activationNotActivatedReason !== undefined;
+
   if (becomingActivated || becomingConfirmedActivated) {
     const codeErr = validateRiderCodeForActivation(patch.riderCode ?? existing.riderCode);
     if (codeErr) return codeErr;
+    const date = String(patch.activationDate ?? existing.activationDate ?? '').trim();
+    if (!date) {
+      return 'تاريخ التفعيل مطلوب عند التفعيل';
+    }
   }
 
-  if (becomingRejected) {
+  if (becomingRejected || (activationTouched && nextStatus === 'مرفوض')) {
     const reason = (patch.activationNotActivatedReason ?? existing.activationNotActivatedReason).trim();
     if (!reason) {
       return 'سبب عدم التفعيل مطلوب';
     }
   }
 
+  return null;
+}
+
+/** Equipment handover YES/NO with date/reason — recruitment onboarding only. */
+export function validateEquipmentHandoverPatch(
+  existing: Candidate,
+  patch: Partial<Candidate>
+): string | null {
+  const nextStatus = patch.equipmentStatus ?? existing.equipmentStatus;
+  const touched =
+    patch.equipmentStatus !== undefined ||
+    patch.equipmentDate !== undefined ||
+    patch.equipmentNotReceivedReason !== undefined;
+  if (!touched) return null;
+
+  if (nextStatus === 'تم الاستلام') {
+    const date = String(patch.equipmentDate ?? existing.equipmentDate ?? '').trim();
+    if (!date) return 'تاريخ استلام المعدات مطلوب عند اختيار تم الاستلام';
+    return null;
+  }
+  if (nextStatus === 'لم يستلم') {
+    const reason = String(
+      patch.equipmentNotReceivedReason ?? existing.equipmentNotReceivedReason ?? ''
+    ).trim();
+    if (!reason) return 'سبب عدم الاستلام مطلوب عند اختيار لم يستلم';
+  }
   return null;
 }
 

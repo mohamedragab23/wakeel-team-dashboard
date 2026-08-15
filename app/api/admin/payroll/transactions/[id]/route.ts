@@ -40,7 +40,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   const auth = authenticate(request);
   if (!auth.ok) return auth.response;
   const { decoded } = auth;
-  const access = assertAdminApiAccess(decoded, 'payroll_ledger');
+  const access = await assertAdminApiAccess(decoded, 'payroll_ledger');
   if (access) return access;
 
   if (!isPayrollLedgerEnabled()) {
@@ -90,7 +90,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   const auth = authenticate(request);
   if (!auth.ok) return auth.response;
   const { decoded } = auth;
-  const access = assertAdminApiAccess(decoded, 'payroll_ledger');
+  const access = await assertAdminApiAccess(decoded, 'payroll_ledger');
   if (access) return access;
 
   if (!isPayrollLedgerEnabled()) {

@@ -12,7 +12,7 @@ export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'enterprise-cert');
+    const auth = await requireStrategicOpsAdmin(request, 'enterprise-cert');
     if (!auth.ok) return auth.response;
 
     const format = request.nextUrl.searchParams.get('format');

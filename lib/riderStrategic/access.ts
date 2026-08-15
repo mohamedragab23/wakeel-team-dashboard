@@ -41,7 +41,7 @@ export async function resolveStrategicProfileActor(
   }
 
   if (role === 'admin') {
-    const deny = assertAdminApiAccess(decoded, 'rider_strategic_profiles');
+    const deny = await assertAdminApiAccess(decoded, 'rider_strategic_profiles');
     if (deny) return { error: deny };
 
     const scope = await getSupervisorCodesInAdminDataScope(decoded);

@@ -111,7 +111,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (decoded.role === 'admin') {
-      const deny = assertAdminApiAccess(decoded, 'assignment_requests');
+      const deny = await assertAdminApiAccess(decoded, 'assignment_requests');
       if (deny) return deny;
     } else if (decoded.role !== 'supervisor') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
@@ -387,7 +387,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح - المدير فقط' }, { status: 401 });
     }
 
-    const denyPut = assertAdminApiAccess(decoded, 'assignment_requests');
+    const denyPut = await assertAdminApiAccess(decoded, 'assignment_requests');
     if (denyPut) return denyPut;
 
     const body = await request.json();

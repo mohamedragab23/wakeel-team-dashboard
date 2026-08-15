@@ -16,6 +16,18 @@ import {
   LIMITED_PRESET_REGIONAL_MANAGER,
   LIMITED_PRESET_ZONE_MANAGER } from '@/lib/adminOrgPresets';
 import { buildDescendantSupervisorCodesMulti } from '@/lib/orgHierarchy';
+import {
+  parseOperationalRoleFromPermissions,
+  type OperationalRoleId,
+} from '@/lib/operationalRoles';
+
+type PermMode =
+  | 'full'
+  | 'limited'
+  | 'recruitment_manager'
+  | 'EQUIPMENT_MANAGER'
+  | 'FOLLOW_UP_SUPERVISOR'
+  | 'ACCOUNTING_MANAGER';
 
 type SupervisorPickerRow = {
   code: string;
@@ -60,7 +72,7 @@ function listOperationalSupervisorsUnderRoots(
 export default function AdminPermissionsPage() {
   const queryClient = useQueryClient();
   const [selectedCode, setSelectedCode] = useState<string>('');
-  const [mode, setMode] = useState<'full' | 'limited' | 'recruitment_manager'>('limited');
+  const [mode, setMode] = useState<PermMode>('limited');
   const [picked, setPicked] = useState<Set<AdminFeatureKey>>(new Set());
   const [pickedZones, setPickedZones] = useState<Set<string>>(new Set());
   /** منصب الأدمن المحدود في الشيت: مدير منطقة / مدير زون */
@@ -72,6 +84,7 @@ export default function AdminPermissionsPage() {
   const [syncZoneManagersToRegional, setSyncZoneManagersToRegional] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newAdmin, setNewAdmin] = useState({ code: '', name: '', password: '' });
+  const [resetPassword, setResetPassword] = useState('');
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [canGrant, setCanGrant] = useState(false);
 
@@ -100,8 +113,11 @@ export default function AdminPermissionsPage() {
           dataZone: string;
           adminPositionRaw?: string;
           linkedSupervisorCode?: string;
+          operationalRole?: OperationalRoleId | null;
+          accountDisabled?: boolean;
         }>;
         featureKeys: AdminFeatureKey[];
+        operationalRoles?: Array<{ id: OperationalRoleId; labelAr: string }>;
         totalRowsInSheet?: number;
         parsedCount?: number;
         columnMap?: {
@@ -152,17 +168,36 @@ export default function AdminPermissionsPage() {
   const loadSelectedIntoForm = (code: string) => {
     const a = data?.admins?.find((x) => x.code === code);
     setSelectedCode(code);
+    setResetPassword('');
     if (!a) return;
     const p = (a.permissions || '').trim();
-    if (!p || p.toLowerCase() === 'all' || p.includes('*')) {
-      setMode('full');
-      setPicked(new Set());
-    } else if (p.toLowerCase() === RECRUITMENT_MANAGER_PERMISSION) {
+    const roleFromPerm =
+      a.operationalRole || parseOperationalRoleFromPermissions(p.replace(/^__DISABLED__\|/i, ''));
+    if (a.accountDisabled) {
+      /* keep editing underlying role after strip in UI */
+    }
+    if (!p || p.toLowerCase() === 'all' || p.includes('*') || roleFromPerm === 'ADMIN_FULL') {
+      if (/^\s*role:/i.test(p.replace(/^__DISABLED__\|/i, '')) === false && !p.toLowerCase().includes('limited:')) {
+        setMode('full');
+        setPicked(new Set());
+      }
+    }
+    if (roleFromPerm === 'RECRUITMENT_MANAGER' || p.toLowerCase().includes(RECRUITMENT_MANAGER_PERMISSION)) {
       setMode('recruitment_manager');
       setPicked(new Set());
-    } else if (p.toLowerCase().startsWith('limited:')) {
+    } else if (roleFromPerm === 'EQUIPMENT_MANAGER') {
+      setMode('EQUIPMENT_MANAGER');
+      setPicked(new Set());
+    } else if (roleFromPerm === 'FOLLOW_UP_SUPERVISOR') {
+      setMode('FOLLOW_UP_SUPERVISOR');
+      setPicked(new Set());
+    } else if (roleFromPerm === 'ACCOUNTING_MANAGER') {
+      setMode('ACCOUNTING_MANAGER');
+      setPicked(new Set());
+    } else if (p.toLowerCase().includes('limited:') || /^\s*role:/i.test(p.replace(/^__DISABLED__\|/i, ''))) {
       setMode('limited');
-      const rest = p.slice('limited:'.length).trim();
+      const limitedIdx = p.toLowerCase().indexOf('limited:');
+      const rest = limitedIdx >= 0 ? p.slice(limitedIdx + 'limited:'.length).trim() : '';
       const keys = rest
         .split(',')
         .map((s) => s.trim())
@@ -180,23 +215,26 @@ export default function AdminPermissionsPage() {
     setLinkedSupervisorCodes(new Set(parseLinkedRootsFromSheet(a.linkedSupervisorCode || '')));
   };
 
-  function buildPermissionsString(): string {
-    if (mode === 'full') return '';
-    if (mode === 'recruitment_manager') return RECRUITMENT_MANAGER_PERMISSION;
+  function buildPermissionsPayload(): { permissions?: string; operationalRole?: string } {
+    if (mode === 'full') return { permissions: '' };
+    if (mode === 'recruitment_manager') return { operationalRole: 'RECRUITMENT_MANAGER' };
+    if (mode === 'EQUIPMENT_MANAGER') return { operationalRole: 'EQUIPMENT_MANAGER' };
+    if (mode === 'FOLLOW_UP_SUPERVISOR') return { operationalRole: 'FOLLOW_UP_SUPERVISOR' };
+    if (mode === 'ACCOUNTING_MANAGER') return { operationalRole: 'ACCOUNTING_MANAGER' };
     const keys = Array.from(picked);
     if (!keys.length) throw new Error('اختر ميزة واحدة على الأقل أو اختر وصول كامل');
-    return `limited:${keys.join(',')}`;
+    return { permissions: `limited:${keys.join(',')}` };
   }
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const permissions = buildPermissionsString();
+      const payload = buildPermissionsPayload();
       const res = await authFetch('/api/admin/admin-permissions', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           targetCode: selectedCode,
-          permissions,
+          ...payload,
           dataZones: Array.from(pickedZones),
           adminPosition: adminPositionSheet.trim(),
           linkedSupervisorCode: Array.from(linkedSupervisorCodes).join('|'),
@@ -237,7 +275,7 @@ export default function AdminPermissionsPage() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const permissions = buildPermissionsString();
+      const payload = buildPermissionsPayload();
       const res = await authFetch('/api/admin/admin-permissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -245,7 +283,7 @@ export default function AdminPermissionsPage() {
           code: newAdmin.code.trim(),
           name: newAdmin.name.trim(),
           password: newAdmin.password,
-          permissions,
+          ...payload,
           dataZones: Array.from(pickedZones),
           adminPosition: adminPositionSheet.trim(),
           linkedSupervisorCode: Array.from(linkedSupervisorCodes).join('|'),
@@ -273,6 +311,34 @@ export default function AdminPermissionsPage() {
       queryClient.invalidateQueries({ queryKey: ['admin-hierarchy-audit'] });
     },
     onError: (e: any) => setMsg({ type: 'err', text: e?.message || 'فشل الإنشاء' }) });
+
+  const securityMutation = useMutation({
+    mutationFn: async (payload: {
+      action: 'reset_password' | 'deactivate' | 'reactivate';
+      newPassword?: string;
+    }) => {
+      if (!selectedCode) throw new Error('اختر مستخدماً');
+      const res = await authFetch('/api/admin/security', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: payload.action,
+          targetType: 'admin',
+          targetCode: selectedCode,
+          newPassword: payload.newPassword,
+        }),
+      });
+      const j = await res.json();
+      if (!j.success) throw new Error(j.error || 'فشل الإجراء');
+      return j;
+    },
+    onSuccess: (j: { message?: string }) => {
+      setMsg({ type: 'ok', text: j.message || 'تم' });
+      setResetPassword('');
+      queryClient.invalidateQueries({ queryKey: ['admin-permissions-list'] });
+    },
+    onError: (e: any) => setMsg({ type: 'err', text: e?.message || 'فشل الإجراء' }),
+  });
 
   const isRegionalPosition = adminPositionSheet.includes('منطقة');
   const isZonePosition = adminPositionSheet.includes('زون');
@@ -448,6 +514,8 @@ export default function AdminPermissionsPage() {
                 {data.admins.map((a) => (
                   <option key={a.code} value={a.code}>
                     {a.name || a.code} ({a.code})
+                    {a.accountDisabled ? ' — معطّل' : ''}
+                    {a.operationalRole ? ` [${a.operationalRole}]` : ''}
                   </option>
                 ))}
               </select>
@@ -488,13 +556,57 @@ export default function AdminPermissionsPage() {
                         setUseAdminCodeAsLink(false);
                       }}
                     />
-                    مسؤول التعيينات فقط
+                    مسؤول التعيين (سير العمل الجديد)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="perm-mode"
+                      checked={mode === 'EQUIPMENT_MANAGER'}
+                      onChange={() => {
+                        setMode('EQUIPMENT_MANAGER');
+                        setPicked(new Set());
+                      }}
+                    />
+                    مسؤول المعدات
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="perm-mode"
+                      checked={mode === 'FOLLOW_UP_SUPERVISOR'}
+                      onChange={() => {
+                        setMode('FOLLOW_UP_SUPERVISOR');
+                        setPicked(new Set());
+                      }}
+                    />
+                    مشرف متابعة المجموعات
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="perm-mode"
+                      checked={mode === 'ACCOUNTING_MANAGER'}
+                      onChange={() => {
+                        setMode('ACCOUNTING_MANAGER');
+                        setPicked(new Set());
+                      }}
+                    />
+                    مسؤول الحسابات / المالية
                   </label>
                 </div>
 
                 {mode === 'recruitment_manager' && (
                   <p className="text-xs rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-cyan-100">
-                    سيتم حفظ الصلاحية كـ <strong>recruitment_manager</strong>، ويظهر لهذا المستخدم قسم التعيينات فقط.
+                    صلاحية <strong>recruitment_manager</strong> — واجهة التعيين الجديدة فقط (بدون أرشيف/رفع مجمع).
+                  </p>
+                )}
+                {(mode === 'EQUIPMENT_MANAGER' ||
+                  mode === 'FOLLOW_UP_SUPERVISOR' ||
+                  mode === 'ACCOUNTING_MANAGER') && (
+                  <p className="text-xs rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-emerald-100">
+                    دور تشغيلي صريح مع فرض صلاحيات على الـ API. لا يفعّل Financial Apply تلقائياً.
+                    {selected?.accountDisabled ? ' — الحساب حالياً معطّل.' : ''}
                   </p>
                 )}
 
@@ -856,6 +968,53 @@ export default function AdminPermissionsPage() {
                         </p>
                       )}
                     </div>
+                  </div>
+                )}
+
+                {!showCreateForm && selectedCode && (
+                  <div className="rounded-lg border border-amber-400/30 bg-amber-500/5 p-4 space-y-3">
+                    <p className="text-sm font-medium text-amber-100">أمان الحساب (إبطال كل الجلسات)</p>
+                    <div className="flex flex-wrap gap-2 items-end">
+                      <input
+                        type="password"
+                        className="rounded-lg border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] px-3 py-2 text-sm min-w-[12rem]"
+                        placeholder="كلمة مرور جديدة"
+                        value={resetPassword}
+                        onChange={(e) => setResetPassword(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        disabled={!resetPassword || resetPassword.length < 6 || securityMutation.isPending}
+                        className="px-3 py-2 rounded-lg border border-amber-400/40 text-amber-100 text-sm disabled:opacity-50"
+                        onClick={() =>
+                          securityMutation.mutate({
+                            action: 'reset_password',
+                            newPassword: resetPassword,
+                          })
+                        }
+                      >
+                        إعادة تعيين كلمة المرور
+                      </button>
+                      <button
+                        type="button"
+                        disabled={securityMutation.isPending || selected?.accountDisabled}
+                        className="px-3 py-2 rounded-lg border border-red-400/40 text-red-100 text-sm disabled:opacity-50"
+                        onClick={() => securityMutation.mutate({ action: 'deactivate' })}
+                      >
+                        تعطيل الحساب
+                      </button>
+                      <button
+                        type="button"
+                        disabled={securityMutation.isPending || !selected?.accountDisabled}
+                        className="px-3 py-2 rounded-lg border border-emerald-400/40 text-emerald-100 text-sm disabled:opacity-50"
+                        onClick={() => securityMutation.mutate({ action: 'reactivate' })}
+                      >
+                        إعادة التفعيل
+                      </button>
+                    </div>
+                    <p className="text-xs text-[rgba(234,240,255,0.55)]">
+                      الحالة: {selected?.accountDisabled ? 'معطّل' : 'نشط'} — أي تغيير لكلمة المرور أو الدور يبطل كل الجلسات فوراً.
+                    </p>
                   </div>
                 )}
 

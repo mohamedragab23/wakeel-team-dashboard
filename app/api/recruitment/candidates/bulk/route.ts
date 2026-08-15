@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
-import { assertRecruitmentApiAccess, actorFromJwt } from '@/lib/recruitment/recruitmentAuth';
+import { assertRecruitmentApiAccess, actorFromJwt, assertRecruitmentLegacyAdminOnly } from '@/lib/recruitment/recruitmentAuth';
 import { bulkImportCandidates } from '@/lib/recruitment/recruitmentService';
 import type { CandidateInput } from '@/lib/recruitment/types';
 
@@ -14,8 +14,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
     const decoded = verifyToken(token);
-    const denied = assertRecruitmentApiAccess(decoded);
+    const denied = await assertRecruitmentApiAccess(decoded);
     if (denied) return denied;
+    const legacyDenied = assertRecruitmentLegacyAdminOnly(decoded);
+    if (legacyDenied) return legacyDenied;
 
     const body = await request.json();
     const rows = (body.rows || []) as CandidateInput[];

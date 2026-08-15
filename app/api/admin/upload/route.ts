@@ -224,7 +224,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (type === 'riders') {
-      const permR = assertAdminApiAccess(decoded, 'riders');
+      const permR = await assertAdminApiAccess(decoded, 'riders');
       if (permR) return permR;
       // Step 1: Process Excel
       const processed = processRidersExcel(rawData);
@@ -294,7 +294,7 @@ export async function POST(request: NextRequest) {
         errors: result.errors?.slice(0, 20) || [], // Show first 20 errors
       });
     } else if (type === 'performance') {
-      const permP = assertAdminApiAccess(decoded, 'performance_upload');
+      const permP = await assertAdminApiAccess(decoded, 'performance_upload');
       if (permP) return permP;
       // Step 1: Process Excel
       // IMPORTANT: Performance upload should rely on admin-selected date (not the sheet date)

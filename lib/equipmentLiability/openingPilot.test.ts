@@ -150,7 +150,7 @@ describe('4D.5.4.15 admin authorization', () => {
       join(process.cwd(), 'app/api/admin/equipment-reconciliation/route.ts'),
       'utf8'
     );
-    assert.ok(route.includes("assertAdminApiAccess(decoded, 'equipment_liability')"));
+    assert.ok(route.includes("await assertAdminApiAccess(decoded, 'equipment_liability')"));
   });
 });
 

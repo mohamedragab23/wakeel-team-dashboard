@@ -70,7 +70,7 @@ function auth(request: NextRequest) {
     code?: string;
     name?: string;
   } | null;
-  const access = assertAdminApiAccess(decoded, 'equipment_liability');
+  const access = await assertAdminApiAccess(decoded, 'equipment_liability');
   if (access) return { error: access };
   return { decoded };
 }

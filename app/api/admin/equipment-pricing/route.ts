@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
-    const ep = assertAdminApiAccess(decoded, 'equipment_pricing');
+    const ep = await assertAdminApiAccess(decoded, 'equipment_pricing');
     if (ep) return ep;
 
     const ui = await loadAdminEquipmentPricingForAdminUi();
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
-    const ep2 = assertAdminApiAccess(decoded, 'equipment_pricing');
+    const ep2 = await assertAdminApiAccess(decoded, 'equipment_pricing');
     if (ep2) return ep2;
 
     const body = (await request.json()) as Partial<AdminEquipmentPricingEgp>;

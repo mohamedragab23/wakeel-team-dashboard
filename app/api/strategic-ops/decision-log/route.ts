@@ -12,7 +12,7 @@ export const maxDuration = 60;
  *  POST → manual check-in: { id, executed: boolean } marks whether a recommendation was executed. */
 export async function GET(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'strategic-ops-decision-log');
+    const auth = await requireStrategicOpsAdmin(request, 'strategic-ops-decision-log');
     if (!auth.ok) return auth.response;
 
     const log = await getDecisionLog();
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'strategic-ops-decision-log-write');
+    const auth = await requireStrategicOpsAdmin(request, 'strategic-ops-decision-log-write');
     if (!auth.ok) return auth.response;
 
     const limited = checkApiRateLimit('strategic-ops-decision-log-write', auth.code, 30, 60_000);

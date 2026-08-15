@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { parseAdminAllowedZonesList } from '@/lib/zones';
+import { stripAccountDisabledMarker } from '@/lib/accountDisable';
 
 export const LIMITED_PREFIX = 'limited:';
 
@@ -205,11 +206,11 @@ export function adminCanAccessRecruitment(permissions: string | undefined | null
   return adminFeatureAllowed(permissions, 'recruitment');
 }
 
-/** Comma-separated feature keys after "limited:" */
+/** Comma-separated feature keys after "limited:" (role: markers stripped first). */
 export function parseLimitedFeatures(permissions: string | undefined | null): string[] | null {
-  const p = String(permissions ?? '')
-    .replace(/^\uFEFF/, '')
-    .trim();
+  const raw = stripAccountDisabledMarker(permissions);
+  // role:EQUIPMENT_MANAGER|limited:a,b → limited:a,b
+  const p = raw.replace(/^\s*role:[A-Z0-9_]+\|/i, '').trim();
   if (!p.toLowerCase().startsWith(LIMITED_PREFIX)) return null;
   const rest = p.slice(LIMITED_PREFIX.length).trim();
   if (!rest) return [];
@@ -244,7 +245,7 @@ export function getDefaultAdminHome(permissions: string | undefined | null): str
 }
 
 /**
- * من يستطيع تعديل صلاحيات أدمن آخر: أدمن بصلاحيات فارغة أو all/* فقط (ليس limited:).
+ * من يستطيع تعديل صلاحيات أدمن آخر: أدمن بصلاحيات فارغة أو all/* فقط (ليس limited: / role packs).
  */
 export function isGrantingAdmin(decoded: { role?: string; permissions?: string } | null): boolean {
   if (!decoded || decoded.role !== 'admin') return false;
@@ -252,16 +253,26 @@ export function isGrantingAdmin(decoded: { role?: string; permissions?: string }
   if (p === '') return true;
   const low = p.toLowerCase();
   if (low.includes('all') || low.includes('*')) return true;
-  if (low.startsWith(LIMITED_PREFIX)) return false;
+  if (/^\s*role:/i.test(p)) return false;
+  if (low.includes(LIMITED_PREFIX) || low.startsWith(LIMITED_PREFIX)) return false;
   return false;
 }
 
-export function assertAdminApiAccess(
-  decoded: { role?: string; permissions?: string } | null,
+export async function assertAdminApiAccess(
+  decoded: { role?: string; permissions?: string; code?: string; sv?: number } | null,
   apiKey: string
-): NextResponse | null {
+): Promise<NextResponse | null> {
   if (!decoded || decoded.role !== 'admin') {
     return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
+  }
+  const { assertSessionVersionValid } = await import('@/lib/sessionVersion');
+  const svErr = await assertSessionVersionValid({
+    role: decoded.role,
+    code: decoded.code,
+    sv: decoded.sv,
+  });
+  if (svErr) {
+    return NextResponse.json({ success: false, error: svErr }, { status: 401 });
   }
   const feature = API_ACCESS_MAP[apiKey];
   if (!feature) {
@@ -272,11 +283,16 @@ export function assertAdminApiAccess(
 }
 
 /** قراءة أداء المناديب في صفحة إدارة المناديب — لا يتطلب صلاحية رفع الأداء. */
-export function assertAdminRidersPerformanceReadAccess(
-  decoded: { role?: string; permissions?: string } | null
-): NextResponse | null {
+export async function assertAdminRidersPerformanceReadAccess(
+  decoded: { role?: string; permissions?: string; code?: string; sv?: number } | null
+): Promise<NextResponse | null> {
   if (!decoded || decoded.role !== 'admin') {
     return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
+  }
+  const { assertSessionVersionValid } = await import('@/lib/sessionVersion');
+  const svErr = await assertSessionVersionValid(decoded);
+  if (svErr) {
+    return NextResponse.json({ success: false, error: svErr }, { status: 401 });
   }
   if (parseLimitedFeatures(decoded.permissions) === null) return null;
   const limited = parseLimitedFeatures(decoded.permissions) || [];
@@ -290,9 +306,19 @@ export function assertAdminRidersPerformanceReadAccess(
   return NextResponse.json({ success: false, error: 'لا تملك صلاحية هذه العملية' }, { status: 403 });
 }
 
-export function assertAdminSupervisorsReadAccess(decoded: { role?: string; permissions?: string } | null): NextResponse | null {
+export async function assertAdminSupervisorsReadAccess(decoded: {
+  role?: string;
+  permissions?: string;
+  code?: string;
+  sv?: number;
+} | null): Promise<NextResponse | null> {
   if (!decoded || decoded.role !== 'admin') {
     return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
+  }
+  const { assertSessionVersionValid } = await import('@/lib/sessionVersion');
+  const svErr = await assertSessionVersionValid(decoded);
+  if (svErr) {
+    return NextResponse.json({ success: false, error: svErr }, { status: 401 });
   }
   if (parseLimitedFeatures(decoded.permissions) === null) return null;
   const limited = parseLimitedFeatures(decoded.permissions) || [];

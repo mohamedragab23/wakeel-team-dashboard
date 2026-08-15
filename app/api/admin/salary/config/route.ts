@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const scp = assertAdminApiAccess(decoded, 'salary_config');
+    const scp = await assertAdminApiAccess(decoded, 'salary_config');
     if (scp) return scp;
 
     const body = await request.json();
@@ -170,7 +170,7 @@ export async function GET(request: NextRequest) {
       if (decoded.role !== 'admin') {
         return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
       }
-      const singleRead = assertAdminApiAccess(decoded, 'salary_config');
+      const singleRead = await assertAdminApiAccess(decoded, 'salary_config');
       if (singleRead) return singleRead;
       const zoneSingle = await assertLimitedAdminSupervisorZoneAccess(decoded, supervisorId.trim());
       if (zoneSingle) return zoneSingle;
@@ -250,7 +250,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
       }
 
-      const scg = assertAdminApiAccess(decoded, 'salary_config');
+      const scg = await assertAdminApiAccess(decoded, 'salary_config');
       if (scg) return scg;
 
       const configs: any[] = [];

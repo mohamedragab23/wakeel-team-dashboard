@@ -24,7 +24,7 @@ function authenticate(request: NextRequest): { ok: true; decoded: Decoded } | { 
 export async function GET(request: NextRequest, context: { params: { id: string } }) {
   const auth = authenticate(request);
   if (!auth.ok) return auth.response;
-  const access = assertAdminApiAccess(auth.decoded, 'payout_cycles');
+  const access = await assertAdminApiAccess(auth.decoded, 'payout_cycles');
   if (access) return access;
   if (!isPayoutCyclesEnabled()) return NextResponse.json(SRS014_FLAG_OFF_BODY, { status: 503 });
 
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest, context: { params: { id: string 
 export async function PATCH(request: NextRequest, context: { params: { id: string } }) {
   const auth = authenticate(request);
   if (!auth.ok) return auth.response;
-  const access = assertAdminApiAccess(auth.decoded, 'payout_cycles');
+  const access = await assertAdminApiAccess(auth.decoded, 'payout_cycles');
   if (access) return access;
   if (!isPayoutCyclesEnabled()) return NextResponse.json(SRS014_FLAG_OFF_BODY, { status: 503 });
 

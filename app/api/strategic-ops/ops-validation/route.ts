@@ -9,7 +9,7 @@ export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'ops-validation');
+    const auth = await requireStrategicOpsAdmin(request, 'ops-validation');
     if (!auth.ok) return auth.response;
 
     const historyOnly = request.nextUrl.searchParams.get('history') === '1';

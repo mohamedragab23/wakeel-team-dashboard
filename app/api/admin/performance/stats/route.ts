@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
       }, { status: 401 });
     }
 
-    const ps = assertAdminApiAccess(decoded, 'performance_upload');
+    const ps = await assertAdminApiAccess(decoded, 'performance_upload');
     if (ps) return ps;
 
     const dailyData = await getSheetData('البيانات اليومية');

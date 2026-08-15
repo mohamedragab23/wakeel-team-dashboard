@@ -15,7 +15,7 @@ export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'dt-learning');
+    const auth = await requireStrategicOpsAdmin(request, 'dt-learning');
     if (!auth.ok) return auth.response;
 
     if (!isSimulationDbConfigured()) {

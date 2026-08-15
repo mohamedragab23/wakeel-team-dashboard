@@ -113,7 +113,7 @@ export async function GET(request: NextRequest, ctx: RouteCtx) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
     const decoded = verifyToken(token);
-    const denied = assertRecruitmentApiAccess(decoded);
+    const denied = await assertRecruitmentApiAccess(decoded);
     if (denied) return denied;
 
     const id = await resolveRouteId(ctx.params);
@@ -135,7 +135,7 @@ export async function PUT(request: NextRequest, ctx: RouteCtx) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
     const decoded = verifyToken(token);
-    const denied = assertRecruitmentApiAccess(decoded);
+    const denied = await assertRecruitmentApiAccess(decoded);
     if (denied) return denied;
 
     const id = await resolveRouteId(ctx.params);
@@ -188,9 +188,11 @@ export async function PUT(request: NextRequest, ctx: RouteCtx) {
     // Phase B lecture/activation/riderCode rules always apply (even when V2 flag is OFF).
     // Prevents confirm-only activation without an authoritative riderCode.
     {
-      const { validateLectureAttendancePatch, validateActivationPatch } = await import(
-        '@/lib/recruitment/phaseB'
-      );
+      const {
+        validateLectureAttendancePatch,
+        validateActivationPatch,
+        validateEquipmentHandoverPatch,
+      } = await import('@/lib/recruitment/phaseB');
       const lectureErr = validateLectureAttendancePatch(existing, patch);
       if (lectureErr) {
         return NextResponse.json({ success: false, error: lectureErr }, { status: 400 });
@@ -198,6 +200,10 @@ export async function PUT(request: NextRequest, ctx: RouteCtx) {
       const activationErr = validateActivationPatch(existing, patch);
       if (activationErr) {
         return NextResponse.json({ success: false, error: activationErr }, { status: 400 });
+      }
+      const equipmentErr = validateEquipmentHandoverPatch(existing, patch);
+      if (equipmentErr) {
+        return NextResponse.json({ success: false, error: equipmentErr }, { status: 400 });
       }
     }
 
@@ -270,7 +276,7 @@ export async function DELETE(request: NextRequest, ctx: RouteCtx) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
     const decoded = verifyToken(token);
-    const denied = assertRecruitmentApiAccess(decoded);
+    const denied = await assertRecruitmentApiAccess(decoded);
     if (denied) return denied;
 
     const id = await resolveRouteId(ctx.params);

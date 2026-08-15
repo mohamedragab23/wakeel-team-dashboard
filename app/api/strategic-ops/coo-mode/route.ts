@@ -16,7 +16,7 @@ const COO_MODE_TTL_MS = 5 * 60 * 1000;
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'strategic-ops-coo-mode');
+    const auth = await requireStrategicOpsAdmin(request, 'strategic-ops-coo-mode');
     if (!auth.ok) return auth.response;
 
     const parsed = parseStrategicOpsFilters(request);

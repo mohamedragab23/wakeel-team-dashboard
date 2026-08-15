@@ -113,7 +113,7 @@ describe('4D.5.4.15A persistence call-chain source audit', () => {
     assert.ok(page.includes("action: 'persist'") || page.includes("buildBody('persist'"));
     assert.ok(route.includes('runControlledOpeningPilotPersist'));
     assert.ok(route.includes('persistIssue: appendLiabilityIssue'));
-    assert.ok(route.includes("assertAdminApiAccess(decoded, 'equipment_liability')"));
+    assert.ok(route.includes("await assertAdminApiAccess(decoded, 'equipment_liability')"));
     assert.ok(pilot.includes('createOpeningLiability'));
     assert.ok(pilot.includes("action: 'create_opening_liability'"));
     assert.ok(balance.includes('deps.persistIssue'));
@@ -446,21 +446,21 @@ describe('4D.5.4.15A allowlist domain enforcement', () => {
 describe('4D.5.4.15A authorization (API boundary)', () => {
   it('non-admin / limited without equipment_liability blocked by assertAdminApiAccess', () => {
     assert.equal(adminFeatureAllowed('limited:dashboard', 'equipment_liability'), false);
-    const deniedLimited = assertAdminApiAccess(
+    const deniedLimited = await assertAdminApiAccess(
       { role: 'admin', permissions: 'limited:dashboard' },
       'equipment_liability'
     );
     assert.ok(deniedLimited);
     assert.equal(deniedLimited!.status, 403);
 
-    const deniedRole = assertAdminApiAccess(
+    const deniedRole = await assertAdminApiAccess(
       { role: 'supervisor', permissions: '' },
       'equipment_liability'
     );
     assert.ok(deniedRole);
     assert.equal(deniedRole!.status, 401);
 
-    const allowed = assertAdminApiAccess(
+    const allowed = await assertAdminApiAccess(
       { role: 'admin', permissions: 'limited:equipment_liability' },
       'equipment_liability'
     );
@@ -470,7 +470,7 @@ describe('4D.5.4.15A authorization (API boundary)', () => {
       join(process.cwd(), 'app/api/admin/equipment-reconciliation/route.ts'),
       'utf8'
     );
-    assert.ok(route.includes("assertAdminApiAccess(decoded, 'equipment_liability')"));
+    assert.ok(route.includes("await assertAdminApiAccess(decoded, 'equipment_liability')"));
     assert.ok(route.includes('confirmPersist'));
   });
 });

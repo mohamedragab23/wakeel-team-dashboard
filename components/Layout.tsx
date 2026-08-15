@@ -18,11 +18,16 @@ import RiderMetadataNotificationBell from '@/components/RiderMetadataNotificatio
 import { authFetch, clearClientSession } from '@/lib/authFetch';
 import { getStoredUser, setStoredUser } from '@/lib/clientSession';
 
-const RECRUITMENT_MENU = [
+/** New onboarding workflow only (Recruitment User). */
+const RECRUITMENT_USER_MENU = [
   { href: '/recruitment', label: 'لوحة التعيين', icon: '📊' },
-  { href: '/recruitment/candidates', label: 'جميع المتقدمين', icon: '👥' },
-  { href: '/recruitment/archive', label: 'إعادة التفعيل', icon: '📁' },
-  { href: '/recruitment/bulk-import', label: 'الرفع المجمع', icon: '📥' },
+  { href: '/recruitment/candidates', label: 'إدخال / متابعة المرشحين', icon: '👥' },
+];
+
+/** Admin may still open legacy archive/bulk for historical data. */
+const RECRUITMENT_ADMIN_LEGACY_MENU = [
+  { href: '/recruitment/archive', label: 'إعادة التفعيل (أرشيف)', icon: '📁' },
+  { href: '/recruitment/bulk-import', label: 'الرفع المجمع (أدمن)', icon: '📥' },
 ];
 
 interface User {
@@ -75,6 +80,14 @@ export default function Layout({ children }: LayoutProps) {
           return;
         }
         if (
+          verified?.role === 'recruitment_manager' &&
+          (pathname?.startsWith('/recruitment/archive') ||
+            pathname?.startsWith('/recruitment/bulk-import'))
+        ) {
+          router.push('/recruitment/candidates');
+          return;
+        }
+        if (
           pathname?.startsWith('/recruitment') &&
           !hasRecruitmentAccess(verified as { role?: string; permissions?: string })
         ) {
@@ -111,7 +124,7 @@ export default function Layout({ children }: LayoutProps) {
 
   const getMenuItems = () => {
     if (user?.role === 'recruitment_manager') {
-      return RECRUITMENT_MENU;
+      return RECRUITMENT_USER_MENU;
     }
     if (user?.role === 'admin') {
       const perms = String(user?.permissions ?? '');
@@ -123,7 +136,7 @@ export default function Layout({ children }: LayoutProps) {
           icon: d.icon,
         }));
       if (adminCanAccessRecruitment(perms)) {
-        base.push(...RECRUITMENT_MENU);
+        base.push(...RECRUITMENT_USER_MENU, ...RECRUITMENT_ADMIN_LEGACY_MENU);
       }
       if (isGrantingAdmin(user)) {
         base.push({ href: '/admin/admin-permissions', label: 'المستخدمون والهرمية', icon: '🔐' });

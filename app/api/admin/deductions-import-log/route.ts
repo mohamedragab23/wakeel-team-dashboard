@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const di = assertAdminApiAccess(decoded, 'deductions_reconcile');
+    const di = await assertAdminApiAccess(decoded, 'deductions_reconcile');
     if (di) return di;
 
     const { searchParams } = new URL(request.url);

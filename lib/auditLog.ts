@@ -35,7 +35,8 @@ export type AuditLogDomain =
   | 'rider_data'
   | 'equipment'
   | 'recruitment'
-  | 'payout_cycles';
+  | 'payout_cycles'
+  | 'auth';
 
 // `ensureSheetExists` is already idempotent server-side (checks metadata
 // before creating), but this in-process guard avoids one extra Sheets API

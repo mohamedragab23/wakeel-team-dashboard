@@ -15,7 +15,7 @@ export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'recruitment-metrics');
+    const auth = await requireStrategicOpsAdmin(request, 'recruitment-metrics');
     if (!auth.ok) return auth.response;
 
     const { searchParams } = new URL(request.url);

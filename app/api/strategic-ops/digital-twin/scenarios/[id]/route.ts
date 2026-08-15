@@ -16,7 +16,7 @@ type Ctx = { params: { id: string } };
 
 export async function GET(request: NextRequest, context: Ctx) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'dt-scenario-get');
+    const auth = await requireStrategicOpsAdmin(request, 'dt-scenario-get');
     if (!auth.ok) return auth.response;
     if (!isSimulationDbConfigured()) {
       return NextResponse.json({ success: false, error: 'قاعدة البيانات غير مُعدة' }, { status: 503 });
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest, context: Ctx) {
 
 export async function PATCH(request: NextRequest, context: Ctx) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'dt-scenario-patch');
+    const auth = await requireStrategicOpsAdmin(request, 'dt-scenario-patch');
     if (!auth.ok) return auth.response;
     if (!isSimulationDbConfigured()) {
       return NextResponse.json({ success: false, error: 'قاعدة البيانات غير مُعدة' }, { status: 503 });
@@ -60,7 +60,7 @@ export async function PATCH(request: NextRequest, context: Ctx) {
 
 export async function DELETE(request: NextRequest, context: Ctx) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'dt-scenario-delete');
+    const auth = await requireStrategicOpsAdmin(request, 'dt-scenario-delete');
     if (!auth.ok) return auth.response;
     if (!isSimulationDbConfigured()) {
       return NextResponse.json({ success: false, error: 'قاعدة البيانات غير مُعدة' }, { status: 503 });

@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
-    const sal = assertAdminApiAccess(decoded, 'salaries');
+    const sal = await assertAdminApiAccess(decoded, 'salaries');
     if (sal) return sal;
 
     const { searchParams } = new URL(request.url);
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
-    const sal = assertAdminApiAccess(decoded, 'salaries');
+    const sal = await assertAdminApiAccess(decoded, 'salaries');
     if (sal) return sal;
 
     const body = await request.json();

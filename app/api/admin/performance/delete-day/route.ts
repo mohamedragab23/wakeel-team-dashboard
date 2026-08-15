@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح - المدير فقط' }, { status: 401 });
     }
 
-    const deny = assertAdminApiAccess(decoded, 'performance_upload');
+    const deny = await assertAdminApiAccess(decoded, 'performance_upload');
     if (deny) return deny;
     const globalDeny = assertLimitedAdminGlobalWriteDenied(decoded);
     if (globalDeny) return globalDeny;

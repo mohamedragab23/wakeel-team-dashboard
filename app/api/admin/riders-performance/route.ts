@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const rp = assertAdminRidersPerformanceReadAccess(decoded);
+    const rp = await assertAdminRidersPerformanceReadAccess(decoded);
     if (rp) return rp;
 
     const { searchParams } = new URL(request.url);

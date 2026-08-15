@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const d0 = assertAdminApiAccess(decoded, 'debug');
+    const d0 = await assertAdminApiAccess(decoded, 'debug');
     if (d0) return d0;
 
     const { searchParams } = new URL(request.url);

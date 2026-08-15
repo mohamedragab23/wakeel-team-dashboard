@@ -8,6 +8,7 @@ import { assertMinContacts } from './contactsStore';
 import {
   normalizeSecurityFeeInput,
   validateActivationPatch,
+  validateEquipmentHandoverPatch,
   validateLectureAttendancePatch,
   validateRiderCodeForActivation,
 } from './phaseB';
@@ -29,6 +30,9 @@ export async function validateRecruitmentV2Activation(
 
   const activationErr = validateActivationPatch(existing, patch);
   if (activationErr) return activationErr;
+
+  const equipmentErr = validateEquipmentHandoverPatch(existing, patch);
+  if (equipmentErr) return equipmentErr;
 
   const nextStatus = patch.activationStatus ?? existing.activationStatus;
   const becomingActivated =

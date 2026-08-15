@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'المديرون فقط' }, { status: 401 });
     }
 
-    const dr = assertAdminApiAccess(decoded, 'deductions_reconcile');
+    const dr = await assertAdminApiAccess(decoded, 'deductions_reconcile');
     if (dr) return dr;
 
     if (!adminHasPermission(decoded, 'deductions_verify')) {

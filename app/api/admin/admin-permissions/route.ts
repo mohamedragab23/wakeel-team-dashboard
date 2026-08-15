@@ -12,6 +12,20 @@ import {
   type AdminFeatureKey,
 } from '@/lib/adminFeatureAccess';
 import {
+  buildPermissionsForOperationalRole,
+  isOperationalRoleId,
+  OPERATIONAL_ROLE_IDS,
+  OPERATIONAL_ROLE_LABELS_AR,
+  parseOperationalRoleFromPermissions,
+} from '@/lib/operationalRoles';
+import { revokeAllSessionsForLoginCode } from '@/lib/sessionVersion';
+import { appendAuditLog } from '@/lib/auditLog';
+import { hashPassword } from '@/lib/passwordUtils';
+import {
+  isAccountDisabledPermissions,
+  stripAccountDisabledMarker,
+} from '@/lib/accountDisable';
+import {
   ensureAdminsOrgColumns,
   syncAdminHierarchyAfterSave,
 } from '@/lib/orgDashboardSync';
@@ -53,6 +67,10 @@ export async function GET(request: NextRequest) {
       dataZone: a.dataZone,
       adminPositionRaw: a.adminPositionRaw,
       linkedSupervisorCode: a.linkedSupervisorCode,
+      operationalRole: parseOperationalRoleFromPermissions(
+        stripAccountDisabledMarker(a.permissions)
+      ),
+      accountDisabled: isAccountDisabledPermissions(a.permissions),
     }));
 
     return NextResponse.json({
@@ -61,6 +79,10 @@ export async function GET(request: NextRequest) {
         sheetName: loaded.sheetName,
         admins,
         featureKeys: ALL_ADMIN_FEATURE_KEYS,
+        operationalRoles: OPERATIONAL_ROLE_IDS.map((id) => ({
+          id,
+          labelAr: OPERATIONAL_ROLE_LABELS_AR[id],
+        })),
         columnMap: columns,
         totalRowsInSheet: loaded.rows.length,
         parsedCount: admins.length,
@@ -78,8 +100,17 @@ function normalizePermissionsInput(v: unknown): string {
   const low = s.toLowerCase();
   if (low === RECRUITMENT_MANAGER_PERMISSION) return RECRUITMENT_MANAGER_PERMISSION;
   if (low === 'all' || low === '*') return 'all';
+  // Allow role:EQUIPMENT_MANAGER|limited:... packs
+  if (/^\s*role:[A-Z0-9_]+\|/i.test(s)) {
+    const limitedPart = s.replace(/^\s*role:[A-Z0-9_]+\|/i, '').trim();
+    if (!limitedPart.toLowerCase().startsWith(LIMITED_PREFIX)) {
+      throw new Error('صيغة الدور يجب أن تتضمن limited:بعد role:');
+    }
+    // Validate limited segment via recursive normalize of limited-only part
+    return `${s.match(/^\s*role:[A-Z0-9_]+/i)![0]}|${normalizePermissionsInput(limitedPart)}`;
+  }
   if (!low.startsWith(LIMITED_PREFIX)) {
-    throw new Error('صيغة الصلاحيات يجب أن تكون فارغة (وصول كامل) أو all أو limited:ميزة1,ميزة2');
+    throw new Error('صيغة الصلاحيات يجب أن تكون فارغة (وصول كامل) أو all أو limited:ميزة1,ميزة2 أو دور تشغيلي');
   }
   const rest = s.slice(LIMITED_PREFIX.length).trim();
   if (!rest) {
@@ -114,7 +145,15 @@ export async function PUT(request: NextRequest) {
     const targetCode = String(body?.targetCode ?? '').trim();
     let permissions: string;
     try {
-      permissions = normalizePermissionsInput(body?.permissions);
+      if (body?.operationalRole != null && String(body.operationalRole).trim()) {
+        const roleId = String(body.operationalRole).trim().toUpperCase();
+        if (!isOperationalRoleId(roleId)) {
+          return NextResponse.json({ success: false, error: 'دور تشغيلي غير معروف' }, { status: 400 });
+        }
+        permissions = buildPermissionsForOperationalRole(roleId);
+      } else {
+        permissions = normalizePermissionsInput(body?.permissions);
+      }
     } catch (e: any) {
       return NextResponse.json({ success: false, error: e?.message || 'صلاحيات غير صالحة' }, { status: 400 });
     }
@@ -166,6 +205,28 @@ export async function PUT(request: NextRequest) {
     if (!ok) {
       return NextResponse.json({ success: false, error: 'فشل حفظ التعديل' }, { status: 500 });
     }
+
+    const prevPerm = target.permissions;
+    const nextRole = parseOperationalRoleFromPermissions(permissions);
+    const prevRole = parseOperationalRoleFromPermissions(
+      stripAccountDisabledMarker(prevPerm)
+    );
+    const revoked = await revokeAllSessionsForLoginCode(targetCode);
+    void appendAuditLog({
+      domain: 'auth',
+      action: 'role_changed',
+      entityType: 'admin_user',
+      entityCode: targetCode,
+      actorCode: String(decoded.code || ''),
+      actorName: String(decoded.name || ''),
+      before: { permissions: prevPerm, operationalRole: prevRole },
+      after: {
+        permissions,
+        operationalRole: nextRole,
+        sessions_revoked: true,
+        sessionVersions: revoked,
+      },
+    }).catch(() => undefined);
 
     let syncResult = {
       created: [] as string[],
@@ -219,7 +280,15 @@ export async function POST(request: NextRequest) {
     const password = String(body?.password ?? '').trim();
     let permissions: string;
     try {
-      permissions = normalizePermissionsInput(body?.permissions);
+      if (body?.operationalRole != null && String(body.operationalRole).trim()) {
+        const roleId = String(body.operationalRole).trim().toUpperCase();
+        if (!isOperationalRoleId(roleId)) {
+          return NextResponse.json({ success: false, error: 'دور تشغيلي غير معروف' }, { status: 400 });
+        }
+        permissions = buildPermissionsForOperationalRole(roleId);
+      } else {
+        permissions = normalizePermissionsInput(body?.permissions);
+      }
     } catch (e: any) {
       return NextResponse.json({ success: false, error: e?.message || 'صلاحيات غير صالحة' }, { status: 400 });
     }
@@ -266,7 +335,7 @@ export async function POST(request: NextRequest) {
     while (row.length <= maxCol) row.push('');
     row[columns.codeCol] = code;
     row[columns.nameCol] = name;
-    row[columns.passCol] = password;
+    row[columns.passCol] = await hashPassword(password);
     row[columns.permCol] = permissions;
     row[columns.zoneCol] = dataZone;
     if (columns.positionCol >= 0) row[columns.positionCol] = adminPosition;
@@ -276,6 +345,21 @@ export async function POST(request: NextRequest) {
     if (!ok) {
       return NextResponse.json({ success: false, error: 'فشل إضافة الأدمن' }, { status: 500 });
     }
+
+    void appendAuditLog({
+      domain: 'auth',
+      action: 'user_created',
+      entityType: 'admin_user',
+      entityCode: code,
+      actorCode: String(decoded.code || ''),
+      actorName: String(decoded.name || ''),
+      after: {
+        name,
+        permissions,
+        operationalRole: parseOperationalRoleFromPermissions(permissions),
+        passwordStoredHashed: true,
+      },
+    }).catch(() => undefined);
 
     let syncResult = {
       created: [] as string[],

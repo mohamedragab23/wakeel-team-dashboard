@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (decoded.role === 'admin') {
-      const db = assertAdminApiAccess(decoded, 'debts');
+      const db = await assertAdminApiAccess(decoded, 'debts');
       if (db) return db;
     }
 

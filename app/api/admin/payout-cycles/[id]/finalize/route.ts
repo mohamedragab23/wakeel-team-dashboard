@@ -13,7 +13,7 @@ export async function POST(request: NextRequest, context: { params: { id: string
     return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
   }
   const decoded = verifyToken(token) as { role?: string; permissions?: string; name?: string; code?: string } | null;
-  const access = assertAdminApiAccess(decoded, 'payout_cycles');
+  const access = await assertAdminApiAccess(decoded, 'payout_cycles');
   if (access) return access;
   if (!isPayoutCyclesEnabled()) return NextResponse.json(SRS014_FLAG_OFF_BODY, { status: 503 });
 

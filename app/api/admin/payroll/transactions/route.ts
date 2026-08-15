@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
   const auth = authenticate(request);
   if (!auth.ok) return auth.response;
   const { decoded } = auth;
-  const access = assertAdminApiAccess(decoded, 'payroll_ledger');
+  const access = await assertAdminApiAccess(decoded, 'payroll_ledger');
   if (access) return access;
 
   const { searchParams } = new URL(request.url);
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
   const auth = authenticate(request);
   if (!auth.ok) return auth.response;
   const { decoded } = auth;
-  const access = assertAdminApiAccess(decoded, 'payroll_ledger');
+  const access = await assertAdminApiAccess(decoded, 'payroll_ledger');
   if (access) return access;
 
   if (!isPayrollLedgerEnabled()) {

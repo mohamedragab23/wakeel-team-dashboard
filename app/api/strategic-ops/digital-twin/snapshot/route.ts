@@ -12,7 +12,7 @@ export const maxDuration = 120;
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'dt-snapshot');
+    const auth = await requireStrategicOpsAdmin(request, 'dt-snapshot');
     if (!auth.ok) return auth.response;
 
     const parsed = parseStrategicOpsFilters(request);

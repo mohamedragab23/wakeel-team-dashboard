@@ -48,7 +48,7 @@ async function resolveScopedRider(decoded: AuthUser, riderCode: string) {
   }
 
   if (decoded.role === 'admin') {
-    const deny = assertAdminApiAccess(decoded, 'strategic_ops');
+    const deny = await assertAdminApiAccess(decoded, 'strategic_ops');
     if (deny) return { error: deny };
 
     const allowed = await getSupervisorCodesInAdminDataScope(decoded);
@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (decoded.role === 'admin') {
-      const deny = assertAdminApiAccess(decoded, 'strategic_ops');
+      const deny = await assertAdminApiAccess(decoded, 'strategic_ops');
       if (deny) return deny;
     }
 

@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح - المدير فقط' }, { status: 401 });
     }
 
-    const sal = assertAdminApiAccess(decoded, 'salaries');
+    const sal = await assertAdminApiAccess(decoded, 'salaries');
     if (sal) return sal;
 
     const { searchParams } = new URL(request.url);

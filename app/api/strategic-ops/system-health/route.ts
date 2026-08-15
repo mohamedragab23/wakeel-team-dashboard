@@ -18,7 +18,7 @@ const APP_VERSION = process.env.npm_package_version || process.env.VERCEL_GIT_CO
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'strategic-ops-health');
+    const auth = await requireStrategicOpsAdmin(request, 'strategic-ops-health');
     if (!auth.ok) return auth.response;
 
     const parsed = parseStrategicOpsFilters(request);

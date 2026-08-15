@@ -467,7 +467,7 @@ describe('Phase C â€” immutability / isolation / sheet / permissions / flags (Wâ
     assert.equal(adminFeatureAllowed('limited:equipment_liability', 'equipment_liability'), true);
     assert.equal(adminFeatureAllowed('', 'equipment_liability'), true);
     const route = readFileSync(join(process.cwd(), 'app/api/admin/equipment-liability/route.ts'), 'utf8');
-    assert.ok(route.includes("assertAdminApiAccess(decoded, 'equipment_liability')"));
+    assert.ok(route.includes("await assertAdminApiAccess(decoded, 'equipment_liability')"));
     const deliveries = readFileSync(join(process.cwd(), 'app/api/equipment-deliveries/route.ts'), 'utf8');
     assert.ok(deliveries.includes("decoded.role !== 'admin'"));
   });

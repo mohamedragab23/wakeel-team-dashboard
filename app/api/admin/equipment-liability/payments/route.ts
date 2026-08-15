@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
   }
   const decoded = verifyToken(token) as { role?: string; permissions?: string } | null;
-  const access = assertAdminApiAccess(decoded, 'equipment_liability');
+  const access = await assertAdminApiAccess(decoded, 'equipment_liability');
   if (access) return access;
 
   if (!isEquipmentLedgerEnabled()) {

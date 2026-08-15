@@ -50,12 +50,13 @@ describe('4D.5.4.8 activation requires authoritative riderCode', () => {
     );
   });
 
-  it('allows activation when legitimate riderCode provided', () => {
+  it('allows activation when legitimate riderCode + activation date provided', () => {
     const existing = candidate({ activationStatus: 'غير مفعل' });
     assert.equal(
       validateActivationPatch(existing, {
         activationStatus: 'مفعل - تم القبول',
         riderCode: '4821034',
+        activationDate: '2026-08-03',
       }),
       null
     );

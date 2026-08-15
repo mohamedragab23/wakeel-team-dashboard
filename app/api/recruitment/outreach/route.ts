@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
     const token = extractBearerToken(request);
     if (!token) return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     const decoded = verifyToken(token);
-    const denied = assertRecruitmentApiAccess(decoded);
+    const denied = await assertRecruitmentApiAccess(decoded);
     if (denied) return denied;
 
     const leads = await listOutreachLeads();
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     const token = extractBearerToken(request);
     if (!token) return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     const decoded = verifyToken(token);
-    const denied = assertRecruitmentApiAccess(decoded);
+    const denied = await assertRecruitmentApiAccess(decoded);
     if (denied) return denied;
 
     const body = await request.json();

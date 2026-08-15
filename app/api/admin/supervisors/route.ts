@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const readDenied = assertAdminSupervisorsReadAccess(decoded);
+    const readDenied = await assertAdminSupervisorsReadAccess(decoded);
     if (readDenied) return readDenied;
 
     // Force fresh data by clearing cache first if requested
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const w = assertAdminApiAccess(decoded, 'supervisors');
+    const w = await assertAdminApiAccess(decoded, 'supervisors');
     if (w) return w;
 
     const body = await request.json();
@@ -141,7 +141,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const w2 = assertAdminApiAccess(decoded, 'supervisors');
+    const w2 = await assertAdminApiAccess(decoded, 'supervisors');
     if (w2) return w2;
 
     const body = await request.json();
@@ -183,7 +183,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const w3 = assertAdminApiAccess(decoded, 'supervisors');
+    const w3 = await assertAdminApiAccess(decoded, 'supervisors');
     if (w3) return w3;
 
     const { searchParams } = new URL(request.url);

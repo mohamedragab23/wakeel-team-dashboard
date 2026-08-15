@@ -302,6 +302,20 @@ export async function updateSupervisor(
     const success = await updateSheetRange('المشرفين', range, [updatedRow]);
 
     if (success) {
+      if (patch.password) {
+        const { revokeAllSessionsForLoginCode } = await import('@/lib/sessionVersion');
+        const { appendAuditLog } = await import('@/lib/auditLog');
+        const revoked = await revokeAllSessionsForLoginCode(merged.code);
+        void appendAuditLog({
+          domain: 'auth',
+          action: 'password_reset',
+          entityType: 'supervisor',
+          entityCode: merged.code,
+          actorCode: 'admin',
+          actorName: 'admin',
+          after: { sessions_revoked: true, sessionVersions: revoked },
+        }).catch(() => undefined);
+      }
       const { invalidateSupervisorCaches } = await import('./realtimeSync');
       invalidateSupervisorCaches(merged.code);
       cache.clear('admin:supervisors');

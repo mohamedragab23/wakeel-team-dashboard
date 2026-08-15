@@ -25,7 +25,7 @@ function authenticate(request: NextRequest): { ok: true; decoded: Decoded } | { 
 export async function GET(request: NextRequest) {
   const auth = authenticate(request);
   if (!auth.ok) return auth.response;
-  const access = assertAdminApiAccess(auth.decoded, 'payout_cycles');
+  const access = await assertAdminApiAccess(auth.decoded, 'payout_cycles');
   if (access) return access;
 
   if (!isPayoutCyclesEnabled()) {
@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = authenticate(request);
   if (!auth.ok) return auth.response;
-  const access = assertAdminApiAccess(auth.decoded, 'payout_cycles');
+  const access = await assertAdminApiAccess(auth.decoded, 'payout_cycles');
   if (access) return access;
 
   if (!isPayoutCyclesEnabled()) {

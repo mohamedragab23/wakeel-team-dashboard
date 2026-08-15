@@ -13,6 +13,7 @@ import {
   normalizeSecurityFeeInput,
   validateActivationPatch,
   validateContactInput,
+  validateEquipmentHandoverPatch,
   validateLectureAttendancePatch,
   validateRiderCodeForActivation,
   PIPELINE_STAGE_LABELS_AR,
@@ -80,24 +81,30 @@ describe('SRS-014 Phase B — family contacts validation', () => {
 });
 
 describe('SRS-014 Phase B — lecture / attendance', () => {
-  it('requires absence reason when recording لم يحضر after lecture planned', () => {
+  it('requires lecture date when YES (حضر)', () => {
+    const existing = baseCandidate({ lectureAttendance: '' });
+    assert.match(
+      String(validateLectureAttendancePatch(existing, { lectureAttendance: 'حضر' })),
+      /تاريخ حضور/
+    );
+    assert.equal(
+      validateLectureAttendancePatch(existing, {
+        lectureAttendance: 'حضر',
+        lectureDate: '2026-08-01',
+      }),
+      null
+    );
+  });
+
+  it('requires absence reason when NO (لم يحضر)', () => {
     const existing = baseCandidate({
-      lecturePlannedDate: '2026-08-01',
-      lectureAttendance: 'لم يحضر',
+      lectureAttendance: '',
       lectureAbsenceReason: '',
     });
     const err = validateLectureAttendancePatch(existing, {
       lectureAttendance: 'لم يحضر',
     });
-    assert.match(String(err), /سبب الغياب/);
-  });
-
-  it('allows present when explicitly set', () => {
-    const existing = baseCandidate({ lecturePlannedDate: '2026-08-01' });
-    assert.equal(
-      validateLectureAttendancePatch(existing, { lectureAttendance: 'حضر' }),
-      null
-    );
+    assert.match(String(err), /سبب عدم الحضور/);
   });
 
   it('allows absence with reason', () => {
@@ -112,6 +119,40 @@ describe('SRS-014 Phase B — lecture / attendance', () => {
   });
 });
 
+describe('SRS-014 Phase B — equipment handover', () => {
+  it('requires date when received YES', () => {
+    const existing = baseCandidate({ equipmentStatus: '' });
+    assert.match(
+      String(
+        validateEquipmentHandoverPatch(existing, { equipmentStatus: 'تم الاستلام' })
+      ),
+      /تاريخ استلام/
+    );
+    assert.equal(
+      validateEquipmentHandoverPatch(existing, {
+        equipmentStatus: 'تم الاستلام',
+        equipmentDate: '2026-08-02',
+      }),
+      null
+    );
+  });
+
+  it('requires reason when received NO', () => {
+    const existing = baseCandidate({ equipmentStatus: '' });
+    assert.match(
+      String(validateEquipmentHandoverPatch(existing, { equipmentStatus: 'لم يستلم' })),
+      /سبب عدم الاستلام/
+    );
+    assert.equal(
+      validateEquipmentHandoverPatch(existing, {
+        equipmentStatus: 'لم يستلم',
+        equipmentNotReceivedReason: 'غير متوفر',
+      }),
+      null
+    );
+  });
+});
+
 describe('SRS-014 Phase B — activation + rider code', () => {
   it('rejects invalid / empty rider code on activation', () => {
     assert.ok(validateRiderCodeForActivation(''));
@@ -119,7 +160,7 @@ describe('SRS-014 Phase B — activation + rider code', () => {
     assert.equal(validateRiderCodeForActivation('12345'), null);
   });
 
-  it('requires rider code when becoming activated', () => {
+  it('requires rider code + activation date when becoming activated', () => {
     const existing = baseCandidate({
       activationStatus: 'غير مفعل',
       lectureAttendance: 'حضر',
@@ -129,16 +170,26 @@ describe('SRS-014 Phase B — activation + rider code', () => {
       String(validateActivationPatch(existing, { activationStatus: 'مفعل - تم القبول' })),
       /كود المندوب/
     );
+    assert.match(
+      String(
+        validateActivationPatch(existing, {
+          activationStatus: 'مفعل - تم القبول',
+          riderCode: '98765',
+        })
+      ),
+      /تاريخ التفعيل/
+    );
     assert.equal(
       validateActivationPatch(existing, {
         activationStatus: 'مفعل - تم القبول',
         riderCode: '98765',
+        activationDate: '2026-08-03',
       }),
       null
     );
   });
 
-  it('requires rider code when activationConfirmed becomes مؤكد', () => {
+  it('requires rider code + date when activationConfirmed becomes مؤكد', () => {
     const existing = baseCandidate({
       activationStatus: 'غير مفعل',
       activationConfirmed: 'غير مؤكد',
@@ -152,6 +203,7 @@ describe('SRS-014 Phase B — activation + rider code', () => {
       validateActivationPatch(existing, {
         activationConfirmed: 'مؤكد',
         riderCode: '4821034',
+        activationDate: '2026-08-03',
       }),
       null
     );

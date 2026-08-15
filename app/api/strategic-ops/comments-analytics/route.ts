@@ -18,7 +18,7 @@ export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'comments-analytics');
+    const auth = await requireStrategicOpsAdmin(request, 'comments-analytics');
     if (!auth.ok) return auth.response;
 
     const { searchParams } = new URL(request.url);

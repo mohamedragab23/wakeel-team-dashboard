@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const r0 = assertAdminApiAccess(decoded, 'riders');
+    const r0 = await assertAdminApiAccess(decoded, 'riders');
     if (r0) return r0;
 
     // Get all riders from Google Sheets (server-side compatible)
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const r1 = assertAdminApiAccess(decoded, 'riders');
+    const r1 = await assertAdminApiAccess(decoded, 'riders');
     if (r1) return r1;
 
     const body = await request.json();
@@ -136,7 +136,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const r2 = assertAdminApiAccess(decoded, 'riders');
+    const r2 = await assertAdminApiAccess(decoded, 'riders');
     if (r2) return r2;
 
     const body = await request.json();
@@ -201,7 +201,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const r3 = assertAdminApiAccess(decoded, 'riders');
+    const r3 = await assertAdminApiAccess(decoded, 'riders');
     if (r3) return r3;
 
     const { searchParams } = new URL(request.url);

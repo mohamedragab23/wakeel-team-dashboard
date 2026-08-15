@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
   }
   const decoded = verifyToken(token) as { role?: string; permissions?: string } | null;
-  const access = assertAdminApiAccess(decoded, 'payout_cycles');
+  const access = await assertAdminApiAccess(decoded, 'payout_cycles');
   if (access) return access;
 
   return NextResponse.json({ success: true, enabled: isPayoutCyclesEnabled() });

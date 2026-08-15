@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     if (!decoded) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
-    const denied = assertAdminApiAccess(decoded, 'equipment_liability');
+    const denied = await assertAdminApiAccess(decoded, 'equipment_liability');
     if (denied) return denied;
 
     const raw = request.nextUrl.searchParams.get('riderCode') || '';

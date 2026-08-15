@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const m0 = assertAdminApiAccess(decoded, 'main_inventory');
+    const m0 = await assertAdminApiAccess(decoded, 'main_inventory');
     if (m0) return m0;
 
     const data = await readMainInventory();
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const m1 = assertAdminApiAccess(decoded, 'main_inventory');
+    const m1 = await assertAdminApiAccess(decoded, 'main_inventory');
     if (m1) return m1;
 
     if (!adminHasPermission(decoded, 'inventory')) {

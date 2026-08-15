@@ -24,7 +24,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const sc2 = assertAdminApiAccess(decoded, 'salary_config');
+    const sc2 = await assertAdminApiAccess(decoded, 'salary_config');
     if (sc2) return sc2;
 
     const body = await request.json();

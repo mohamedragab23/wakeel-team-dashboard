@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح - المدير فقط' }, { status: 401 });
     }
 
-    const rs = assertAdminApiAccess(decoded, 'debug');
+    const rs = await assertAdminApiAccess(decoded, 'debug');
     if (rs) return rs;
 
     let body: any = {};

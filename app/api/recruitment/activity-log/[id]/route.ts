@@ -16,7 +16,7 @@ export async function GET(request: NextRequest, ctx: RouteCtx) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
     const decoded = verifyToken(token);
-    const denied = assertAdminActivityLogAccess(decoded);
+    const denied = await assertAdminActivityLogAccess(decoded);
     if (denied) return denied;
 
     const id = await resolveRouteId(ctx.params);

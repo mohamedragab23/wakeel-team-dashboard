@@ -18,7 +18,7 @@ export const maxDuration = 120;
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'dt-scenarios-list');
+    const auth = await requireStrategicOpsAdmin(request, 'dt-scenarios-list');
     if (!auth.ok) return auth.response;
 
     if (!isSimulationDbConfigured()) {
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'dt-scenarios-create');
+    const auth = await requireStrategicOpsAdmin(request, 'dt-scenarios-create');
     if (!auth.ok) return auth.response;
 
     if (!isSimulationDbConfigured()) {

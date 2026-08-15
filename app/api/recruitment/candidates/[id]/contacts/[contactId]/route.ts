@@ -34,7 +34,7 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
     const decoded = verifyToken(token);
-    const denied = assertRecruitmentApiAccess(decoded);
+    const denied = await assertRecruitmentApiAccess(decoded);
     if (denied) return denied;
 
     const { id, contactId } = await resolveContactParams(ctx.params);
@@ -91,7 +91,7 @@ export async function DELETE(request: NextRequest, ctx: RouteCtx) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
     const decoded = verifyToken(token);
-    const denied = assertRecruitmentApiAccess(decoded);
+    const denied = await assertRecruitmentApiAccess(decoded);
     if (denied) return denied;
 
     const { id, contactId } = await resolveContactParams(ctx.params);

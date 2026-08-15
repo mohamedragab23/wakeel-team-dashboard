@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
   const token = extractBearerToken(request);
   if (!token) return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
   const decoded = verifyToken(token) as { role?: string; permissions?: string } | null;
-  const access = assertAdminApiAccess(decoded, 'equipment_finance');
+  const access = await assertAdminApiAccess(decoded, 'equipment_finance');
   if (access) return access;
 
   const enabled =

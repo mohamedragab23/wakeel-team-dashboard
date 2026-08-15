@@ -13,7 +13,7 @@ export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'dt-city-expansion');
+    const auth = await requireStrategicOpsAdmin(request, 'dt-city-expansion');
     if (!auth.ok) return auth.response;
 
     const body = (await request.json()) as {

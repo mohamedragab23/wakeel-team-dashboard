@@ -23,7 +23,7 @@ export async function GET(
     return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
   }
   const decoded = verifyToken(token) as Decoded | null;
-  const access = assertAdminApiAccess(decoded, 'equipment_liability');
+  const access = await assertAdminApiAccess(decoded, 'equipment_liability');
   if (access) return access;
 
   if (!isEquipmentLedgerEnabled()) {
@@ -52,7 +52,7 @@ export async function POST(
     return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
   }
   const decoded = verifyToken(token) as Decoded | null;
-  const access = assertAdminApiAccess(decoded, 'equipment_liability');
+  const access = await assertAdminApiAccess(decoded, 'equipment_liability');
   if (access) return access;
 
   if (!isEquipmentLedgerEnabled()) {

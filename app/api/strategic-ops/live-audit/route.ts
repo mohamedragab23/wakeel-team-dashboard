@@ -16,7 +16,7 @@ const AUDIT_TTL_MS = 10 * 60 * 1000;
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'strategic-ops-live-audit');
+    const auth = await requireStrategicOpsAdmin(request, 'strategic-ops-live-audit');
     if (!auth.ok) return auth.response;
 
     const parsed = parseStrategicOpsFilters(request);
@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
 /** Optional: return lineage for a specific audit result id using cached audit + report. */
 export async function POST(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'strategic-ops-live-audit-lineage');
+    const auth = await requireStrategicOpsAdmin(request, 'strategic-ops-live-audit-lineage');
     if (!auth.ok) return auth.response;
 
     const body = (await request.json()) as {

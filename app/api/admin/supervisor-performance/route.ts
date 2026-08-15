@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const denied = assertAdminApiAccess(decoded, 'supervisor_performance');
+    const denied = await assertAdminApiAccess(decoded, 'supervisor_performance');
     if (denied) return denied;
 
     const { searchParams } = new URL(request.url);

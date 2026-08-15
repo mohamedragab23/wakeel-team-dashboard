@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
-    const deny = assertAdminApiAccess(decoded, 'performance_upload');
+    const deny = await assertAdminApiAccess(decoded, 'performance_upload');
     if (deny) return deny;
 
     const date = new URL(request.url).searchParams.get('date')?.trim() || '';
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
-    const deny = assertAdminApiAccess(decoded, 'performance_upload');
+    const deny = await assertAdminApiAccess(decoded, 'performance_upload');
     if (deny) return deny;
 
     const formData = await request.formData();

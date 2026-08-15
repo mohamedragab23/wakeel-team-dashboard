@@ -13,7 +13,7 @@ export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'dt-simulate');
+    const auth = await requireStrategicOpsAdmin(request, 'dt-simulate');
     if (!auth.ok) return auth.response;
 
     const body = (await request.json()) as {

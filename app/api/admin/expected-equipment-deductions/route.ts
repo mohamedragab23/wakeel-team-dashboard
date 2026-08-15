@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     if (!decoded) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
-    const denied = assertAdminApiAccess(decoded, 'equipment_finance');
+    const denied = await assertAdminApiAccess(decoded, 'equipment_finance');
     if (denied) return denied;
 
     if (!isPayoutCyclesEnabled()) {

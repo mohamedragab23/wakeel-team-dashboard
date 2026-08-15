@@ -478,7 +478,7 @@ describe('equipment liability desk — permissions & flags & isolation', () => {
       'utf8'
     );
     assert.ok(body.includes('isEquipmentLedgerEnabled'));
-    assert.ok(body.includes("assertAdminApiAccess(decoded, 'equipment_liability')"));
+    assert.ok(body.includes("await assertAdminApiAccess(decoded, 'equipment_liability')"));
   });
 
   it('U: Returns V2 remains untouched by desk payment sheet', () => {

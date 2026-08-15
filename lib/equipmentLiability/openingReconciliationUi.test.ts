@@ -310,7 +310,7 @@ describe('4D.5.4.14 admin access + route safety', () => {
       join(process.cwd(), 'app/api/admin/equipment-reconciliation/route.ts'),
       'utf8'
     );
-    assert.ok(body.includes("assertAdminApiAccess(decoded, 'equipment_liability')"));
+    assert.ok(body.includes("await assertAdminApiAccess(decoded, 'equipment_liability')"));
     assert.ok(body.includes('DRY_RUN_PREVIEW') || body.includes("mode: 'DRY_RUN_PREVIEW'"));
     assert.ok(body.includes('runControlledOpeningPilotPersist'));
     assert.ok(body.includes("action !== 'preview' && action !== 'persist'"));

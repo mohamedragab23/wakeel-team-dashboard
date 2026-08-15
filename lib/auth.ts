@@ -3,6 +3,8 @@ import { parseAdminsSheetDataMatrix, ADMIN_SHEET_TAB_CANDIDATES } from './admins
 import { jwtAdminOrgRoleFromSheet } from './adminFeatureAccess';
 import { normalizeSupervisorCodeForMatch } from './dataFilter';
 import { RECRUITMENT_MANAGER_PERMISSION } from './authConstants';
+import { getSessionVersion } from '@/lib/sessionVersion';
+import { isAccountDisabledPermissions } from '@/lib/accountDisable';
 import jwt from 'jsonwebtoken';
 import { getJwtSecret } from '@/lib/jwtConfig';
 import { verifyPassword } from '@/lib/passwordUtils';
@@ -52,11 +54,13 @@ export async function authenticateSupervisor(code: string, password: string): Pr
       if (normalizeSupervisorCodeForMatch(supervisorCode) === normalizeSupervisorCodeForMatch(code)) {
         if (await verifyPassword(supervisorPassword, password)) {
           void rehashSupervisorPasswordIfNeeded(supervisorCode, password, supervisorPassword);
+          const sv = await getSessionVersion('supervisor', supervisorCode);
           const token = jwt.sign(
             {
               code: supervisorCode,
               name: supervisorName,
               role: 'supervisor',
+              sv,
             },
             getJwtSecret(),
             { expiresIn: '7d' }
@@ -159,6 +163,12 @@ export async function authenticateAdmin(code: string, password: string): Promise
 
     for (const a of parsedAdmins) {
       if (a.code !== code) continue;
+      if (isAccountDisabledPermissions(a.permissions)) {
+        return {
+          success: false,
+          error: 'هذا الحساب معطّل — تواصل مع الأدمن',
+        };
+      }
       if (!(await verifyPassword(a.password, password))) {
         return {
           success: false,
@@ -181,6 +191,8 @@ export async function authenticateAdmin(code: string, password: string): Promise
       const isRecruitmentManager =
         permissionsNorm.toLowerCase() === RECRUITMENT_MANAGER_PERMISSION;
       const jwtRole = isRecruitmentManager ? 'recruitment_manager' : 'admin';
+      const svRole = isRecruitmentManager ? 'recruitment_manager' : 'admin';
+      const sv = await getSessionVersion(svRole, a.code);
 
       const token = jwt.sign(
         {
@@ -191,6 +203,7 @@ export async function authenticateAdmin(code: string, password: string): Promise
           dataZone: dataZoneNorm,
           adminOrgRole: isRecruitmentManager ? 'full' : adminOrgRole,
           linkedSupervisorCode: linkedNorm,
+          sv,
         },
         getJwtSecret(),
         { expiresIn: '7d' }

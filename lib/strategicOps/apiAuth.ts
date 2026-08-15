@@ -8,7 +8,7 @@ export type StrategicOpsAuth =
   | { ok: true; code: string; name: string | null }
   | { ok: false; response: NextResponse };
 
-export function requireStrategicOpsAdmin(request: NextRequest, rateBucket: string): StrategicOpsAuth {
+export async function requireStrategicOpsAdmin(request: NextRequest, rateBucket: string): Promise<StrategicOpsAuth> {
   const token = extractBearerToken(request);
   if (!token) {
     return { ok: false, response: NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 }) };
@@ -18,13 +18,14 @@ export function requireStrategicOpsAdmin(request: NextRequest, rateBucket: strin
     role?: string;
     code?: string;
     name?: string;
+    sv?: number;
   } | null;
 
   if (!decoded || decoded.role !== 'admin') {
     return { ok: false, response: NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 }) };
   }
 
-  const denied = assertAdminApiAccess(decoded, 'strategic_ops');
+  const denied = await assertAdminApiAccess(decoded, 'strategic_ops');
   if (denied) return { ok: false, response: denied };
 
   const rateKey = String(decoded.code ?? decoded.role ?? 'admin');

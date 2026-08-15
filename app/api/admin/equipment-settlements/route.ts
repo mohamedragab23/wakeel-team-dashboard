@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   const token = extractBearerToken(request);
   if (!token) return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
   const decoded = verifyToken(token) as Decoded | null;
-  const access = assertAdminApiAccess(decoded, 'equipment_liability');
+  const access = await assertAdminApiAccess(decoded, 'equipment_liability');
   if (access) return access;
 
   if (!isEquipmentReturnsV2Enabled()) {
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
   const token = extractBearerToken(request);
   if (!token) return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
   const decoded = verifyToken(token) as Decoded | null;
-  const access = assertAdminApiAccess(decoded, 'equipment_liability');
+  const access = await assertAdminApiAccess(decoded, 'equipment_liability');
   if (access) return access;
   if (!isEquipmentReturnsV2Enabled()) return NextResponse.json(SRS014_FLAG_OFF_BODY, { status: 503 });
 

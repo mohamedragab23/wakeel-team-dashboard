@@ -18,7 +18,7 @@ const HISTORY_TTL_MS = 24 * 60 * 60 * 1000;
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = requireStrategicOpsAdmin(request, 'strategic-ops-trust');
+    const auth = await requireStrategicOpsAdmin(request, 'strategic-ops-trust');
     if (!auth.ok) return auth.response;
 
     const parsed = parseStrategicOpsFilters(request);

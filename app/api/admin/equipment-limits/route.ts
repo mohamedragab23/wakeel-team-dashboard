@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const el = assertAdminApiAccess(decoded, 'equipment_limits');
+    const el = await assertAdminApiAccess(decoded, 'equipment_limits');
     if (el) return el;
 
     let supervisors = await getAllSupervisors(false);
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const el2 = assertAdminApiAccess(decoded, 'equipment_limits');
+    const el2 = await assertAdminApiAccess(decoded, 'equipment_limits');
     if (el2) return el2;
 
     const body = await request.json();

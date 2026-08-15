@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
-    const denied = assertAdminApiAccess(decoded, 'strategic_ops');
+    const denied = await assertAdminApiAccess(decoded, 'strategic_ops');
     if (denied) return denied;
 
     const rateKey = String(decoded.code ?? decoded.role ?? 'admin');

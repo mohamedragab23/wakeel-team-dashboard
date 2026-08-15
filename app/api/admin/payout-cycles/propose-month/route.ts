@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     if (!decoded) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
-    const denied = assertAdminApiAccess(decoded, 'payout_cycles');
+    const denied = await assertAdminApiAccess(decoded, 'payout_cycles');
     if (denied) return denied;
 
     if (!isPayoutCyclesEnabled()) {
