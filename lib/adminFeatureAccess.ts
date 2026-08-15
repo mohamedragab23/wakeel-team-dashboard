@@ -158,6 +158,12 @@ export function getAdminMenuDefs(): AdminMenuDef[] {
       icon: '⚖️',
       feature: 'equipment_liability',
     },
+    {
+      href: '/admin/equipment-payment-proposals',
+      label: 'اقتراحات سداد المعدات',
+      icon: '📩',
+      feature: 'equipment_liability',
+    },
     { href: '/admin/rider-360', label: 'ملف المندوب 360°', icon: '🧭', feature: 'equipment_liability' },
     { href: '/admin/debug', label: 'تهيئة النظام والتحقق', icon: '🧹', feature: 'debug' },
     { href: '/shifts', label: 'الشفتات', icon: '🕒', feature: 'shifts' },

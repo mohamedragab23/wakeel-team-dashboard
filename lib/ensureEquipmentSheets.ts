@@ -84,6 +84,15 @@ export async function ensureAllEquipmentSheets(): Promise<{
   ]);
   ensured.push(SHEET_EQUIPMENT_PAYROLL_ACTUAL);
 
+  const {
+    SHEET_EQUIPMENT_PAYMENT_PROPOSALS,
+    EQUIPMENT_PAYMENT_PROPOSAL_HEADERS,
+  } = await import('@/lib/equipmentLiability/paymentProposals');
+  await ensureSheetExists(SHEET_EQUIPMENT_PAYMENT_PROPOSALS, [
+    ...EQUIPMENT_PAYMENT_PROPOSAL_HEADERS,
+  ]);
+  ensured.push(SHEET_EQUIPMENT_PAYMENT_PROPOSALS);
+
   await ensureMainInventoryInitialized();
   ensured.push('المخزون_الرئيسي');
 

@@ -80,7 +80,7 @@ Supervisors must **not** need Excel for *new* equipment deduction **requests**. 
 | `FEATURE_EQUIPMENT_LEDGER_ENABLED` | Liability creation on issue + **Equipment Liability Management Desk** (cash payments) |
 | `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED` | **Cron REQUEST creation only** + (separate) Manager Compare post-payroll **allocation** wiring + salary guard. Cron itself does **not** allocate ACTUAL. Enablement = separate Go. |
 | `FEATURE_EQUIPMENT_RETURNS_V2_ENABLED` | Physical return + return-settlement / waiver sheet |
-| `FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED` | Supervisor form (no Excel) |
+| `FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED` | Supervisor Manual Deductions V2 (REQUEST on الاستقطاعات; default OFF). Enable on Vercel: `FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED=true` after merge — do not hard-default ON in code. Excel `/deductions-upload` is hidden from supervisor nav. |
 | `FEATURE_EQUIPMENT_INVENTORY_V2_ENABLED` | Inventory anomaly flags / extras |
 
 Pattern: `String(process.env.X||'').trim().toLowerCase()==='true'`. API → `503 { enabled:false }`. Cron → `{ skipped:true }`.
