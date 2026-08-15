@@ -100,10 +100,11 @@ export default function SupervisorEquipmentStatusPage() {
   return (
     <Layout>
       <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-4" dir="rtl">
-        <h1 className="text-2xl font-bold text-slate-800">عهدة معدات الطيارين</h1>
+        <h1 className="text-2xl font-bold text-slate-800">عهدة / تسوية معدات الطيارين</h1>
         <p className="text-sm text-slate-600">
-          كل مناديبك من الروستر. إن وُجدت عهدة: اقترح تحديث السداد. إن لم توجد: اقترح فتح عهدة
-          (مسدد / جزئي / لم يسدد) لمدير المعدات. لا يطبّق النظام خصماً مالياً من هذه الصفحة.
+          دي صفحة المشرف لتسوية المعدات (مش صفحة الأدمن «تسوية افتتاحية»). تظهر{' '}
+          <strong>كل مناديبك</strong> من الروستر — اللي بدون عهدة اضغط «اقتراح فتح عهدة»، واللي
+          عنده عهدة اضغط «اقتراح تحديث». مسؤول المعدات يراجع ويقبل.
         </p>
         <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded p-2">
           مهم قبل الاستقطاع الأوتوماتيك: المناديب القديمة لازم تتظبط عهدتهم (Opening / اقتراح فتح) عشان

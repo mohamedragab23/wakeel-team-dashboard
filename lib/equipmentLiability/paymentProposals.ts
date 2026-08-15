@@ -273,26 +273,28 @@ export async function listLiabilitiesForSupervisor(
   issues: ReturnType<typeof issueToSupervisorView>[];
   rosterRiderCount: number;
 }> {
-  const desk = await listSupervisorEquipmentDesk(supervisorCode);
-  return {
-    issues: desk.rows
-      .filter((r) => r.hasLiability && r.equipmentIssueId)
-      .map((r) => ({
-        equipmentIssueId: r.equipmentIssueId!,
-        riderCode: r.riderCode,
-        riderName: r.riderName,
-        zone: r.zone,
-        status: r.status,
-        paymentStatus: r.paymentStatus || 'UNPAID',
-        paymentStatusAr: r.paymentStatusAr,
-        outstandingEgp: r.outstandingEgp ?? 0,
-        amountDeductedEgp: r.amountDeductedEgp ?? 0,
-        settlementPaidEgp: r.settlementPaidEgp ?? 0,
-        originalLiabilityEgp: r.originalLiabilityEgp ?? 0,
-        deliveryRowRef: '',
-      })),
-    rosterRiderCount: desk.rosterRiderCount,
-  };
+  const riders = await getSupervisorRiders(supervisorCode, false);
+  const rosterCodes = riders.map((r) => r.code);
+  const all = await listIssues();
+  const issues = all
+    .filter((i) =>
+      issueMatchesSupervisorScope({
+        riderCode: i.riderCode,
+        supervisorCodeSnapshot: i.supervisorCodeSnapshot,
+        supervisorCode,
+        rosterRiderCodes: rosterCodes,
+      })
+    )
+    .map(issueToSupervisorView)
+    .sort((a, b) => {
+      const rank = (p: string) =>
+        p === 'UNPAID' ? 0 : p === 'PARTIALLY_PAID' ? 1 : 2;
+      const byPay = rank(a.paymentStatus) - rank(b.paymentStatus);
+      if (byPay !== 0) return byPay;
+      return b.outstandingEgp - a.outstandingEgp;
+    });
+
+  return { issues, rosterRiderCount: riders.length };
 }
 
 /** Full roster + optional liability join for supervisor desk. */
