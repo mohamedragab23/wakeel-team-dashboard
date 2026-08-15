@@ -36,7 +36,7 @@ const emptyForm = {
   hiringDecision: 'قيد المراجعة' as 'قيد المراجعة' | 'هيشتغل' | 'لن يشتغل',
   notHiredReason: '',
   lecturePlannedDate: '',
-  securityInquiryPayment: 'NOT_PAID' as 'PAID' | 'NOT_PAID',
+  securityInquiryPayment: '' as '' | 'PAID' | 'NOT_PAID',
   notes: '',
 };
 
@@ -164,10 +164,11 @@ export default function NewCandidateForm({ onCreated }: Props) {
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    securityInquiryPayment: e.target.value as 'PAID' | 'NOT_PAID',
+                    securityInquiryPayment: e.target.value as '' | 'PAID' | 'NOT_PAID',
                   })
                 }
               >
+                <option value="">اختر… (لا يُستنتج تلقائيًا)</option>
                 <option value="NOT_PAID">لم يتم السداد</option>
                 <option value="PAID">تم السداد</option>
               </select>

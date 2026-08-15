@@ -20,6 +20,9 @@ export const PHASE_C_ERROR = {
   EQUIPMENT_LIABILITY_ALREADY_EXISTS: 'EQUIPMENT_LIABILITY_ALREADY_EXISTS',
   LOCK_BUSY: 'LOCK_BUSY',
   LIABILITY_CREATE_FAILED: 'LIABILITY_CREATE_FAILED',
+  /** Admin أسعار_المعدات unavailable or invalid — fail closed for NEW liability. */
+  PRICING_UNAVAILABLE: 'PRICING_UNAVAILABLE',
+  PRICING_INVALID: 'PRICING_INVALID',
 } as const;
 
 export type PhaseCErrorCode = (typeof PHASE_C_ERROR)[keyof typeof PHASE_C_ERROR];
@@ -37,6 +40,10 @@ export const PHASE_C_ERROR_AR: Record<PhaseCErrorCode, string> = {
   EQUIPMENT_LIABILITY_ALREADY_EXISTS: 'EQUIPMENT_LIABILITY_ALREADY_EXISTS',
   LOCK_BUSY: 'عملية موافقة أخرى قيد التنفيذ على نفس التسليم — أعد المحاولة بعد لحظات',
   LIABILITY_CREATE_FAILED: 'فشل إنشاء سجل عهدة المعدات',
+  PRICING_UNAVAILABLE:
+    'لا يمكن إنشاء عهدة المعدات: أسعار المعدات من إعدادات الأدمن غير متاحة — أصلح تاب أسعار المعدات ثم أعد المحاولة',
+  PRICING_INVALID:
+    'لا يمكن إنشاء عهدة المعدات: أسعار المعدات من إعدادات الأدمن غير صالحة (يجب قيم غير سالبة تشمل التأمين/الاستعلام الأمني)',
 };
 
 export function isCandidateActivatedForPhaseC(c: Pick<Candidate, 'activationStatus' | 'activationConfirmed'>): boolean {

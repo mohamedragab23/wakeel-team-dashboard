@@ -12,34 +12,55 @@ interface EquipmentPricing {
   tshirt: number;
   jacket: number;
   helmet: number;
+  securityCheck: number;
 }
 
+/** Display-only suggested defaults — Sheets is authoritative once saved. */
 const defaultPricing: EquipmentPricing = {
-  motorcycleBox: 550,
-  bicycleBox: 550,
-  tshirt: 100,
-  jacket: 200,
-  helmet: 150 };
+  motorcycleBox: 530,
+  bicycleBox: 530,
+  tshirt: 135,
+  jacket: 0,
+  helmet: 0,
+  securityCheck: 100,
+};
 
 export default function EquipmentPricingPage() {
   const notify = usePageNotify();
   const [pricing, setPricing] = useState<EquipmentPricing>(defaultPricing);
+  const [needsSecurityColumnSave, setNeedsSecurityColumnSave] = useState(false);
   const queryClient = useQueryClient();
 
   // Fetch existing pricing
-  const { data: existingPricing, isLoading } = useQuery({
+  const { data: pricingPayload, isLoading } = useQuery({
     queryKey: ['equipment-pricing'],
     queryFn: async () => {
       const res = await authFetch('/api/admin/equipment-pricing');
       const data = await res.json();
-      return data.success ? data.data : defaultPricing;
-    } });
+      if (!data.success) {
+        return { pricing: defaultPricing, needsSecurityColumnSave: true };
+      }
+      return {
+        pricing: data.data as EquipmentPricing,
+        needsSecurityColumnSave: Boolean(data.meta?.needsSecurityColumnSave),
+      };
+    },
+  });
 
   useEffect(() => {
-    if (existingPricing) {
-      setPricing(existingPricing);
+    if (pricingPayload?.pricing) {
+      const existingPricing = pricingPayload.pricing;
+      setPricing({
+        ...defaultPricing,
+        ...existingPricing,
+        securityCheck:
+          typeof existingPricing.securityCheck === 'number'
+            ? existingPricing.securityCheck
+            : defaultPricing.securityCheck,
+      });
+      setNeedsSecurityColumnSave(Boolean(pricingPayload.needsSecurityColumnSave));
     }
-  }, [existingPricing]);
+  }, [pricingPayload]);
 
   // Save pricing
   const saveMutation = useMutation({
@@ -98,7 +119,16 @@ export default function EquipmentPricingPage() {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-semibold text-[#EAF0FF] mb-2">أسعار المعدات</h1>
-          <p className="text-[rgba(234,240,255,0.70)]">تحديد أسعار المعدات لحساب الخصومات تلقائياً</p>
+          <p className="text-[rgba(234,240,255,0.70)]">
+            مصدر الحقيقة لأسعار معدات المندوبين — يُثبَّت السعر داخل العهدة عند التسليم ولا يُعاد تسعير الديون القديمة
+          </p>
+          {needsSecurityColumnSave ? (
+            <div className="mt-3 rounded-lg border border-amber-400/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+              عمود <strong>الاستعلام الأمني (Security Check = 100)</strong> غير محفوظ بعد في الشيت.
+              اضبط القيمة ثم اضغط «حفظ الأسعار» حتى يكتمل مصدر الحقيقة. إنشاء عهدة جديدة يبقى مقفولًا
+              (fail-closed) حتى يتم الحفظ.
+            </div>
+          ) : null}
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 space-y-6">
@@ -212,6 +242,36 @@ export default function EquipmentPricingPage() {
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">ج.م</span>
               </div>
             </div>
+
+            {/* Security check — required for NEW liability SoT (800 vs 900) */}
+            <div
+              className={`rounded-lg p-4 border-2 ${
+                needsSecurityColumnSave
+                  ? 'bg-amber-50 border-amber-400'
+                  : 'bg-gray-50 border-transparent'
+              }`}
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-3xl">🔎</span>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">الاستعلام الأمني</label>
+                  <p className="text-xs text-gray-500">Security Check (100 → 900 إذا غير مدفوع)</p>
+                </div>
+              </div>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={pricing.securityCheck}
+                  onChange={(e) =>
+                    setPricing({ ...pricing, securityCheck: parseFloat(e.target.value) || 0 })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-lg font-semibold"
+                  min="0"
+                  step="0.01"
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">ج.م</span>
+              </div>
+            </div>
           </div>
 
           <div className="pt-4">
@@ -268,7 +328,15 @@ export default function EquipmentPricingPage() {
             </table>
           </div>
           <p className="text-sm text-green-700">
-            <strong>المعادلة:</strong> (صناديق نارية × {pricing.motorcycleBox}) + (صناديق هوائية × {pricing.bicycleBox}) + (تيشرتات × {pricing.tshirt}) + (جواكيت × {pricing.jacket}) + (خوذ × {pricing.helmet})
+            <strong>معدات قياسية:</strong> باوتش {pricing.motorcycleBox} + 2×تيشيرت{' '}
+            {pricing.tshirt} = {pricing.motorcycleBox + 2 * pricing.tshirt} ج.م (مثال الجدول أعلاه ≈{' '}
+            {exampleTotal} مع الجاكيت).
+          </p>
+          <p className="text-sm text-green-700 mt-2">
+            <strong>عهدة المندوب:</strong> إذا الاستعلام الأمني مدفوع →{' '}
+            {pricing.motorcycleBox + 2 * pricing.tshirt} ج.م؛ إذا غير مدفوع →{' '}
+            {pricing.motorcycleBox + 2 * pricing.tshirt + pricing.securityCheck} ج.م (يشمل Security{' '}
+            {pricing.securityCheck}).
           </p>
         </div>
 

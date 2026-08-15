@@ -5,7 +5,13 @@
 
 export const MILLIEMES_PER_EGP = 100;
 
-/** Fixed liability components (milliemes). */
+/**
+ * Approved CURRENT business fixture amounts (milliemes) matching Admin defaults
+ * Bag 530 + 2×Shirt 135 + Security 100.
+ *
+ * NOT a runtime Source of Truth for NEW liabilities (see lib/equipmentPricing).
+ * Kept for installment arithmetic fixtures / docs of the 800/900 meaning.
+ */
 export const BAG_COST_MILLI = 53000;
 export const TWO_TSHIRTS_COST_MILLI = 27000;
 export const SECURITY_FEE_MILLI = 10000;

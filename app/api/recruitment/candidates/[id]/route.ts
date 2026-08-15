@@ -185,6 +185,22 @@ export async function PUT(request: NextRequest, ctx: RouteCtx) {
       return NextResponse.json({ success: false, error: sequentialError }, { status: 400 });
     }
 
+    // Phase B lecture/activation/riderCode rules always apply (even when V2 flag is OFF).
+    // Prevents confirm-only activation without an authoritative riderCode.
+    {
+      const { validateLectureAttendancePatch, validateActivationPatch } = await import(
+        '@/lib/recruitment/phaseB'
+      );
+      const lectureErr = validateLectureAttendancePatch(existing, patch);
+      if (lectureErr) {
+        return NextResponse.json({ success: false, error: lectureErr }, { status: 400 });
+      }
+      const activationErr = validateActivationPatch(existing, patch);
+      if (activationErr) {
+        return NextResponse.json({ success: false, error: activationErr }, { status: 400 });
+      }
+    }
+
     if (v2On) {
       const v2Error = await validateRecruitmentV2Activation(id, existing, patch);
       if (v2Error) {

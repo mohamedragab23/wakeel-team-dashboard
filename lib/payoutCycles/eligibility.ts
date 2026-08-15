@@ -59,6 +59,12 @@ export function isCycleEligibleForEquipmentDeduction(
   allCycles: PayoutCycle[],
   activationDate: string
 ): { eligible: boolean; reason?: string } {
+  if (cycle.status === 'finalized') {
+    return { eligible: false, reason: 'cycle_finalized' };
+  }
+  if (cycle.status === 'draft') {
+    return { eligible: false, reason: 'cycle_draft' };
+  }
   if (shouldSkipEquipmentAutoDeductions(cycle)) {
     return {
       eligible: false,

@@ -1,95 +1,39 @@
 /**
- * Equipment Pricing API
- * Manages equipment prices for deduction calculations.
- * On Vercel the filesystem is read-only, so we use Google Sheets (أسعار_المعدات).
- * Locally we also try to write to a file for salaryService compatibility.
+ * Equipment Pricing API — Admin Source of Truth for أسعار_المعدات.
+ * Rider liability creation reads this sheet (fail closed). UI may show approved defaults only for display.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminFeatureAccess';
-import { getSheetData, updateSheetRange, ensureSheetExists } from '@/lib/googleSheets';
+import { updateSheetRange, ensureSheetExists } from '@/lib/googleSheets';
+import { appendAuditLog } from '@/lib/auditLog';
+import { APPROVED_ADMIN_EQUIPMENT_PRICING_EGP } from '@/lib/equipmentPricing/approvedDefaults';
+import {
+  loadAdminEquipmentPricingForAdminUi,
+  loadAdminEquipmentPricingFromSheets,
+} from '@/lib/equipmentPricing/loadAdminPricing';
+import { validateAndConvertAdminPricingEgp } from '@/lib/equipmentPricing/validate';
+import type { AdminEquipmentPricingEgp } from '@/lib/equipmentPricing/types';
+import { ADMIN_EQUIPMENT_PRICING_SHEET } from '@/lib/equipmentPricing/types';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-const SHEET_NAME = 'أسعار_المعدات';
 const LOCAL_FILE = path.join(process.cwd(), 'data', 'equipment-pricing.json');
 
-interface EquipmentPricing {
-  motorcycleBox: number;
-  bicycleBox: number;
-  tshirt: number;
-  jacket: number;
-  helmet: number;
-}
+const PRICING_HEADERS = [
+  'motorcycleBox',
+  'bicycleBox',
+  'tshirt',
+  'jacket',
+  'helmet',
+  'securityCheck',
+] as const;
 
-const defaultPricing: EquipmentPricing = {
-  motorcycleBox: 550,
-  bicycleBox: 550,
-  tshirt: 100,
-  jacket: 200,
-  helmet: 150,
-};
-
-function parsePricingFromRow(row: any[]): EquipmentPricing {
-  return {
-    motorcycleBox: Number(row?.[0]) >= 0 ? Number(row[0]) : defaultPricing.motorcycleBox,
-    bicycleBox: Number(row?.[1]) >= 0 ? Number(row[1]) : defaultPricing.bicycleBox,
-    tshirt: Number(row?.[2]) >= 0 ? Number(row[2]) : defaultPricing.tshirt,
-    jacket: Number(row?.[3]) >= 0 ? Number(row[3]) : defaultPricing.jacket,
-    helmet: Number(row?.[4]) >= 0 ? Number(row[4]) : defaultPricing.helmet,
-  };
-}
-
-/** Read pricing from Google Sheets (works on Vercel) */
-async function readPricingFromSheets(): Promise<EquipmentPricing | null> {
-  try {
-    const data = await getSheetData(SHEET_NAME, false);
-    if (data && data.length >= 2 && data[1] && data[1].length >= 5) {
-      return parsePricingFromRow(data[1]);
-    }
-  } catch (e) {
-    console.error('[Equipment Pricing] Sheets read error:', e);
-  }
-  return null;
-}
-
-/** Read pricing from local file (dev only; fails on Vercel read-only) */
-function readLocalPricing(): EquipmentPricing | null {
-  try {
-    if (typeof fs !== 'undefined' && fs.existsSync && fs.existsSync(LOCAL_FILE)) {
-      const data = fs.readFileSync(LOCAL_FILE, 'utf-8');
-      return JSON.parse(data);
-    }
-  } catch (error) {
-    console.error('[Equipment Pricing] Local file read error:', error);
-  }
-  return null;
-}
-
-/** Save pricing to Google Sheets (works on Vercel) */
-async function savePricingToSheets(pricing: EquipmentPricing): Promise<boolean> {
-  try {
-    await ensureSheetExists(SHEET_NAME, ['motorcycleBox', 'bicycleBox', 'tshirt', 'jacket', 'helmet']);
-    const updated = await updateSheetRange(SHEET_NAME, 'A2:E2', [[
-      pricing.motorcycleBox,
-      pricing.bicycleBox,
-      pricing.tshirt,
-      pricing.jacket,
-      pricing.helmet,
-    ]]);
-    return updated;
-  } catch (e) {
-    console.error('[Equipment Pricing] Sheets write error:', e);
-    return false;
-  }
-}
-
-/** Optionally save to local file (for local dev; ignore errors on Vercel) */
-function saveLocalPricingIfPossible(pricing: EquipmentPricing): void {
+function saveLocalPricingIfPossible(pricing: AdminEquipmentPricingEgp): void {
   try {
     const dataDir = path.join(process.cwd(), 'data');
     if (typeof fs !== 'undefined' && fs.existsSync && !fs.existsSync(dataDir)) {
@@ -98,83 +42,128 @@ function saveLocalPricingIfPossible(pricing: EquipmentPricing): void {
     if (typeof fs !== 'undefined' && fs.writeFileSync) {
       fs.writeFileSync(LOCAL_FILE, JSON.stringify(pricing, null, 2));
     }
-  } catch (_) {
-    // Expected on Vercel (read-only FS); ignore
+  } catch {
+    // Expected on Vercel
   }
 }
 
-// GET - Fetch equipment pricing (Sheets first so Vercel and local stay in sync)
+async function savePricingToSheets(pricing: AdminEquipmentPricingEgp): Promise<boolean> {
+  try {
+    await ensureSheetExists(ADMIN_EQUIPMENT_PRICING_SHEET, [...PRICING_HEADERS]);
+    return await updateSheetRange(ADMIN_EQUIPMENT_PRICING_SHEET, 'A2:F2', [
+      [
+        pricing.motorcycleBox,
+        pricing.bicycleBox,
+        pricing.tshirt,
+        pricing.jacket,
+        pricing.helmet,
+        pricing.securityCheck,
+      ],
+    ]);
+  } catch (e) {
+    console.error('[Equipment Pricing] Sheets write error:', e);
+    return false;
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const token = extractBearerToken(request);
-
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
-
     const decoded = verifyToken(token);
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
-
     const ep = assertAdminApiAccess(decoded, 'equipment_pricing');
     if (ep) return ep;
 
-    const fromSheets = await readPricingFromSheets();
-    if (fromSheets) {
-      return NextResponse.json({ success: true, data: fromSheets });
-    }
-
-    const localPricing = readLocalPricing();
-    if (localPricing) {
-      return NextResponse.json({ success: true, data: localPricing });
-    }
-
-    return NextResponse.json({ success: true, data: defaultPricing });
-  } catch (error: any) {
+    const ui = await loadAdminEquipmentPricingForAdminUi();
+    return NextResponse.json({
+      success: true,
+      data: ui.egp,
+      meta: {
+        fromSheets: ui.fromSheets,
+        displayOnlyDefaults: ui.displayOnlyDefaults,
+        needsSecurityColumnSave: ui.needsSecurityColumnSave,
+        sourceOfTruth: 'أسعار_المعدات',
+        note: ui.needsSecurityColumnSave
+          ? 'Security Check not persisted yet — save Admin pricing to write securityCheck=100. NEW liability creation remains fail-closed until then.'
+          : ui.displayOnlyDefaults
+            ? 'Display defaults only — NEW liability creation fails closed until Admin prices are saved to Sheets'
+            : 'Loaded from Admin Sheets',
+      },
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'حدث خطأ';
     console.error('Get equipment pricing error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'حدث خطأ' }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
-// POST - Save equipment pricing (المدير يمكنه التعديل والتعديلات تظهر للمشرفين عبر نفس الملف)
 export async function POST(request: NextRequest) {
   try {
     const token = extractBearerToken(request);
-
     if (!token) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
-
     const decoded = verifyToken(token);
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
-
     const ep2 = assertAdminApiAccess(decoded, 'equipment_pricing');
     if (ep2) return ep2;
 
-    const pricing: EquipmentPricing = await request.json();
+    const body = (await request.json()) as Partial<AdminEquipmentPricingEgp>;
+    // Allow omitting jacket/helmet by filling approved custody defaults; security required.
+    const candidate: Partial<AdminEquipmentPricingEgp> = {
+      motorcycleBox: body.motorcycleBox,
+      bicycleBox: body.bicycleBox,
+      tshirt: body.tshirt,
+      jacket: body.jacket ?? APPROVED_ADMIN_EQUIPMENT_PRICING_EGP.jacket,
+      helmet: body.helmet ?? APPROVED_ADMIN_EQUIPMENT_PRICING_EGP.helmet,
+      securityCheck: body.securityCheck,
+    };
 
-    if (
-      pricing.motorcycleBox < 0 ||
-      pricing.bicycleBox < 0 ||
-      pricing.tshirt < 0 ||
-      pricing.jacket < 0 ||
-      pricing.helmet < 0
-    ) {
-      return NextResponse.json({ success: false, error: 'الأسعار يجب أن تكون موجبة' }, { status: 400 });
+    const validated = validateAndConvertAdminPricingEgp(candidate);
+    if (!validated.ok) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `أسعار غير صالحة: ${validated.detail}`,
+          code: validated.error,
+        },
+        { status: 400 }
+      );
     }
 
-    const saved = await savePricingToSheets(pricing);
-    if (saved) {
-      saveLocalPricingIfPossible(pricing);
-      return NextResponse.json({ success: true, message: 'تم حفظ الأسعار بنجاح. التعديلات تظهر للمشرفين تلقائياً.' });
+    const before = await loadAdminEquipmentPricingFromSheets();
+    const saved = await savePricingToSheets(validated.egp);
+    if (!saved) {
+      return NextResponse.json({ success: false, error: 'فشل حفظ الأسعار' }, { status: 500 });
     }
-    return NextResponse.json({ success: false, error: 'فشل حفظ الأسعار' }, { status: 500 });
-  } catch (error: any) {
+    saveLocalPricingIfPossible(validated.egp);
+
+    void appendAuditLog({
+      domain: 'equipment',
+      action: 'update_equipment_pricing',
+      entityType: 'equipment_pricing',
+      entityCode: ADMIN_EQUIPMENT_PRICING_SHEET,
+      actorCode: decoded.code || 'admin',
+      actorName: decoded.name || decoded.code || 'admin',
+      before: before.ok ? before.egp : null,
+      after: validated.egp,
+    }).catch((err) => console.error('[Equipment Pricing] audit failed:', err));
+
+    return NextResponse.json({
+      success: true,
+      message: 'تم حفظ الأسعار بنجاح. التعديلات مصدر الحقيقة لالتزامات المعدات الجديدة.',
+      data: validated.egp,
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'حدث خطأ';
     console.error('Save equipment pricing error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'حدث خطأ' }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
-

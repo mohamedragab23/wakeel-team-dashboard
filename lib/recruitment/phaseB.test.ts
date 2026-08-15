@@ -138,6 +138,25 @@ describe('SRS-014 Phase B — activation + rider code', () => {
     );
   });
 
+  it('requires rider code when activationConfirmed becomes مؤكد', () => {
+    const existing = baseCandidate({
+      activationStatus: 'غير مفعل',
+      activationConfirmed: 'غير مؤكد',
+      riderCode: '',
+    });
+    assert.match(
+      String(validateActivationPatch(existing, { activationConfirmed: 'مؤكد' })),
+      /كود المندوب/
+    );
+    assert.equal(
+      validateActivationPatch(existing, {
+        activationConfirmed: 'مؤكد',
+        riderCode: '4821034',
+      }),
+      null
+    );
+  });
+
   it('requires reason when not activated / rejected', () => {
     const existing = baseCandidate({ activationStatus: 'غير مفعل' });
     assert.match(

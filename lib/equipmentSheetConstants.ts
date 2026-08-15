@@ -10,6 +10,33 @@ export const SHEET_DEDUCTIONS_UPLOAD_LOG = 'سجل_رفع_الاستقطاعات
 /** نتائج مقارنة استقطاع المشرفين مع شيت المحفظة/المدير */
 export const SHEET_DEDUCTIONS_ACTUAL = 'الاستقطاعات_الفعلية';
 
+/**
+ * SRS-014 4D.5.4.16 — confirmed Talabat payroll Actuals for equipment REQUEST rows.
+ * Separate from manager-compare sheet «الاستقطاعات_الفعلية».
+ */
+export const SHEET_EQUIPMENT_PAYROLL_ACTUAL = 'تسوية_خصم_معدات_فعلي';
+
+export const EQUIPMENT_PAYROLL_ACTUAL_HEADERS = [
+  'reconcileId',
+  'idempotencyKey',
+  'deductionId',
+  'equipmentIssueId',
+  'riderCode',
+  'cycleId',
+  'requestedAmountMilli',
+  'actualDeductedMilli',
+  'previousOutstandingMilli',
+  'newOutstandingMilli',
+  'amountDeductedDelta',
+  'talabatReference',
+  'actualDeductionDate',
+  'actorCode',
+  'actorName',
+  'createdAt',
+  'notes',
+  'status',
+] as const;
+
 /** صف رأس ورقة المقارنة (ثابت مع أعمدة تفاصيل شيت المدير) */
 export const DEDUCTIONS_ACTUAL_HEADERS = [
   'تاريخ_المقارنة',
@@ -46,7 +73,11 @@ export const DEDUCTIONS_ACTUAL_HEADERS = [
   'مشرف_أكواد_ومشرفين',
 ] as const;
 
-/** أعمدة ورقة «الاستقطاعات» بعد الاستيراد من Excel */
+/**
+ * أعمدة ورقة «الاستقطاعات» بعد الاستيراد من Excel.
+ * Trailing English fields are SRS-014 §8.1 additive obligation columns (REQUEST ledger).
+ * Existing Arabic columns are unchanged (no rename/delete).
+ */
 export const DEDUCTION_IMPORT_HEADERS = [
   'تاريخ_الرفع',
   'كود_المشرف',
@@ -59,6 +90,17 @@ export const DEDUCTION_IMPORT_HEADERS = [
   'دورة_الاستقطاع',
   'شهر',
   'سنة',
+  /** SRS-014 §8.1 additive — milliemes for money fields */
+  'deductionId',
+  'source',
+  'equipmentIssueId',
+  'installmentNumber',
+  'originalCycleId',
+  'currentCycleId',
+  'originalAmount',
+  'paidAmount',
+  'remainingAmount',
+  'status',
 ] as const;
 
 /** أعمدة «سجل_رفع_الاستقطاعات» */

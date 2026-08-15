@@ -478,33 +478,31 @@ async function getSecurityInquiriesCost(supervisorCode: string, startDate: Date,
   }
 }
 
-// Get equipment pricing from Google Sheets (Vercel) or local file or defaults
+/**
+ * Supervisor salary equipment-cost catalog.
+ * Shares Admin sheet أسعار_المعدات with rider liability SoT when available.
+ * Salary domain may fall back to approved Admin defaults if Sheets unavailable
+ * (does NOT create rider liabilities; rider create path is fail-closed separately).
+ */
 async function getEquipmentPricing() {
-  const defaults = {
-    motorcycleBox: 550,
-    bicycleBox: 550,
-    tshirt: 100,
-    jacket: 200,
-    helmet: 150,
-  };
+  const { loadAdminEquipmentPricingFromSheets } = await import(
+    '@/lib/equipmentPricing/loadAdminPricing'
+  );
+  const { APPROVED_ADMIN_EQUIPMENT_PRICING_EGP } = await import(
+    '@/lib/equipmentPricing/approvedDefaults'
+  );
 
-  try {
-    const { getSheetData } = await import('./googleSheets');
-    const data = await getSheetData('أسعار_المعدات', true);
-    if (data && data.length >= 2 && data[1] && data[1].length >= 5) {
-      const row = data[1];
-      const pricing = {
-        motorcycleBox: Number(row[0]) >= 0 ? Number(row[0]) : defaults.motorcycleBox,
-        bicycleBox: Number(row[1]) >= 0 ? Number(row[1]) : defaults.bicycleBox,
-        tshirt: Number(row[2]) >= 0 ? Number(row[2]) : defaults.tshirt,
-        jacket: Number(row[3]) >= 0 ? Number(row[3]) : defaults.jacket,
-        helmet: Number(row[4]) >= 0 ? Number(row[4]) : defaults.helmet,
-      };
-      console.log('[Salary] Equipment pricing loaded from Google Sheets:', pricing);
-      return pricing;
-    }
-  } catch (e) {
-    console.log('[Salary] Equipment pricing from Sheets failed, trying local file:', e);
+  const loaded = await loadAdminEquipmentPricingFromSheets();
+  if (loaded.ok) {
+    const pricing = {
+      motorcycleBox: loaded.egp.motorcycleBox,
+      bicycleBox: loaded.egp.bicycleBox,
+      tshirt: loaded.egp.tshirt,
+      jacket: loaded.egp.jacket,
+      helmet: loaded.egp.helmet,
+    };
+    console.log('[Salary] Equipment pricing loaded from Admin Sheets SoT:', pricing);
+    return pricing;
   }
 
   try {
@@ -516,18 +514,43 @@ async function getEquipmentPricing() {
       const pricing = JSON.parse(data);
       console.log('[Salary] Equipment pricing loaded from file:', pricing);
       return {
-        motorcycleBox: typeof pricing.motorcycleBox === 'number' ? pricing.motorcycleBox : 550,
-        bicycleBox: typeof pricing.bicycleBox === 'number' ? pricing.bicycleBox : 550,
-        tshirt: typeof pricing.tshirt === 'number' ? pricing.tshirt : 100,
-        jacket: typeof pricing.jacket === 'number' ? pricing.jacket : 200,
-        helmet: typeof pricing.helmet === 'number' ? pricing.helmet : 150,
+        motorcycleBox:
+          typeof pricing.motorcycleBox === 'number'
+            ? pricing.motorcycleBox
+            : APPROVED_ADMIN_EQUIPMENT_PRICING_EGP.motorcycleBox,
+        bicycleBox:
+          typeof pricing.bicycleBox === 'number'
+            ? pricing.bicycleBox
+            : APPROVED_ADMIN_EQUIPMENT_PRICING_EGP.bicycleBox,
+        tshirt:
+          typeof pricing.tshirt === 'number'
+            ? pricing.tshirt
+            : APPROVED_ADMIN_EQUIPMENT_PRICING_EGP.tshirt,
+        jacket:
+          typeof pricing.jacket === 'number'
+            ? pricing.jacket
+            : APPROVED_ADMIN_EQUIPMENT_PRICING_EGP.jacket,
+        helmet:
+          typeof pricing.helmet === 'number'
+            ? pricing.helmet
+            : APPROVED_ADMIN_EQUIPMENT_PRICING_EGP.helmet,
       };
     }
   } catch (error) {
-    console.log('[Salary] Equipment pricing file not found, using defaults:', error);
+    console.log('[Salary] Equipment pricing file not found, using approved Admin defaults:', error);
   }
 
-  return defaults;
+  console.log(
+    '[Salary] Admin Sheets pricing unavailable — using approved display defaults (salary domain only):',
+    loaded.error
+  );
+  return {
+    motorcycleBox: APPROVED_ADMIN_EQUIPMENT_PRICING_EGP.motorcycleBox,
+    bicycleBox: APPROVED_ADMIN_EQUIPMENT_PRICING_EGP.bicycleBox,
+    tshirt: APPROVED_ADMIN_EQUIPMENT_PRICING_EGP.tshirt,
+    jacket: APPROVED_ADMIN_EQUIPMENT_PRICING_EGP.jacket,
+    helmet: APPROVED_ADMIN_EQUIPMENT_PRICING_EGP.helmet,
+  };
 }
 
 // Equipment details interface
@@ -915,25 +938,37 @@ export async function calculateSupervisorSalary(
     const deductionsSheetTotal = deductionsDetails.total;
 
     const advances = advancesDetails.total;
-    // SRS-014 Phase E — when auto equipment deductions are ON and this
-    // supervisor has riders on the new liability path, legacy المعدات ×
-    // أسعار_المعدات would double-count against ledger_native installments.
-    // Additive filter only: zero the legacy sheet contribution for that case.
+    // SRS-014 Phase D — legacy المعدات isolation.
+    // Legacy sheet is supervisor-aggregated (no rider column). Zeroing the
+    // entire supervisor when any rider has an open V2 liability incorrectly
+    // alters unrelated riders' legacy equipment costs. Keep legacy cost;
+    // double-count is prevented operationally (V2 deliveries must not also
+    // be posted on legacy المعدات). When Auto Deduction is OFF this block
+    // never changes salary fields.
     let equipmentCost = equipmentDetails.totalCost;
     let equipmentDetailsForResult = equipmentDetails;
     if (String(process.env.FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED || '').trim().toLowerCase() === 'true') {
       try {
         const { listOpenLiabilityRiderCodesForSupervisor } = await import('@/lib/equipmentLiability/store');
+        const { shouldZeroLegacyEquipmentCostForSupervisor } = await import(
+          '@/lib/equipmentDeductions/legacyEquipmentGuard'
+        );
         const liabilityRiders = await listOpenLiabilityRiderCodesForSupervisor(supervisorCode);
-        if (liabilityRiders.length > 0) {
-          console.log(
-            `[Salary] SRS-014 double-count guard: excluding legacy equipmentCost for ${supervisorCode} (${liabilityRiders.length} open liability riders)`
-          );
+        if (
+          shouldZeroLegacyEquipmentCostForSupervisor({
+            autoDeductionsEnabled: true,
+            openLiabilityRiderCount: liabilityRiders.length,
+          })
+        ) {
           equipmentCost = 0;
           equipmentDetailsForResult = { ...equipmentDetails, totalCost: 0, items: [] };
+        } else if (liabilityRiders.length > 0) {
+          console.log(
+            `[Salary] SRS-014 isolation: keeping legacy equipmentCost for ${supervisorCode} despite ${liabilityRiders.length} open V2 liability rider(s) (no supervisor-wide zero)`
+          );
         }
       } catch (err) {
-        console.error('[Salary] SRS-014 equipment double-count guard failed (keeping legacy cost):', err);
+        console.error('[Salary] SRS-014 equipment isolation guard failed (keeping legacy cost):', err);
       }
     }
     const adminDeductionTotal = adminDeductions.total;

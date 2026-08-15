@@ -604,3 +604,122 @@ No synthetic production candidate writes (flag OFF ⇒ V2 APIs 503).
 **Do NOT start Phase C.**
 
 Await explicit human approval before enabling Recruitment V2.
+
+---
+
+## PHASE B FINAL SAFETY GATE (READ-ONLY) — 2026-08-09
+
+**Decision: PASS**  
+**Flag NOT enabled. Phase C NOT started.**
+
+### Deployed commit / deployment
+
+| Item | Value |
+|---|---|
+| Production alias deploy | `dpl_4Z4yCd6kVPxrpQvcCWS1Bio36356` (docs commit `c52e0ef`) |
+| Phase B code commit | `0bfbc65` (included in alias history) |
+| Alias | `https://wakeel-team-dashboard.vercel.app` |
+| Audit script | `scripts/srs014-phase-b-final-safety-audit.ts` → **25/25 PASS** |
+
+### Flag state (Production)
+
+| Flag | State |
+|---|---|
+| `FEATURE_RECRUITMENT_V2_ENABLED` | **absent / OFF** |
+| `FEATURE_PAYOUT_CYCLES_ENABLED` | **ON** |
+| `FEATURE_EQUIPMENT_LEDGER_ENABLED` | absent / OFF |
+| `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED` | absent / OFF |
+| `FEATURE_EQUIPMENT_RETURNS_V2_ENABLED` | absent / OFF |
+| `FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED` | absent / OFF |
+| `FEATURE_EQUIPMENT_INVENTORY_V2_ENABLED` | absent / OFF |
+| Auto-deduction cron | **skipped** (`FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED off`) |
+
+### Existing recruitment regression
+
+| Check | Result |
+|---|---|
+| Unauthenticated `GET /api/recruitment/candidates` | **401** (expected — prior report “401” was an unauth probe, **not** a regression) |
+| Authenticated Admin list | **200**, historical rows readable |
+| Authenticated Recruitment Manager list | **200** |
+| Supervisor | **403** |
+| Limited admin `limited:salaries,riders` | **403** |
+| Limited admin `limited:recruitment` | **200** |
+| Capability `recruitmentV2Enabled` | **false** |
+| V2 contacts / security-fee | **503** `enabled:false` |
+| Recruitment stats (RM) | **200** |
+| Sheet first-22 headers vs code | **exact match** |
+| Historical rows | **552** intact |
+| Destructive rename (`phone`→`phonePrimary`) | **none** |
+
+Production UI (flag OFF): `/recruitment/candidates` loads legacy create form (name, primary phone, vehicle, worked-before, governorate, zone, supervisor preference, hiring decision, notes). Candidate table filters including lecture/activation/equipment remain. V2-only create fields (secondary phone, national ID, address, age, student, security fee, contacts panel) are **hidden** while flag OFF — correct.
+
+### UI verification (flag OFF + code readiness for ON)
+
+| Area | Production (flag OFF) | Code/tests (flag ON) |
+|---|---|---|
+| Candidate core fields | Visible / working | Extended fields gated by capability |
+| Family contacts UI/API | Hidden / **503** | Validated in `phaseB.test.ts` + contacts store |
+| Security fee PAID/NOT_PAID | Hidden / **503** | Status-only updater; UNPAID→NOT_PAID |
+| Lecture / absence / reschedule | Legacy lecture fields present | Absence reason + reschedule rules in `phaseB.ts` |
+| Activation + rider code | Legacy activation fields present | Rider code required on activate; reject reason required |
+| Ops assignment | Admin row-assign UI remains; RM wizard gated when V2 ON | Server `assertOpsAssignmentPermission` RM→deny, Admin→allow |
+
+### Permission matrix (verified)
+
+| Actor | Legacy recruitment GET | V2 contacts/fee (flag OFF) | Ops assign (V2 ON helper) | Contacts exception (V2 ON) |
+|---|---|---|---|---|
+| Unauth | 401 | 503 before/with auth N/A | — | — |
+| Supervisor | 403 | — | — | — |
+| Recruitment Manager | 200 | 503 | **blocked** | **blocked** |
+| Limited admin (no recruitment) | 403 | — | — | — |
+| Limited admin (recruitment) | 200 | 503 | — | — |
+| Full Admin | 200 | 503 | **allowed** | **allowed** |
+
+### Financial isolation
+
+| Check | Evidence |
+|---|---|
+| No 800/900 liability creation from Phase B | `recruitmentV2.ts` has no liability/ledger/800/900 calls |
+| No equipment ledger / auto-deduction / payroll QA rows | Sheets scan `SRS014QA_` = **0** |
+| Cron cannot deduct | Production cron **skipped** |
+| Salary untouched | SRS-013 Phase 3 green |
+| 100 EGP fee | Status field only (`PAID`/`NOT_PAID`) |
+
+### Test / build results
+
+| Suite | Result |
+|---|---|
+| `npm run test:srs014` | **61/61 PASS** |
+| SRS-013 Phase 3 | **5 PASS / 0 FAIL / 1 SKIP** |
+| `tsc --noEmit` | PASS |
+| `next build` | PASS |
+| Production read-only audit | **25/25 PASS** |
+
+### Production mutation / cleanup
+
+| Check | Result |
+|---|---|
+| QA candidate rows created this audit | **0** (read-only) |
+| Existing candidate rows modified | **0** |
+| Sheets deleted/renamed | **none** |
+| Flags changed | **none** |
+| Prior `SRS014QA_` financial leftovers | **0** (liability / auto-deductions / payroll) |
+| Contacts sheet | Not created yet (lazy; missing tab parse error expected) |
+
+### Data model note (non-blocking)
+
+- Header row currently lists **22** columns; data rows already use up to **26** (vehicleType / workedBefore / governorate / zone) — pre-existing header lag, first-22 names still exact-match code.
+- Phase B columns are append-only in `CANDIDATE_HEADERS`; `ensureHeaderRow` runs on create/ensure path (not on list) and extends headers without renaming legacy columns.
+- Primary phone remains `phone`; secondary is additive `phoneSecondary` — no duplicate national-ID column collision observed.
+
+### Remaining non-blocking issues
+
+1. **V2 pipeline stage filter** (`مرحلة المتابعة (V2)`) is visible in the candidates table even while the flag is OFF (client-side derive; no API dependency). Harmless; can be gated on capability later.
+2. **Full V2 form fields** cannot be exercised end-to-end on Production until the flag is enabled (by design for this gate).
+3. **Ops-assignment 403 on live Production API** cannot be proven with flag OFF (helpers are no-ops for backward compat); enforcement proven via in-process flag ON + unit suite + route strip of `finalAssignedSupervisorCode` for RM when V2 ON.
+
+### Final STOP
+
+**PHASE B FINAL SAFETY GATE: PASS**  
+Do **not** enable `FEATURE_RECRUITMENT_V2_ENABLED` until explicit human approval.  
+Do **not** start Phase C.

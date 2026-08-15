@@ -29,6 +29,12 @@ export const EQUIPMENT_LIABILITY_HEADERS = [
   'updatedBy',
   /** Additive — cash return settlement paid (not installment progress). */
   'settlementPaidMilli',
+  /** 4D.5.4.2 — immutable Admin price snapshot metadata (additive). */
+  'pricingSource',
+  'pricingCapturedAt',
+  'snapMotorcycleBagMilli',
+  'snapBicycleBagMilli',
+  'snapShirtUnitMilli',
 ] as const;
 
 export type EquipmentLiabilityStatus = 'open' | 'settled' | 'waived' | 'closed';

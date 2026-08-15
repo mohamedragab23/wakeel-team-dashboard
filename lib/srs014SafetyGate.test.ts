@@ -34,8 +34,11 @@ import {
   isManualDeductionsV2Enabled,
   isPayoutCyclesEnabled,
   isRecruitmentV2Enabled,
+  isSrs014FinancialApplyEnabled,
+  isSrs014OpeningBalanceWriteEnabled,
 } from '@/lib/srs014Flags';
 import { detectInventoryAnomalies } from '@/lib/equipmentInventory/anomalies';
+import { shouldZeroLegacyEquipmentCostForSupervisor } from '@/lib/equipmentDeductions/legacyEquipmentGuard';
 
 function cycle(
   partial: Partial<PayoutCycle> & Pick<PayoutCycle, 'cycleId' | 'startDate' | 'endDate' | 'deductionGenerationDate'>
@@ -75,7 +78,18 @@ function reconcile(params: {
 
 describe('SRS-014 safety gate — §2 liability 900/800', () => {
   it('Scenario A NOT_PAID = exactly 900.00 with 300×3', () => {
-    const fields = computeLiabilityFields({ securityPaidUpfront: false, bagType: 'motorcycle' });
+    const fields = computeLiabilityFields({
+      securityPaidUpfront: false,
+      bagType: 'motorcycle',
+      pricing: {
+        source: 'ADMIN_EQUIPMENT_PRICES',
+        capturedAt: '2026-08-01T00:00:00.000Z',
+        motorcycleBagMilli: 53000,
+        bicycleBagMilli: 53000,
+        shirtMilli: 13500,
+        securityFeeMilli: 10000,
+      },
+    });
     assert.equal(fields.bagCostMilli, 53000);
     assert.equal(fields.shirtCostMilli, 27000);
     assert.equal(fields.securityFeeMilli, 10000);
@@ -90,8 +104,19 @@ describe('SRS-014 safety gate — §2 liability 900/800', () => {
   });
 
   it('Scenario B PAID = exactly 800.00 with 266.67/266.67/266.66', () => {
-    const fields = computeLiabilityFields({ securityPaidUpfront: true, bagType: 'bicycle' });
-    assert.equal(fields.bagCostMilli, 53000); // bag type ignored financially
+    const fields = computeLiabilityFields({
+      securityPaidUpfront: true,
+      bagType: 'bicycle',
+      pricing: {
+        source: 'ADMIN_EQUIPMENT_PRICES',
+        capturedAt: '2026-08-01T00:00:00.000Z',
+        motorcycleBagMilli: 53000,
+        bicycleBagMilli: 53000,
+        shirtMilli: 13500,
+        securityFeeMilli: 10000,
+      },
+    });
+    assert.equal(fields.bagCostMilli, 53000); // bicycle uses configured bicycleBagMilli
     assert.equal(fields.originalLiabilityMilli, 80000);
     assert.equal(LIABILITY_AFTER_SECURITY_PAID_MILLI, 80000);
     assert.equal(formatMilliemesAsEgp(fields.originalLiabilityMilli), '800.00');
@@ -195,7 +220,7 @@ describe('SRS-014 safety gate — §4 closing cycle', () => {
       cycle: closing,
       allCycles: [prior, closing],
       activationDate: '2026-08-01',
-      riderCode: 'QA-R1',
+      riderCode: '900001',
       equipmentIssueId: 'QA-ISSUE-1',
       existingIdempotencyKeys: new Set(),
     });
@@ -226,7 +251,7 @@ describe('SRS-014 safety gate — §5 partial payout', () => {
       cycle: c1,
       allCycles: [c1, c2],
       activationDate: '2026-08-01',
-      riderCode: 'QA-PARTIAL',
+      riderCode: '900002',
       equipmentIssueId: 'ISSUE-P',
       availablePayoutMilli: 15000,
       existingIdempotencyKeys: new Set(),
@@ -254,8 +279,9 @@ describe('SRS-014 safety gate — §5 partial payout', () => {
       cycle: c2,
       allCycles: [c1, c2],
       activationDate: '2026-08-01',
-      riderCode: 'QA-PARTIAL',
+      riderCode: '900002',
       equipmentIssueId: 'ISSUE-P',
+      availablePayoutMilli: 15000,
       existingIdempotencyKeys: new Set(),
     });
     assert.equal(d2.action, 'deduct');
@@ -277,8 +303,8 @@ describe('SRS-014 safety gate — §7 idempotency', () => {
       endDate: '2026-09-07',
       deductionGenerationDate: '2026-09-07',
     });
-    const key = buildIdempotencyKey('QA-R', 'ISSUE-1', 'idemp', 1);
-    assert.equal(key, 'equipment:QA-R:ISSUE-1:idemp:1');
+    const key = buildIdempotencyKey('900003', 'ISSUE-1', 'idemp', 1);
+    assert.equal(key, 'equipment:900003:ISSUE-1:idemp:1');
     const keys = new Set<string>();
     let deductCount = 0;
     for (let i = 0; i < 3; i++) {
@@ -289,8 +315,9 @@ describe('SRS-014 safety gate — §7 idempotency', () => {
         cycle: c,
         allCycles: [c],
         activationDate: '2026-08-01',
-        riderCode: 'QA-R',
+        riderCode: '900003',
         equipmentIssueId: 'ISSUE-1',
+        availablePayoutMilli: 30000,
         existingIdempotencyKeys: keys,
       });
       if (d.action === 'deduct') {
@@ -467,6 +494,8 @@ describe('SRS-014 safety gate — §14 flag isolation (process env defaults)', (
       'FEATURE_EQUIPMENT_RETURNS_V2_ENABLED',
       'FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED',
       'FEATURE_EQUIPMENT_INVENTORY_V2_ENABLED',
+      'FEATURE_SRS014_FINANCIAL_APPLY_ENABLED',
+      'FEATURE_SRS014_OPENING_BALANCE_WRITE_ENABLED',
     ] as const;
     const saved: Record<string, string | undefined> = {};
     for (const k of keys) saved[k] = process.env[k];
@@ -480,11 +509,15 @@ describe('SRS-014 safety gate — §14 flag isolation (process env defaults)', (
       assert.equal(isEquipmentReturnsV2Enabled(), false);
       assert.equal(isManualDeductionsV2Enabled(), false);
       assert.equal(isEquipmentInventoryV2Enabled(), false);
+      assert.equal(isSrs014FinancialApplyEnabled(), false);
+      assert.equal(isSrs014OpeningBalanceWriteEnabled(), false);
 
       process.env.FEATURE_PAYOUT_CYCLES_ENABLED = 'true';
       assert.equal(isPayoutCyclesEnabled(), true);
       assert.equal(isAutoEquipmentDeductionsEnabled(), false);
       assert.equal(isEquipmentLedgerEnabled(), false);
+      assert.equal(isSrs014FinancialApplyEnabled(), false);
+      assert.equal(isSrs014OpeningBalanceWriteEnabled(), false);
     } finally {
       for (const k of keys) {
         if (saved[k] === undefined) delete process.env[k];
@@ -494,18 +527,20 @@ describe('SRS-014 safety gate — §14 flag isolation (process env defaults)', (
   });
 });
 
-describe('SRS-014 safety gate — §6 double-count guard contract', () => {
-  it('documents salary guard trigger: auto flag ON + open liability riders ⇒ legacy equipmentCost=0', () => {
-    // Pure contract test — runtime salaryService needs Sheets; guard is additive filter:
-    // if FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED && listOpenLiabilityRiderCodesForSupervisor.length>0
-    // then equipmentCost = 0 for that supervisor period.
+describe('SRS-014 safety gate — §6 legacy equipment isolation contract', () => {
+  it('auto ON + open V2 liability riders must NOT zero supervisor-wide legacy equipmentCost', () => {
     const legacyEquipmentCost = 900;
     const ledgerNativeInstallment = 300;
-    const withGuard = 0; // legacy excluded
-    const withoutGuardDouble = legacyEquipmentCost + ledgerNativeInstallment;
-    assert.equal(withGuard + ledgerNativeInstallment, 300);
-    assert.equal(withoutGuardDouble, 1200);
-    assert.ok(withoutGuardDouble !== withGuard + ledgerNativeInstallment || true);
+    assert.equal(
+      shouldZeroLegacyEquipmentCostForSupervisor({
+        autoDeductionsEnabled: true,
+        openLiabilityRiderCount: 2,
+      }),
+      false
+    );
+    // Isolation: legacy cost for unrelated riders on the same supervisor remains.
+    assert.equal(legacyEquipmentCost, 900);
+    assert.equal(legacyEquipmentCost + ledgerNativeInstallment, 1200);
   });
 });
 

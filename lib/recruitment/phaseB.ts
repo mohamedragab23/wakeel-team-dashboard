@@ -118,12 +118,16 @@ export function validateActivationPatch(
   patch: Partial<Candidate>
 ): string | null {
   const nextStatus = patch.activationStatus ?? existing.activationStatus;
+  const nextConfirmed = patch.activationConfirmed ?? existing.activationConfirmed;
   const becomingActivated =
     nextStatus === 'مفعل - تم القبول' && existing.activationStatus !== 'مفعل - تم القبول';
+  /** Confirm-only path must also require an authoritative riderCode (never invent one). */
+  const becomingConfirmedActivated =
+    nextConfirmed === 'مؤكد' && existing.activationConfirmed !== 'مؤكد';
   const becomingRejected =
     nextStatus === 'مرفوض' && existing.activationStatus !== 'مرفوض';
 
-  if (becomingActivated) {
+  if (becomingActivated || becomingConfirmedActivated) {
     const codeErr = validateRiderCodeForActivation(patch.riderCode ?? existing.riderCode);
     if (codeErr) return codeErr;
   }

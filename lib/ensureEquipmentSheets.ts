@@ -6,11 +6,13 @@ import {
   DEDUCTION_IMPORT_HEADERS,
   DEDUCTION_UPLOAD_LOG_HEADERS,
   DEDUCTIONS_ACTUAL_HEADERS,
+  EQUIPMENT_PAYROLL_ACTUAL_HEADERS,
   SHEET_DEDUCTIONS_ACTUAL,
   SHEET_DEDUCTIONS_IMPORT,
   SHEET_DEDUCTIONS_UPLOAD_LOG,
   SHEET_EQUIPMENT_DELIVERY,
   SHEET_EQUIPMENT_PHOTOS,
+  SHEET_EQUIPMENT_PAYROLL_ACTUAL,
   SHEET_EQUIPMENT_RETURN,
 } from '@/lib/equipmentSheetConstants';
 import { ensureMainInventoryInitialized } from '@/lib/mainInventoryService';
@@ -76,6 +78,11 @@ export async function ensureAllEquipmentSheets(): Promise<{
 
   await ensureSheetExists(SHEET_DEDUCTIONS_ACTUAL, [...DEDUCTIONS_ACTUAL_HEADERS]);
   ensured.push(SHEET_DEDUCTIONS_ACTUAL);
+
+  await ensureSheetExists(SHEET_EQUIPMENT_PAYROLL_ACTUAL, [
+    ...EQUIPMENT_PAYROLL_ACTUAL_HEADERS,
+  ]);
+  ensured.push(SHEET_EQUIPMENT_PAYROLL_ACTUAL);
 
   await ensureMainInventoryInitialized();
   ensured.push('المخزون_الرئيسي');

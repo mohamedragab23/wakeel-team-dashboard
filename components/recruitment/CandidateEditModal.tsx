@@ -156,7 +156,7 @@ export default function CandidateEditModal({ candidate, open, onClose, onSaved }
               <Field label="الاستعلام الأمني — 100 جنيه">
                 <select
                   className={inputClass}
-                  value={form.securityInquiryPayment ?? 'NOT_PAID'}
+                  value={form.securityInquiryPayment ?? ''}
                   onChange={(e) =>
                     setForm({
                       ...form,
@@ -164,6 +164,7 @@ export default function CandidateEditModal({ candidate, open, onClose, onSaved }
                     })
                   }
                 >
+                  <option value="">غير محدد (UNKNOWN) — لا يُستنتج تلقائيًا</option>
                   <option value="PAID">تم السداد</option>
                   <option value="NOT_PAID">لم يتم السداد</option>
                 </select>

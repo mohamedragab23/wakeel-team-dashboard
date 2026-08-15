@@ -108,9 +108,8 @@ export async function POST(request: NextRequest) {
           );
         }
         securityFee = normalized;
-      } else {
-        securityFee = 'NOT_PAID';
       }
+      // Do NOT invent NOT_PAID when omitted — leave UNKNOWN until human records PAID|NOT_PAID.
     }
 
     // Phase B: RM must not select Ops supervisor on create. Keep empty for Admin later.

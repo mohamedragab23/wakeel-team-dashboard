@@ -10,11 +10,15 @@ import Button from '@/components/ui-v2/Button';
 import {
   ARABIC_MONTH_NAMES,
   DEDUCTION_CYCLE_LABELS,
-  type DeductionCycleKey } from '@/lib/equipmentSheetConstants';
+  type DeductionCycleKey,
+} from '@/lib/equipmentSheetConstants';
+import { formatMilliemesAsEgp } from '@/lib/money';
 
 const CYCLE_OPTIONS: { key: DeductionCycleKey; label: string }[] = (
   Object.entries(DEDUCTION_CYCLE_LABELS) as [DeductionCycleKey, string][]
 ).map(([key, label]) => ({ key, label }));
+
+type PathMode = 'srs014' | 'legacy';
 
 export default function AdminDeductionsReconcilePage() {
   const router = useRouter();
@@ -23,12 +27,17 @@ export default function AdminDeductionsReconcilePage() {
   const [deductionCycle, setDeductionCycle] = useState<DeductionCycleKey | ''>('');
   const [month, setMonth] = useState<string>(() => String(new Date().getMonth() + 1));
   const [year, setYear] = useState<string>(() => String(new Date().getFullYear()));
+  const [pathMode, setPathMode] = useState<PathMode>('srs014');
+  const [completeCycleConfirmed, setCompleteCycleConfirmed] = useState(false);
+  const [runAllocation, setRunAllocation] = useState(false);
+  const [payoutCycleId, setPayoutCycleId] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{
     ok: boolean;
     text: string;
     stats?: Record<string, number>;
     warnings?: string[];
+    srs?: Record<string, unknown>;
   } | null>(null);
 
   const yearOptions = Array.from({ length: 8 }, (_, i) => String(new Date().getFullYear() - 2 + i));
@@ -61,27 +70,59 @@ export default function AdminDeductionsReconcilePage() {
       fd.append('deductionCycle', deductionCycle);
       fd.append('month', month);
       fd.append('year', year);
-      const origin = typeof window !== 'undefined' ? window.location.origin : '';
-      const res = await authFetch(`${origin}/api/admin/deductions-reconcile`, {
+
+      if (pathMode === 'srs014') {
+        fd.append('completeCycleConfirmed', completeCycleConfirmed ? 'true' : 'false');
+        fd.append('runAllocation', runAllocation ? 'true' : 'false');
+        if (payoutCycleId.trim()) fd.append('payoutCycleId', payoutCycleId.trim());
+        const res = await authFetch('/api/admin/deductions-manager-compare', {
+          method: 'POST',
+          credentials: 'same-origin',
+          body: fd,
+        });
+        const data = await res.json();
+        if (!data.success) {
+          setResult({
+            ok: false,
+            text: data.error || 'فشل',
+            warnings: data.details,
+          });
+          return;
+        }
+        setResult({
+          ok: true,
+          text: data.message || 'تم',
+          warnings: data.parseWarnings,
+          srs: data,
+        });
+        setFile(null);
+        return;
+      }
+
+      const res = await authFetch('/api/admin/deductions-reconcile', {
         method: 'POST',
         credentials: 'same-origin',
-        body: fd });
+        body: fd,
+      });
       const data = await res.json();
       if (!data.success) {
         setResult({
           ok: false,
           text: data.error || 'فشل',
-          warnings: data.details });
+          warnings: data.details,
+        });
         return;
       }
       setResult({
         ok: true,
         text: data.message || 'تم',
         stats: data.stats,
-        warnings: data.parseWarnings });
+        warnings: data.parseWarnings,
+      });
       setFile(null);
-    } catch (err: any) {
-      setResult({ ok: false, text: err.message || 'خطأ' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'خطأ';
+      setResult({ ok: false, text: message });
     } finally {
       setLoading(false);
     }
@@ -95,20 +136,36 @@ export default function AdminDeductionsReconcilePage() {
     );
   }
 
+  const srs = result?.srs as
+    | {
+        fileValidationStatus?: string;
+        completeCycleConfirmed?: boolean;
+        evidenceIdentityKey?: string | null;
+        allocationReady?: boolean;
+        allocationOutcome?: string;
+        allocatedTotalMilli?: number;
+        anomalyActualExceedsRequested?: unknown[];
+        linesPreview?: Array<{
+          riderCode: string;
+          requestedMilli: number;
+          actualMilli: number | null;
+          deltaMilli: number | null;
+        }>;
+        financialMutation?: boolean;
+        financialApplyEnabled?: boolean;
+      }
+    | undefined;
+
   return (
     <Layout>
       <div className="max-w-3xl mx-auto space-y-6 px-4 py-6" dir="rtl">
-        <h1 className="text-2xl font-semibold text-[#EAF0FF]">استقطاعات المدير — مقارنة مع رفع المشرفين</h1>
+        <h1 className="text-2xl font-semibold text-[#EAF0FF]">
+          استقطاعات المدير — مقارنة مع رفع المشرفين
+        </h1>
         <p className="text-sm text-[rgba(234,240,255,0.7)] leading-relaxed">
-          ارفع شيت Excel كما يصدر من النظام (Rider ID، Applaied Deduction on Wallet، …). حدد{' '}
-          <strong className="text-[#EAF0FF]">نفس</strong> الدورة والشهر والسنة المستخدمة في رفع المشرف لورقة
-          «الاستقطاعات». يتمتجميع قيم المشرفين لكل كود مندوب ومقارنتها بمجموع عمود خصم المحفظة من شيتك، ثم إلحاق
-          النتائج في Google Sheet تسمى <strong className="text-[#EAF0FF]">الاستقطاعات_الفعلية</strong>.
-        </p>
-        <p className="text-xs text-amber-200/90 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2">
-          الصلاحية: أضف في ورقة Admins للعمود الرابع (الصلاحيات) أحد القيم:{' '}
-          <code className="text-amber-100">deductions_verify</code> أو{' '}
-          <code className="text-amber-100">استقطاعات_ادمن</code> أو <code className="text-amber-100">all</code>.
+          المسار الافتراضي (SRS-014): Manager Compare → Evidence → Allocation (اختياري).{' '}
+          <strong className="text-[#EAF0FF]">لا يخصم فلوسًا</strong> — Financial Apply يبقى مقفولًا.
+          المسار القديم يكتب فقط إلى «الاستقطاعات_الفعلية» كما سابقًا.
         </p>
 
         {result && (
@@ -120,14 +177,57 @@ export default function AdminDeductionsReconcilePage() {
             }`}
           >
             <div>{result.text}</div>
+            {srs && (
+              <ul className="text-xs space-y-1 opacity-95">
+                <li>FILE status: {srs.fileValidationStatus}</li>
+                <li>completeCycleConfirmed: {String(srs.completeCycleConfirmed)}</li>
+                <li>evidenceIdentityKey: {srs.evidenceIdentityKey || '—'}</li>
+                <li>allocationReady: {String(srs.allocationReady)}</li>
+                <li>allocationOutcome: {srs.allocationOutcome || '—'}</li>
+                <li>
+                  allocatedTotal:{' '}
+                  {formatMilliemesAsEgp(srs.allocatedTotalMilli ?? 0)} ج.م
+                </li>
+                <li>
+                  anomalies (actual &gt; requested):{' '}
+                  {(srs.anomalyActualExceedsRequested || []).length}
+                </li>
+                <li>financialMutation: {String(srs.financialMutation)}</li>
+                <li>financialApplyEnabled: {String(srs.financialApplyEnabled)}</li>
+              </ul>
+            )}
+            {srs?.linesPreview && srs.linesPreview.length > 0 && (
+              <div className="overflow-x-auto max-h-48 border border-white/10 rounded">
+                <table className="min-w-full text-xs">
+                  <thead>
+                    <tr>
+                      <th className="p-1 text-right">Rider</th>
+                      <th className="p-1 text-right">Requested</th>
+                      <th className="p-1 text-right">Actual</th>
+                      <th className="p-1 text-right">Δ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {srs.linesPreview.map((l) => (
+                      <tr key={l.riderCode} className="border-t border-white/10">
+                        <td className="p-1">{l.riderCode}</td>
+                        <td className="p-1">{formatMilliemesAsEgp(l.requestedMilli)}</td>
+                        <td className="p-1">
+                          {l.actualMilli == null ? '—' : formatMilliemesAsEgp(l.actualMilli)}
+                        </td>
+                        <td className="p-1">
+                          {l.deltaMilli == null ? '—' : formatMilliemesAsEgp(l.deltaMilli)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             {result.stats && (
               <ul className="text-xs space-y-1 opacity-95">
                 <li>إجمالي صفوف المقارنة: {result.stats.total}</li>
                 <li>متطابقة: {result.stats['متطابقة'] ?? 0}</li>
-                <li>المحفظة أعلى من المشرف: {result.stats['المحفظة_أعلى_من_المشرف'] ?? 0}</li>
-                <li>المشرف أعلى من المحفظة: {result.stats['المشرف_أعلى_من_المحفظة'] ?? 0}</li>
-                <li>لا يوجد في شيت المدير: {result.stats['لا_يوجد_في_شيت_المدير'] ?? 0}</li>
-                <li>لا يوجد في رفع المشرف: {result.stats['لا_يوجد_في_رفع_المشرف'] ?? 0}</li>
               </ul>
             )}
             {result.warnings && result.warnings.length > 0 && (
@@ -142,6 +242,28 @@ export default function AdminDeductionsReconcilePage() {
 
         <Card title="الفترة وملف شيت المدير">
           <form onSubmit={submit} className="space-y-4">
+            <fieldset className="space-y-2 text-sm text-[#EAF0FF]">
+              <legend className="mb-1">مسار المقارنة</legend>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="path"
+                  checked={pathMode === 'srs014'}
+                  onChange={() => setPathMode('srs014')}
+                />
+                SRS-014 (Evidence + Allocation) — بدون خصم مالي
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="path"
+                  checked={pathMode === 'legacy'}
+                  onChange={() => setPathMode('legacy')}
+                />
+                Legacy → كتابة «الاستقطاعات_الفعلية»
+              </label>
+            </fieldset>
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <label className="block space-y-1 text-sm text-[#EAF0FF]">
                 <span>دورة الاستقطاع</span>
@@ -191,6 +313,37 @@ export default function AdminDeductionsReconcilePage() {
               </label>
             </div>
 
+            {pathMode === 'srs014' && (
+              <div className="space-y-3 rounded-lg border border-white/10 p-3 text-sm text-[#EAF0FF]">
+                <label className="block space-y-1">
+                  <span>payoutCycleId (اختياري — لتصفية REQUEST)</span>
+                  <input
+                    className="w-full rounded-md bg-[#1e1e2f] border border-white/15 px-3 py-2"
+                    value={payoutCycleId}
+                    onChange={(e) => setPayoutCycleId(e.target.value)}
+                    placeholder="cycleId من دورات_القبض"
+                  />
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={completeCycleConfirmed}
+                    onChange={(e) => setCompleteCycleConfirmed(e.target.checked)}
+                  />
+                  أؤكد أن ملف الدورة كامل (FILE_VALID) — مطلوب قبل Allocation
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={runAllocation}
+                    onChange={(e) => setRunAllocation(e.target.checked)}
+                    disabled={!completeCycleConfirmed}
+                  />
+                  تشغيل Allocation foundation (سجلات APPLIED فقط — بدون Wallet/Ledger)
+                </label>
+              </div>
+            )}
+
             <div>
               <span className="block text-sm text-[#EAF0FF] mb-1">ملف Excel (شيت المدير)</span>
               <input
@@ -199,14 +352,14 @@ export default function AdminDeductionsReconcilePage() {
                 className="text-sm text-[#EAF0FF]"
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
               />
-              <p className="text-xs text-[rgba(234,240,255,0.55)] mt-2">
-                الأعمدة المتوقعة تشمل: Rider ID، Rider Name، 3PL، City، Starting Point، Vehicle، Salaries،
-                Deduction، …، Applaied Deduction on Wallet، Net After Deduction، Transfer Type.
-              </p>
             </div>
 
             <Button type="submit" variant="primary" disabled={loading || !file || !deductionCycle}>
-              {loading ? 'جاري المقارنة والكتابة...' : 'مقارنة وكتابة إلى «الاستقطاعات_الفعلية»'}
+              {loading
+                ? 'جاري المعالجة...'
+                : pathMode === 'srs014'
+                  ? 'تشغيل Manager Compare (SRS-014)'
+                  : 'مقارنة وكتابة إلى «الاستقطاعات_الفعلية»'}
             </Button>
           </form>
         </Card>

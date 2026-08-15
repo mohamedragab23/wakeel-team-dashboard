@@ -308,42 +308,84 @@ export async function PUT(request: NextRequest) {
       const ledgerOn = isEquipmentLedgerEnabled();
 
       if (ledgerOn) {
-        // Phase C: liability MUST succeed before delivery is marked approved.
-        const { createLiabilityFromDelivery } = await import('@/lib/equipmentLiability/store');
+        // Phase C + swap rules: economics depend on deliveryType (تعيين vs تبديل).
+        const {
+          createLiabilityFromDelivery,
+          createShirtSwapLiabilityFromDelivery,
+        } = await import('@/lib/equipmentLiability/store');
         const { PHASE_C_ERROR_AR } = await import('@/lib/equipmentLiability/phaseCGates');
+        const { resolveDeliveryEconomicIntent } = await import(
+          '@/lib/equipmentLiability/swapRules'
+        );
         const motorcyclePouch = Math.max(0, Number(row[6]) || 0);
         const bicyclePouch = Math.max(0, Number(row[7]) || 0);
+        const tshirtQty = Math.max(0, Number(row[8]) || 0);
+        const deliveryType = row[5]?.toString().trim() || '';
         const bagType = motorcyclePouch > 0 ? 'motorcycle' : 'bicycle';
         const riderCode = row[2]?.toString().trim() || '';
+        // Free shirt override: notes column may contain marker (auditable convention).
+        const notes = String(row[11] ?? '');
+        const adminFreeShirtOverride =
+          /FREE_SHIRT_SWAP|تبديل_تيشيرت_مجاني/i.test(notes);
 
-        const liability = await createLiabilityFromDelivery(
-          {
-            deliveryRowRef: String(rowIndex),
-            riderCode,
-            riderNameSnapshot: row[3]?.toString().trim() || '',
-            zoneSnapshot: row[4]?.toString().trim() || '',
-            supervisorCodeSnapshot: row[0]?.toString().trim() || '',
-            supervisorNameSnapshot: row[1]?.toString().trim() || '',
-            issueDate: approvalDate,
-            bagType,
-            jacketHeld: Math.max(0, Number(row[9]) || 0) > 0,
-            helmetHeld: Math.max(0, Number(row[10]) || 0) > 0,
-          },
-          { code: decoded.code || 'admin', name: approvedBy }
-        );
+        const economic = resolveDeliveryEconomicIntent({
+          deliveryType,
+          motorcyclePouch,
+          bicyclePouch,
+          tshirtQty,
+          adminFreeShirtOverride,
+        });
 
-        if (!liability.ok) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: liability.error || PHASE_C_ERROR_AR.LIABILITY_CREATE_FAILED,
-              code: liability.code,
-            },
-            { status: liability.code === 'LOCK_BUSY' ? 409 : 400 }
+        const baseInput = {
+          deliveryRowRef: String(rowIndex),
+          riderCode,
+          riderNameSnapshot: row[3]?.toString().trim() || '',
+          zoneSnapshot: row[4]?.toString().trim() || '',
+          supervisorCodeSnapshot: row[0]?.toString().trim() || '',
+          supervisorNameSnapshot: row[1]?.toString().trim() || '',
+          issueDate: approvalDate,
+          bagType: bagType as 'motorcycle' | 'bicycle',
+          jacketHeld: Math.max(0, Number(row[9]) || 0) > 0,
+          helmetHeld: Math.max(0, Number(row[10]) || 0) > 0,
+        };
+
+        if (economic.kind === 'assignment_create_liability') {
+          const liability = await createLiabilityFromDelivery(baseInput, {
+            code: decoded.code || 'admin',
+            name: approvedBy,
+          });
+          if (!liability.ok) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: liability.error || PHASE_C_ERROR_AR.LIABILITY_CREATE_FAILED,
+                code: liability.code,
+              },
+              { status: liability.code === 'LOCK_BUSY' ? 409 : 400 }
+            );
+          }
+          equipmentIssueId = liability.issue.equipmentIssueId;
+          updated[17] = equipmentIssueId;
+        } else if (economic.kind === 'swap_shirt_charge_create_liability') {
+          const liability = await createShirtSwapLiabilityFromDelivery(
+            { ...baseInput, shirtQty: economic.shirtQty },
+            { code: decoded.code || 'admin', name: approvedBy }
           );
+          if (!liability.ok) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: liability.error || PHASE_C_ERROR_AR.LIABILITY_CREATE_FAILED,
+                code: liability.code,
+                economicKind: economic.kind,
+              },
+              { status: liability.code === 'LOCK_BUSY' ? 409 : 400 }
+            );
+          }
+          equipmentIssueId = liability.issue.equipmentIssueId;
+          updated[17] = equipmentIssueId;
         }
-        equipmentIssueId = liability.issue.equipmentIssueId;
-        updated[17] = equipmentIssueId;
+        // Bag-free / free-shirt override / noop: inventory-only — no new liability.
 
         // Persist approval only after liability exists (no false approved financial state).
         await updateSheetRow(SHEET_EQUIPMENT_DELIVERY, rowIndex + 1, updated);

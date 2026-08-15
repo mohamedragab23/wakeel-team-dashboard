@@ -6,13 +6,15 @@ import {
   updateSheetRow,
 } from '@/lib/googleSheets';
 import { appendAuditLog } from '@/lib/auditLog';
+import { splitInstallmentsMilliemes } from '@/lib/money';
 import {
-  BAG_COST_MILLI,
-  SECURITY_FEE_MILLI,
-  TWO_TSHIRTS_COST_MILLI,
-  liabilityInstallmentSchedule,
-  type SecurityInquiryPayment,
-} from '@/lib/money';
+  computeAssignmentLiabilityFields,
+  requireAdminEquipmentPricingForLiability,
+  scheduleFromPersistedOriginalMilli,
+  type EquipmentPriceSnapshot,
+  type LoadAdminPricingResult,
+} from '@/lib/equipmentPricing';
+import { shirtSwapOriginalMilli } from '@/lib/equipmentLiability/swapRules';
 import { normalizeRiderCodeForPerformance } from '@/lib/riderCodeUtils';
 import { loadAllCandidates } from '@/lib/recruitment/recruitmentService';
 import {
@@ -60,8 +62,14 @@ export type EquipmentLiabilityIssue = {
   updatedAt: string;
   updatedBy: string;
   sheetRow?: number;
-  /** Derived at read time — not stored in sheet. */
+  /** Derived at read time from persisted originalLiabilityMilli — never live Admin re-price. */
   installmentSchedule?: number[];
+  /** Immutable Admin / opening price snapshot metadata (4D.5.4.2 / 4D.5.4.13). */
+  pricingSource?: 'ADMIN_EQUIPMENT_PRICES' | 'LEGACY_NO_SNAPSHOT' | 'OPENING_MIGRATION';
+  pricingCapturedAt?: string;
+  snapMotorcycleBagMilli?: number;
+  snapBicycleBagMilli?: number;
+  snapShirtUnitMilli?: number;
 };
 
 export type DeliveryLiabilityInput = {
@@ -109,6 +117,8 @@ export type CreateLiabilityDeps = {
   acquirePhaseCLiabilityLocks?: typeof acquirePhaseCLiabilityLocks;
   appendIssue?: (issue: EquipmentLiabilityIssue) => Promise<void>;
   skipAudit?: boolean;
+  /** Inject Admin pricing (tests). Production loads أسعار_المعدات fail-closed. */
+  loadPricing?: () => Promise<LoadAdminPricingResult>;
 };
 
 export async function findCandidateByRiderCode(riderCodeRaw: string) {
@@ -136,16 +146,16 @@ function parseBoolCell(v: string): boolean {
   return s === 'true' || s === '1' || s === 'yes';
 }
 
-function securityPaymentFromPaidUpfront(paid: boolean): SecurityInquiryPayment {
-  return paid ? 'PAID' : 'NOT_PAID';
-}
-
-/** Pure liability field computation from delivery + security payment. */
+/**
+ * Pure liability field computation from an immutable Admin price snapshot.
+ * Does NOT read money.ts business prices.
+ */
 export function computeLiabilityFields(params: {
   securityPaidUpfront: boolean;
   bagType: EquipmentBagType;
   jacketHeld?: boolean;
   helmetHeld?: boolean;
+  pricing: EquipmentPriceSnapshot;
 }): {
   bagCostMilli: number;
   shirtQty: number;
@@ -159,23 +169,15 @@ export function computeLiabilityFields(params: {
   installmentSchedule: number[];
   jacketHeld: boolean;
   helmetHeld: boolean;
+  priceSnapshot: EquipmentPriceSnapshot;
 } {
-  const security = securityPaymentFromPaidUpfront(params.securityPaidUpfront);
-  const { originalLiabilityMilli, schedule } = liabilityInstallmentSchedule(security);
-  return {
-    bagCostMilli: BAG_COST_MILLI,
-    shirtQty: 2,
-    shirtCostMilli: TWO_TSHIRTS_COST_MILLI,
-    securityFeeMilli: SECURITY_FEE_MILLI,
-    originalLiabilityMilli,
-    outstandingMilli: originalLiabilityMilli,
-    amountDeductedMilli: 0,
-    settlementPaidMilli: 0,
-    installmentsCompleted: 0,
-    installmentSchedule: schedule,
-    jacketHeld: Boolean(params.jacketHeld),
-    helmetHeld: Boolean(params.helmetHeld),
-  };
+  return computeAssignmentLiabilityFields({
+    snapshot: params.pricing,
+    bagType: params.bagType,
+    securityPaidUpfront: params.securityPaidUpfront,
+    jacketHeld: params.jacketHeld,
+    helmetHeld: params.helmetHeld,
+  });
 }
 
 export function rowToEquipmentLiability(row: unknown[], sheetRow: number): EquipmentLiabilityIssue | null {
@@ -183,7 +185,6 @@ export function rowToEquipmentLiability(row: unknown[], sheetRow: number): Equip
   if (!equipmentIssueId) return null;
 
   const securityPaidUpfront = parseBoolCell(cell(row, 13));
-  const { schedule } = liabilityInstallmentSchedule(securityPaymentFromPaidUpfront(securityPaidUpfront));
   const statusRaw = cell(row, 18) || 'open';
   const bagTypeRaw = cell(row, 8) || 'motorcycle';
   const status = (['open', 'settled', 'waived', 'closed'].includes(statusRaw)
@@ -191,6 +192,18 @@ export function rowToEquipmentLiability(row: unknown[], sheetRow: number): Equip
     : 'open') as EquipmentLiabilityStatus;
   const bagType = (bagTypeRaw === 'bicycle' ? 'bicycle' : 'motorcycle') as EquipmentBagType;
 
+  const originalLiabilityMilli = Math.max(0, Math.trunc(Number(cell(row, 14)) || 0));
+  const pricingSourceRaw = cell(row, 27);
+  const pricingSource =
+    pricingSourceRaw === 'ADMIN_EQUIPMENT_PRICES' ||
+    pricingSourceRaw === 'LEGACY_NO_SNAPSHOT' ||
+    pricingSourceRaw === 'OPENING_MIGRATION'
+      ? pricingSourceRaw
+      : originalLiabilityMilli > 0 || Number(cell(row, 9)) > 0
+        ? 'LEGACY_NO_SNAPSHOT'
+        : undefined;
+
+  // Persisted amounts are authoritative — never substitute live Admin / money.ts prices.
   return {
     equipmentIssueId,
     riderCode: cell(row, 1),
@@ -201,15 +214,19 @@ export function rowToEquipmentLiability(row: unknown[], sheetRow: number): Equip
     issueDate: cell(row, 6),
     activationDate: cell(row, 7),
     bagType,
-    bagCostMilli: Number(cell(row, 9)) || BAG_COST_MILLI,
-    shirtQty: Number(cell(row, 10)) || 2,
-    shirtCostMilli: Number(cell(row, 11)) || TWO_TSHIRTS_COST_MILLI,
-    securityFeeMilli: Number(cell(row, 12)) || SECURITY_FEE_MILLI,
+    bagCostMilli: Math.max(0, Math.trunc(Number(cell(row, 9)) || 0)),
+    shirtQty: (() => {
+      const raw = cell(row, 10);
+      if (raw === '') return 2; // legacy FLOW B default when column empty
+      return Math.max(0, Math.trunc(Number(raw) || 0));
+    })(),
+    shirtCostMilli: Math.max(0, Math.trunc(Number(cell(row, 11)) || 0)),
+    securityFeeMilli: Math.max(0, Math.trunc(Number(cell(row, 12)) || 0)),
     securityPaidUpfront,
-    originalLiabilityMilli: Number(cell(row, 14)) || 0,
-    outstandingMilli: Number(cell(row, 15)) || 0,
-    amountDeductedMilli: Number(cell(row, 16)) || 0,
-    installmentsCompleted: Number(cell(row, 17)) || 0,
+    originalLiabilityMilli,
+    outstandingMilli: Math.max(0, Math.trunc(Number(cell(row, 15)) || 0)),
+    amountDeductedMilli: Math.max(0, Math.trunc(Number(cell(row, 16)) || 0)),
+    installmentsCompleted: Math.max(0, Math.trunc(Number(cell(row, 17)) || 0)),
     status,
     deliveryRowRef: cell(row, 19),
     jacketHeld: parseBoolCell(cell(row, 20)),
@@ -218,9 +235,14 @@ export function rowToEquipmentLiability(row: unknown[], sheetRow: number): Equip
     createdBy: cell(row, 23),
     updatedAt: cell(row, 24),
     updatedBy: cell(row, 25),
-    settlementPaidMilli: Number(cell(row, 26)) || 0,
+    settlementPaidMilli: Math.max(0, Math.trunc(Number(cell(row, 26)) || 0)),
     sheetRow,
-    installmentSchedule: schedule,
+    installmentSchedule: scheduleFromPersistedOriginalMilli(originalLiabilityMilli),
+    pricingSource,
+    pricingCapturedAt: cell(row, 28) || undefined,
+    snapMotorcycleBagMilli: Math.max(0, Math.trunc(Number(cell(row, 29)) || 0)) || undefined,
+    snapBicycleBagMilli: Math.max(0, Math.trunc(Number(cell(row, 30)) || 0)) || undefined,
+    snapShirtUnitMilli: Math.max(0, Math.trunc(Number(cell(row, 31)) || 0)) || undefined,
   };
 }
 
@@ -253,6 +275,11 @@ function issueToRow(issue: EquipmentLiabilityIssue): unknown[] {
     issue.updatedAt,
     issue.updatedBy,
     issue.settlementPaidMilli ?? 0,
+    issue.pricingSource || '',
+    issue.pricingCapturedAt || '',
+    issue.snapMotorcycleBagMilli ?? '',
+    issue.snapBicycleBagMilli ?? '',
+    issue.snapShirtUnitMilli ?? '',
   ];
 }
 
@@ -263,10 +290,21 @@ export async function ensureEquipmentLiabilitySheet(): Promise<void> {
   ensuredOnce = true;
 }
 
+/** Append one liability row (FLOW A Opening persist uses this via pilot deps). */
+export async function appendLiabilityIssue(issue: EquipmentLiabilityIssue): Promise<void> {
+  await ensureEquipmentLiabilitySheet();
+  await appendToSheet(SHEET_EQUIPMENT_LIABILITY, [issueToRow(issue)]);
+}
+
 async function readAllIssues(): Promise<EquipmentLiabilityIssue[]> {
   await ensureEquipmentLiabilitySheet();
   // Fail closed: Sheets quota/transport errors must not look like "no liabilities".
-  const data = await getSheetDataOrThrow(SHEET_EQUIPMENT_LIABILITY, false);
+  // A:Z truncates after col 26 and drops settlementPaidMilli + pricing snapshot columns.
+  const data = await getSheetDataOrThrow(
+    SHEET_EQUIPMENT_LIABILITY,
+    false,
+    `${SHEET_EQUIPMENT_LIABILITY}!A:AZ`
+  );
   const out: EquipmentLiabilityIssue[] = [];
   for (let i = 1; i < data.length; i++) {
     const issue = rowToEquipmentLiability(data[i], i + 1);
@@ -377,14 +415,33 @@ export async function createLiabilityFromDelivery(
       };
     }
 
+    const loadPricing = deps?.loadPricing ?? requireAdminEquipmentPricingForLiability;
+    const pricingLoad = await loadPricing();
+    if (!pricingLoad.ok) {
+      return {
+        ok: false,
+        code:
+          pricingLoad.code === 'PRICING_UNAVAILABLE'
+            ? PHASE_C_ERROR.PRICING_UNAVAILABLE
+            : PHASE_C_ERROR.PRICING_INVALID,
+        error: PHASE_C_ERROR_AR[
+          pricingLoad.code === 'PRICING_UNAVAILABLE'
+            ? 'PRICING_UNAVAILABLE'
+            : 'PRICING_INVALID'
+        ],
+      };
+    }
+
     const computed = computeLiabilityFields({
       securityPaidUpfront: gate.securityPaidUpfront,
       bagType: input.bagType,
       jacketHeld: input.jacketHeld,
       helmetHeld: input.helmetHeld,
+      pricing: pricingLoad.snapshot,
     });
 
     const now = new Date().toISOString();
+    const snap = computed.priceSnapshot;
     const issue: EquipmentLiabilityIssue = {
       equipmentIssueId: newIssueId(),
       riderCode: gate.riderCode,
@@ -415,6 +472,11 @@ export async function createLiabilityFromDelivery(
       updatedAt: now,
       updatedBy: actor.code,
       installmentSchedule: computed.installmentSchedule,
+      pricingSource: 'ADMIN_EQUIPMENT_PRICES',
+      pricingCapturedAt: snap.capturedAt,
+      snapMotorcycleBagMilli: snap.motorcycleBagMilli,
+      snapBicycleBagMilli: snap.bicycleBagMilli,
+      snapShirtUnitMilli: snap.shirtMilli,
     };
 
     if (deps?.appendIssue) {
@@ -438,6 +500,174 @@ export async function createLiabilityFromDelivery(
         actorName: actor.name,
         after: finalIssue,
       }).catch((err) => console.error('[equipmentLiability] audit create failed:', err));
+    }
+
+    return {
+      ok: true,
+      issue: finalIssue,
+      created: !after || after.equipmentIssueId === issue.equipmentIssueId,
+    };
+  } finally {
+    await locks.release();
+  }
+}
+
+/**
+ * Shirt-only swap liability (تبديل + paid shirts).
+ * May coexist with an open assignment liability (does not use hasActiveEquipmentIssue).
+ * Bag free; security not re-charged. Idempotent by deliveryRowRef.
+ */
+export async function createShirtSwapLiabilityFromDelivery(
+  input: DeliveryLiabilityInput & { shirtQty: number },
+  actor: { code: string; name: string },
+  deps?: CreateLiabilityDeps
+): Promise<
+  | { ok: true; issue: EquipmentLiabilityIssue; created: boolean }
+  | { ok: false; error: string; code: PhaseCErrorCode }
+> {
+  const deliveryRowRef = String(input.deliveryRowRef || '').trim();
+  if (!deliveryRowRef) {
+    return {
+      ok: false,
+      code: PHASE_C_ERROR.LIABILITY_CREATE_FAILED,
+      error: 'معرّف صف التسليم مطلوب',
+    };
+  }
+
+  const getByRef = deps?.getByDeliveryRowRef ?? getByDeliveryRowRef;
+  const findCandidate = deps?.findCandidateByRiderCode ?? findCandidateByRiderCode;
+  const acquireLocks = deps?.acquirePhaseCLiabilityLocks ?? acquirePhaseCLiabilityLocks;
+
+  const existingByDelivery = await getByRef(deliveryRowRef);
+  if (existingByDelivery) {
+    return { ok: true, issue: existingByDelivery, created: false };
+  }
+
+  const candidate = await findCandidate(input.riderCode);
+  const gate = assertPhaseCCandidateReady(candidate, input.riderCode);
+  if (!gate.ok) {
+    return {
+      ok: false,
+      code: gate.code,
+      error:
+        gate.code === PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS
+          ? PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS
+          : PHASE_C_ERROR_AR[gate.code],
+    };
+  }
+
+  const shirtQty = Math.max(0, Math.trunc(input.shirtQty));
+  if (shirtQty <= 0) {
+    return {
+      ok: false,
+      code: PHASE_C_ERROR.LIABILITY_CREATE_FAILED,
+      error: 'كمية التيشيرت للتبديل المدفوع يجب أن تكون > 0',
+    };
+  }
+
+  const locks = await acquireLocks({
+    deliveryRowRef,
+    riderCode: gate.riderCode,
+  });
+  if (!locks.ok) {
+    return {
+      ok: false,
+      code: PHASE_C_ERROR.LOCK_BUSY,
+      error: PHASE_C_ERROR_AR.LOCK_BUSY,
+    };
+  }
+
+  try {
+    const againDelivery = await getByRef(deliveryRowRef);
+    if (againDelivery) return { ok: true, issue: againDelivery, created: false };
+
+    const loadPricing = deps?.loadPricing ?? requireAdminEquipmentPricingForLiability;
+    const pricingLoad = await loadPricing();
+    if (!pricingLoad.ok) {
+      return {
+        ok: false,
+        code:
+          pricingLoad.code === 'PRICING_UNAVAILABLE'
+            ? PHASE_C_ERROR.PRICING_UNAVAILABLE
+            : PHASE_C_ERROR.PRICING_INVALID,
+        error: PHASE_C_ERROR_AR[
+          pricingLoad.code === 'PRICING_UNAVAILABLE'
+            ? 'PRICING_UNAVAILABLE'
+            : 'PRICING_INVALID'
+        ],
+      };
+    }
+
+    const shirtUnitMilli = pricingLoad.snapshot.shirtMilli;
+    const originalLiabilityMilli = shirtSwapOriginalMilli(shirtQty, shirtUnitMilli);
+    if (originalLiabilityMilli <= 0) {
+      return {
+        ok: false,
+        code: PHASE_C_ERROR.LIABILITY_CREATE_FAILED,
+        error: 'كمية التيشيرت للتبديل المدفوع يجب أن تكون > 0',
+      };
+    }
+
+    const schedule = splitInstallmentsMilliemes(originalLiabilityMilli, 3);
+    const now = new Date().toISOString();
+    const snap = pricingLoad.snapshot;
+    const issue: EquipmentLiabilityIssue = {
+      equipmentIssueId: newIssueId(),
+      riderCode: gate.riderCode,
+      riderNameSnapshot: input.riderNameSnapshot.trim(),
+      zoneSnapshot: input.zoneSnapshot.trim(),
+      supervisorCodeSnapshot:
+        input.supervisorCodeSnapshot.trim() || gate.finalAssignedSupervisorCode,
+      supervisorNameSnapshot: input.supervisorNameSnapshot.trim(),
+      issueDate: input.issueDate.trim(),
+      activationDate: gate.activationDate,
+      bagType: input.bagType,
+      bagCostMilli: 0,
+      shirtQty,
+      shirtCostMilli: originalLiabilityMilli,
+      securityFeeMilli: 0,
+      securityPaidUpfront: true,
+      originalLiabilityMilli,
+      outstandingMilli: originalLiabilityMilli,
+      amountDeductedMilli: 0,
+      settlementPaidMilli: 0,
+      installmentsCompleted: 0,
+      status: 'open',
+      deliveryRowRef,
+      jacketHeld: Boolean(input.jacketHeld),
+      helmetHeld: Boolean(input.helmetHeld),
+      createdAt: now,
+      createdBy: actor.code,
+      updatedAt: now,
+      updatedBy: actor.code,
+      installmentSchedule: schedule,
+      pricingSource: 'ADMIN_EQUIPMENT_PRICES',
+      pricingCapturedAt: snap.capturedAt,
+      snapMotorcycleBagMilli: snap.motorcycleBagMilli,
+      snapBicycleBagMilli: snap.bicycleBagMilli,
+      snapShirtUnitMilli: snap.shirtMilli,
+    };
+
+    if (deps?.appendIssue) {
+      await deps.appendIssue(issue);
+    } else {
+      await ensureEquipmentLiabilitySheet();
+      await appendToSheet(SHEET_EQUIPMENT_LIABILITY, [issueToRow(issue)]);
+    }
+
+    const after = await getByRef(deliveryRowRef);
+    const finalIssue = after || issue;
+
+    if (!deps?.skipAudit) {
+      void appendAuditLog({
+        domain: 'equipment',
+        action: 'create_shirt_swap_liability',
+        entityType: 'equipment_issue',
+        entityCode: finalIssue.equipmentIssueId,
+        actorCode: actor.code,
+        actorName: actor.name,
+        after: finalIssue,
+      }).catch((err) => console.error('[equipmentLiability] audit shirt swap failed:', err));
     }
 
     return {

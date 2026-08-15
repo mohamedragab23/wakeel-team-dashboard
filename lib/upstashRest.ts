@@ -126,6 +126,29 @@ export async function redisSetNx(key: string, value: string, ttlSeconds: number)
   return r === 'OK';
 }
 
+/**
+ * Transport-aware SET NX for fail-closed financial locks.
+ * Distinguishes lock contention from Redis unavailable / transport failure.
+ */
+export type RedisSetNxDetailedResult = 'acquired' | 'busy' | 'unavailable';
+
+export async function redisSetNxDetailed(
+  key: string,
+  value: string,
+  ttlSeconds: number
+): Promise<RedisSetNxDetailedResult> {
+  if (!isRedisCacheConfigured()) return 'unavailable';
+  const ttl = Math.max(1, Math.ceil(ttlSeconds));
+  const segments: Array<string | number> = ['SET', key, value, 'NX', 'EX', ttl];
+  const post = await commandPost(segments);
+  if (post.transportOk) {
+    return post.result === 'OK' ? 'acquired' : 'busy';
+  }
+  const path = await commandPath(segments);
+  if (!path.transportOk) return 'unavailable';
+  return path.result === 'OK' ? 'acquired' : 'busy';
+}
+
 /** Deletes `key`. No-op on Redis error/unconfigured. */
 export async function redisDel(key: string): Promise<void> {
   await command(['DEL', key]);

@@ -60,4 +60,25 @@ describe('payout cycle eligibility', () => {
     assert.equal(closing.eligible, false);
     assert.equal(closing.reason, 'closing_cycle');
   });
+
+  it('rejects finalized and draft cycles', () => {
+    const active = c({ cycleId: '2', cycleNumber: 2, startDate: '2026-08-08', endDate: '2026-08-14' });
+    const finalized = c({
+      cycleId: 'f',
+      cycleNumber: 2,
+      startDate: '2026-08-08',
+      endDate: '2026-08-14',
+      status: 'finalized',
+    });
+    const draft = c({
+      cycleId: 'd',
+      cycleNumber: 2,
+      startDate: '2026-08-08',
+      endDate: '2026-08-14',
+      status: 'draft',
+    });
+    const all = [active, finalized, draft];
+    assert.equal(isCycleEligibleForEquipmentDeduction(finalized, all, '2026-08-01').reason, 'cycle_finalized');
+    assert.equal(isCycleEligibleForEquipmentDeduction(draft, all, '2026-08-01').reason, 'cycle_draft');
+  });
 });

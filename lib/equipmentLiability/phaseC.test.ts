@@ -44,6 +44,19 @@ import {
   type CreateLiabilityDeps,
   type EquipmentLiabilityIssue,
 } from '@/lib/equipmentLiability/store';
+import { APPROVED_ADMIN_EQUIPMENT_PRICING_EGP } from '@/lib/equipmentPricing/approvedDefaults';
+import { pricingSnapshotFromEgpForTests } from '@/lib/equipmentPricing/loadAdminPricing';
+import type { LoadAdminPricingResult } from '@/lib/equipmentPricing/loadAdminPricing';
+
+const approvedPack = pricingSnapshotFromEgpForTests(APPROVED_ADMIN_EQUIPMENT_PRICING_EGP);
+const approvedSnapshot = approvedPack.snapshot;
+const okPricing = async (): Promise<LoadAdminPricingResult> => ({
+  ok: true,
+  egp: APPROVED_ADMIN_EQUIPMENT_PRICING_EGP,
+  pricing: approvedPack.pricing,
+  snapshot: approvedSnapshot,
+  source: 'sheets',
+});
 
 function candidate(partial: Partial<Candidate> & { riderCode: string }): Candidate {
   const base = defaultCandidateFields(
@@ -94,6 +107,7 @@ function memoryDeps(opts?: {
 
   const deps: CreateLiabilityDeps = {
     skipAudit: true,
+    loadPricing: okPricing,
     getByDeliveryRowRef: async (ref) => issues.find((i) => i.deliveryRowRef === ref) || null,
     findCandidateByRiderCode: async (code) => {
       const normalized = normalizeRiderCodeForPerformance(code);
@@ -123,7 +137,7 @@ function memoryDeps(opts?: {
 
 describe('Phase C — liability amounts (A–D, Q–V)', () => {
   it('A/V: NOT_PAID = 900 liability', () => {
-    const fields = computeLiabilityFields({ securityPaidUpfront: false, bagType: 'motorcycle' });
+    const fields = computeLiabilityFields({ securityPaidUpfront: false, bagType: 'motorcycle', pricing: approvedSnapshot });
     assert.equal(fields.originalLiabilityMilli, 90000);
     assert.equal(FULL_LIABILITY_MILLI, 90000);
     assert.equal(formatMilliemesAsEgp(fields.originalLiabilityMilli), '900.00');
@@ -131,7 +145,7 @@ describe('Phase C — liability amounts (A–D, Q–V)', () => {
   });
 
   it('B/U: PAID = 800 liability', () => {
-    const fields = computeLiabilityFields({ securityPaidUpfront: true, bagType: 'bicycle' });
+    const fields = computeLiabilityFields({ securityPaidUpfront: true, bagType: 'bicycle', pricing: approvedSnapshot });
     assert.equal(fields.originalLiabilityMilli, 80000);
     assert.equal(LIABILITY_AFTER_SECURITY_PAID_MILLI, 80000);
     assert.equal(formatMilliemesAsEgp(fields.originalLiabilityMilli), '800.00');
@@ -143,7 +157,7 @@ describe('Phase C — liability amounts (A–D, Q–V)', () => {
       BAG_COST_MILLI + TWO_TSHIRTS_COST_MILLI + SECURITY_FEE_MILLI - SECURITY_FEE_MILLI,
       80000
     );
-    const fields = computeLiabilityFields({ securityPaidUpfront: true, bagType: 'motorcycle' });
+    const fields = computeLiabilityFields({ securityPaidUpfront: true, bagType: 'motorcycle', pricing: approvedSnapshot });
     assert.equal(fields.securityFeeMilli, 10000);
     assert.equal(fields.securityFeeMilli, SECURITY_FEE_MILLI);
     assert.equal(fields.originalLiabilityMilli, 80000);
@@ -151,7 +165,7 @@ describe('Phase C — liability amounts (A–D, Q–V)', () => {
 
   it('D: NOT_PAID security fee → 900', () => {
     assert.equal(BAG_COST_MILLI + TWO_TSHIRTS_COST_MILLI + SECURITY_FEE_MILLI, 90000);
-    const fields = computeLiabilityFields({ securityPaidUpfront: false, bagType: 'motorcycle' });
+    const fields = computeLiabilityFields({ securityPaidUpfront: false, bagType: 'motorcycle', pricing: approvedSnapshot });
     assert.equal(fields.originalLiabilityMilli, 90000);
   });
 
@@ -160,11 +174,13 @@ describe('Phase C — liability amounts (A–D, Q–V)', () => {
       securityPaidUpfront: false,
       bagType: 'motorcycle',
       jacketHeld: true,
+      pricing: approvedSnapshot,
     });
     const b = computeLiabilityFields({
       securityPaidUpfront: false,
       bagType: 'motorcycle',
       jacketHeld: false,
+      pricing: approvedSnapshot,
     });
     assert.equal(a.originalLiabilityMilli, b.originalLiabilityMilli);
     assert.equal(a.jacketHeld, true);
@@ -175,33 +191,41 @@ describe('Phase C — liability amounts (A–D, Q–V)', () => {
       securityPaidUpfront: false,
       bagType: 'motorcycle',
       helmetHeld: true,
+      pricing: approvedSnapshot,
     });
     const b = computeLiabilityFields({
       securityPaidUpfront: false,
       bagType: 'motorcycle',
       helmetHeld: false,
+      pricing: approvedSnapshot,
     });
     assert.equal(a.originalLiabilityMilli, b.originalLiabilityMilli);
     assert.equal(a.helmetHeld, true);
   });
 
   it('S: motorcycle pouch = 530', () => {
-    const fields = computeLiabilityFields({ securityPaidUpfront: false, bagType: 'motorcycle' });
+    const fields = computeLiabilityFields({ securityPaidUpfront: false, bagType: 'motorcycle', pricing: approvedSnapshot });
     assert.equal(fields.bagCostMilli, 53000);
     assert.equal(BAG_COST_MILLI, 53000);
   });
 
   it('T: bicycle pouch = 530', () => {
-    const fields = computeLiabilityFields({ securityPaidUpfront: false, bagType: 'bicycle' });
+    const fields = computeLiabilityFields({ securityPaidUpfront: false, bagType: 'bicycle', pricing: approvedSnapshot });
     assert.equal(fields.bagCostMilli, 53000);
   });
 
-  it('frozen source of truth: pouch+shirts+security; no float', () => {
+  it('frozen Admin SoT path: store loads أسعار_المعدات; money.ts is arithmetic only', () => {
     assert.equal(BAG_COST_MILLI, 53000);
     assert.equal(TWO_TSHIRTS_COST_MILLI, 27000);
     assert.equal(SECURITY_FEE_MILLI, 10000);
-    const moneySrc = readFileSync(join(process.cwd(), 'lib/money.ts'), 'utf8');
-    assert.ok(!/أسعار_المعدات/.test(moneySrc));
+    const storeSrc = readFileSync(join(process.cwd(), 'lib/equipmentLiability/store.ts'), 'utf8');
+    assert.ok(/requireAdminEquipmentPricingForLiability/.test(storeSrc));
+    assert.ok(!/BAG_COST_MILLI/.test(storeSrc));
+    const pricingSrc = readFileSync(
+      join(process.cwd(), 'lib/equipmentPricing/loadAdminPricing.ts'),
+      'utf8'
+    );
+    assert.ok(/أسعار_المعدات|ADMIN_EQUIPMENT_PRICING_SHEET/.test(pricingSrc));
     assert.ok(Number.isInteger(FULL_LIABILITY_MILLI));
     assert.ok(Number.isInteger(LIABILITY_AFTER_SECURITY_PAID_MILLI));
   });
@@ -335,6 +359,7 @@ describe('Phase C — duplicate / concurrency / atomicity (M–P)', () => {
     let lockHeld = false;
     const deps: CreateLiabilityDeps = {
       skipAudit: true,
+      loadPricing: okPricing,
       getByDeliveryRowRef: async (ref) => issues.find((i) => i.deliveryRowRef === ref) || null,
       findCandidateByRiderCode: async () => c,
       hasActiveEquipmentIssue: async (riderCode) =>
