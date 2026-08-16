@@ -10,23 +10,28 @@
  * The generic cache layer silently failed large snapshot writes (URL/header
  * limits + soft-fail SET), which made `/api/live-riders` return
  * hasSnapshot:false while cron still logged sync_ok.
+ *
+ * Also: all Upstash fetches must use `cache: 'no-store'`. Next.js App Router
+ * can cache bare `fetch` GETs to Redis REST, so cron verify saw fresh data
+ * while `/api/live-riders` kept serving a poisoned cached GET for hours.
  */
-import { cache } from '@/lib/cache';
 import { isRedisCacheConfigured } from '@/lib/redisCache.optional';
 import { isUpstashConfigured, redisGet, redisSet } from '@/lib/upstashRest';
 import { logStructured } from '@/lib/requestTrace';
 import type { LiveRidersSnapshot } from '@/lib/roosterLive/types';
 
 /** Snapshot outlives one sync interval so a single missed run self-heals silently. */
-const SNAPSHOT_TTL_MS = 6 * 60 * 1000; // 6 minutes
+const SNAPSHOT_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const SNAPSHOT_TTL_SECONDS = Math.ceil(SNAPSHOT_TTL_MS / 1000);
 /** Past this age, the read API flags the data as stale in its response. */
 export const STALE_AFTER_MS = 90 * 1000; // 1.5 min — tighter than old 2.5m so UI warns sooner
-/** In-process L1 after Redis read/write — keep short so other syncs aren't masked. */
-const L1_CACHE_MS = 15_000;
 
+/**
+ * v2 key namespace: busts any Next.js Data Cache entries keyed on the old
+ * Upstash REST GET URL for `rooster_live:snapshot:{cityId}`.
+ */
 function snapshotKey(cityId: string): string {
-  return `rooster_live:snapshot:${cityId}`;
+  return `rooster_live:snapshot:v2:${cityId}`;
 }
 
 export function isRoosterLiveStoreReady(): boolean {
@@ -75,17 +80,22 @@ export async function saveLiveRidersSnapshot(snapshot: LiveRidersSnapshot): Prom
     throw new Error(`Failed to persist live riders snapshot to Redis (key=${key}, bytes=${payload.length})`);
   }
 
-  // Verify read-back so sync_ok cannot lie about durability.
+  // Verify read-back so sync_ok cannot lie about durability (must match lastSyncAt).
   const verify = await redisGet(key);
-  if (!verify || !parseSnapshot(verify)) {
-    throw new Error(`Live riders snapshot write verify failed (key=${key})`);
+  const verified = verify ? parseSnapshot(verify) : null;
+  if (!verified || verified.lastSyncAt !== snapshot.lastSyncAt) {
+    throw new Error(
+      `Live riders snapshot write verify failed (key=${key}, ` +
+        `expected=${snapshot.lastSyncAt}, got=${verified?.lastSyncAt ?? 'null'})`
+    );
   }
 
-  cache.set(key, snapshot, L1_CACHE_MS);
   logStructured('info', 'rooster_live_snapshot_saved', {
     cityId: snapshot.cityId,
     riderCount: snapshot.riderCount,
+    lastSyncAt: snapshot.lastSyncAt,
     bytes: payload.length,
+    key,
   });
 }
 
@@ -93,9 +103,8 @@ export async function getLiveRidersSnapshot(cityId: string): Promise<LiveRidersS
   if (!isRoosterLiveStoreReady()) return null;
 
   const key = snapshotKey(cityId);
-  const fromMemory = cache.get<LiveRidersSnapshot>(key);
-  if (fromMemory) return fromMemory;
-
+  // Always read Redis — no in-process L1. Fluid isolates + Next fetch cache already
+  // caused multi-hour stale "تحديث متأخر" while cron kept writing fresh snapshots.
   const raw = await redisGet(key);
   if (!raw) {
     logStructured('warn', 'rooster_live_snapshot_miss', { cityId, key });
@@ -113,6 +122,5 @@ export async function getLiveRidersSnapshot(cityId: string): Promise<LiveRidersS
     return null;
   }
 
-  cache.set(key, snapshot, L1_CACHE_MS);
   return snapshot;
 }

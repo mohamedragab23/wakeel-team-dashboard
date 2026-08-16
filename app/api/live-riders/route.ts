@@ -199,7 +199,11 @@ export async function GET(request: NextRequest) {
         },
       });
     }
-    return NextResponse.json(response);
+    return NextResponse.json(response, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+      },
+    });
   } catch (error: any) {
     console.error('Get live riders error:', error);
     return NextResponse.json({ success: false, error: error.message || 'حدث خطأ' }, { status: 500 });

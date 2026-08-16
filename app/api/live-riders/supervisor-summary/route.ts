@@ -153,13 +153,20 @@ export async function GET(request: NextRequest) {
     const ageMs = lastSyncAt ? Date.now() - new Date(lastSyncAt).getTime() : null;
     const stale = ageMs === null ? true : ageMs > STALE_AFTER_MS;
 
-    return NextResponse.json({
-      success: true,
-      data: summaries,
-      lastSyncAt,
-      ageMs,
-      stale,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        data: summaries,
+        lastSyncAt,
+        ageMs,
+        stale,
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+        },
+      }
+    );
   } catch (error: any) {
     console.error('[supervisor-summary]', error);
     return NextResponse.json({ success: false, error: error.message || 'حدث خطأ' }, { status: 500 });

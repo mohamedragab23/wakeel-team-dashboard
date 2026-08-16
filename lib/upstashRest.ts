@@ -43,6 +43,7 @@ async function commandPost(segments: Array<string | number>): Promise<CommandOut
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body,
+      cache: 'no-store',
     });
     if (!res.ok) return { transportOk: false };
     const json = await res.json().catch(() => null);
@@ -63,7 +64,7 @@ async function commandPath(segments: Array<string | number>): Promise<CommandOut
 
   try {
     const path = segments.map((s) => encodeURIComponent(String(s))).join('/');
-    const res = await fetch(`${base}/${path}`, { headers });
+    const res = await fetch(`${base}/${path}`, { headers, cache: 'no-store' });
     if (!res.ok) return { transportOk: false };
     const json = await res.json().catch(() => null);
     if (!json || typeof json !== 'object' || !('result' in json)) return { transportOk: false };

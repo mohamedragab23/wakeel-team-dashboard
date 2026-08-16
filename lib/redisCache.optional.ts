@@ -44,6 +44,7 @@ async function redisCommand(path: string, init?: RequestInit): Promise<Response 
   try {
     const res = await fetch(`${restBase()}${path}`, {
       ...init,
+      cache: 'no-store',
       headers: { ...authHeaders(), ...(init?.headers || {}) },
     });
     return res;
