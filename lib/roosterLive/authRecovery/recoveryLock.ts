@@ -58,7 +58,7 @@
  * caller can fire one clearly-worded, deduplicated alert instead of staying
  * in an unbounded 90s retry loop against a persistently broken credential.
  */
-import { redisSetNx, redisDel, redisIncr, redisExpire, isUpstashConfigured } from '@/lib/upstashRest';
+import { redisSetNx, redisDel, redisIncr, redisExpire, redisGet, isUpstashConfigured } from '@/lib/upstashRest';
 import { redisCacheGet, redisCacheSet } from '@/lib/redisCache.optional';
 
 const LOCK_KEY = 'rooster:auth:full_recovery:lock';
@@ -68,27 +68,36 @@ const LOCK_KEY = 'rooster:auth:full_recovery:lock';
  *  process crashes mid-attempt without releasing the lock. */
 const LOCK_TTL_SECONDS = 150;
 
-const COOLDOWN_KEY = 'rooster:auth:full_recovery:cooldown_until';
+/** Bumped key suffix (_v3) so a prior 2h trip in Redis does not keep blocking auto-heal after this deploy. */
+const COOLDOWN_KEY = 'rooster:auth:full_recovery:cooldown_until_v3';
 /** Matches SRS-012 §5 Risk #4's intended mitigation ("cool-down before the
  *  next scheduled attempt") — long enough to absorb a burst of sequential
  *  401s/retries from one sync run without ever hammering Okta, short enough
  *  that a genuinely fixed session doesn't stay artificially blocked. */
 const DEFAULT_COOLDOWN_MS = 90_000;
 
-const OUTCOME_KEY = 'rooster:auth:full_recovery:last_outcome';
+const OUTCOME_KEY = 'rooster:auth:full_recovery:last_outcome_v3';
 /** Kept just long enough for concurrent waiters from the same burst to pick
  *  it up; not meant as a general-purpose cache (the minted `dhh_token` it
  *  may contain has its own much longer real TTL, reusing it for a minute is
  *  harmless). */
 const OUTCOME_TTL_MS = 60_000;
 
-const FAILCOUNT_KEY = 'rooster:auth:full_recovery:failcount';
+const FAILCOUNT_KEY = 'rooster:auth:full_recovery:failcount_v3';
 const FAILCOUNT_WINDOW_SECONDS = 60 * 60; // consecutive-failure counting window
 const TRIP_THRESHOLD = 3; // consecutive failures before extending the cooldown
-const TRIPPED_COOLDOWN_MS = 2 * 60 * 60 * 1000; // extended backoff once tripped
+/** Was 2h — that left Live 3PL stuck for hours while auto-heal is supposed to run.
+ *  20m still stops Okta hammering but lets IMAP/OTP recover without human cookie paste. */
+const TRIPPED_COOLDOWN_MS = 20 * 60 * 1000;
 
-const TRIP_ALERT_DEDUPE_KEY = 'rooster:auth:full_recovery:trip_alert_sent';
+const TRIP_ALERT_DEDUPE_KEY = 'rooster:auth:full_recovery:trip_alert_sent_v3';
 const TRIP_ALERT_DEDUPE_SECONDS = TRIPPED_COOLDOWN_MS / 1000; // one alert per trip window, not one per attempt
+
+/** Transient / inbox contention — do not count toward the 3-strike trip. */
+function isSoftLayer3Failure(reason: string | undefined): boolean {
+  if (!reason) return false;
+  return /otp_email_timeout|gmail_imap|network|ECONNRESET|ETIMEDOUT|socket|IMAP/i.test(reason);
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -107,6 +116,13 @@ export async function acquireFullRecoveryLock(): Promise<boolean> {
 /** Always safe to call even if the lock was never actually held (no-op then). */
 export async function releaseFullRecoveryLock(): Promise<void> {
   await redisDel(LOCK_KEY);
+}
+
+/** True when another instance is mid Layer-3 (Okta+Gmail). OTP forwarder must not contend for IMAP. */
+export async function isFullRecoveryLockHeld(): Promise<boolean> {
+  if (!isUpstashConfigured()) return false;
+  const v = await redisGet(LOCK_KEY);
+  return Boolean(v);
 }
 
 /** Whether a Layer-3 attempt should be skipped right now because a previous
@@ -129,9 +145,18 @@ export async function startFullRecoveryCooldown(durationMs: number = DEFAULT_COO
  * already active" fast-fail — that isn't a real Okta attempt). Increments
  * the consecutive-failure counter; once it reaches `TRIP_THRESHOLD`, extends
  * the cooldown to `TRIPPED_COOLDOWN_MS` and returns `tripped: true`.
+ *
+ * Soft failures (OTP inbox timeout / IMAP network) only open the short
+ * cooldown — they must not trip the long breaker (Gmail contention is common).
  */
-export async function recordFullRecoveryFailure(): Promise<{ tripped: boolean; consecutiveFailures: number }> {
+export async function recordFullRecoveryFailure(
+  reason?: string
+): Promise<{ tripped: boolean; consecutiveFailures: number; soft?: boolean }> {
   if (!isUpstashConfigured()) return { tripped: false, consecutiveFailures: 0 };
+  if (isSoftLayer3Failure(reason)) {
+    await startFullRecoveryCooldown(DEFAULT_COOLDOWN_MS);
+    return { tripped: false, consecutiveFailures: 0, soft: true };
+  }
   const count = await redisIncr(FAILCOUNT_KEY);
   if (count === null) return { tripped: false, consecutiveFailures: 0 };
   void redisExpire(FAILCOUNT_KEY, FAILCOUNT_WINDOW_SECONDS);
@@ -169,7 +194,8 @@ export async function waitForCachedFullRecoveryOutcome<T>(params?: {
   timeoutMs?: number;
   pollIntervalMs?: number;
 }): Promise<T | null> {
-  const timeoutMs = params?.timeoutMs ?? 15_000;
+  // Default must cover most of a Layer-3 attempt (~90s OTP poll + Okta), not 15s.
+  const timeoutMs = params?.timeoutMs ?? 140_000;
   const pollIntervalMs = params?.pollIntervalMs ?? 2_000;
   const deadline = Date.now() + timeoutMs;
 

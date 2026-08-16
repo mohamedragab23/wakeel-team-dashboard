@@ -177,7 +177,7 @@ describe('recoveryLock (SRS-012 concurrency fix)', () => {
 
     const cooldown = await isFullRecoveryCoolingDown();
     assert.equal(cooldown.cooling, true, 'tripping must extend the cooldown');
-    // 2h trip cooldown is far longer than the normal 90s cooldown -- a loose
+    // 20m trip cooldown is far longer than the normal 90s cooldown -- a loose
     // lower bound (>5 min) is enough to distinguish it without being flaky.
     assert.ok((cooldown.retryAfterMs ?? 0) > 5 * 60 * 1000, `expected an extended cooldown, got retryAfterMs=${cooldown.retryAfterMs}`);
   });

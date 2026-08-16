@@ -49,11 +49,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, skipped: true, reason: ROOSTER_AUTO_SYNC_PAUSE_REASON });
   }
 
-  // Extra OTP scan (single pass) in parallel with live sync — fills gaps if the
-  // dedicated OTP cron is delayed; dedupe prevents double posts to جروب الأكواد.
-  void import('@/lib/otpForwarder')
-    .then((m) => m.forwardLatestOktaOtp())
-    .catch(() => undefined);
+  // Do NOT piggyback Gmail OTP forwarding here — it contended with Layer-3
+  // IMAP OTP reads and helped trip the auto-heal breaker. Dedicated cron
+  // `/api/cron/forward-okta-otp` owns جروب الأكواد.
 
   const result = await runRoosterLiveSync();
 
@@ -74,13 +72,10 @@ export async function GET(req: NextRequest) {
         `وتسجيل دخول Okta كامل بقراءة رمز OTP تلقائيًا من Gmail) ولم ينجح أي منها — ` +
         `المشكلة أعمق من انتهاء صلاحية الجلسة العادي (زي تغيير الباسورد، أو انتهاء صلاحية صلاحية Gmail).\n\n` +
         `*السبب:* ${result.error}\n\n` +
-        `*الإجراء المطلوب:*\n` +
-        `1) افتح eg.me.logisticsbackoffice.com وسجّل دخول\n` +
-        `2) من DevTools → Network انسخ الـ Cookie header كاملاً (مش بس CF_Authorization/CF_AppSession — سيب أي كوكيز تانية زي "session" موجودة برضه، النظام هيحتفظ بيها عشان يحاول يجدد نفسه لوحده المرة الجاية)\n` +
-        `3) حدّث Google Sheet تبويب cron_config المفتاح ROOSTER_EXPORT_HEADERS_JSON بالقيمة:\n` +
-        `{"Cookie":"...الصق الكوكي هنا..."}\n` +
-        `4) راجع docs/ROOSTER_LIVE.md قسم SRS-012 عشان تتأكد إن بيانات Okta و Gmail OAuth لسه صحيحة\n` +
-        `5) انتظر دقيقة ثم افتح /live-riders`,
+        `*ملاحظة:* النظام بيحاول يصلّح الجلسة أوتوماتيك (Okta + قراءة OTP من Gmail) بدون لصق كوكي يدوي. ` +
+        `لو الرسالة دي اتكررت: راجع ROOSTER_OKTA_USERNAME/PASSWORD و GMAIL_IMAP_USER/PASSWORD على Vercel، ` +
+        `وشيت cron_config لو الجلسة الأساسية انتهت. راجع docs/ROOSTER_LIVE.md.\n` +
+        `الصفحة: /live-riders`,
       priority: 'high',
       url: `${process.env.NEXT_PUBLIC_APP_URL || ''}/live-riders`,
     });

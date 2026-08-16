@@ -169,19 +169,20 @@ export async function mintDhhTokenViaOkta(
  * every ~90 seconds for as long as some persistent cause keeps failing.
  */
 async function reportFailureAndMaybeEscalate(reason: string): Promise<void> {
-  const { tripped, consecutiveFailures } = await recordFullRecoveryFailure();
-  if (!tripped) return;
+  const { tripped, consecutiveFailures, soft } = await recordFullRecoveryFailure(reason);
+  if (soft || !tripped) return;
   if (!(await shouldSendFullRecoveryTripAlert())) return;
   await sendAdminTelegramNotificationSafe({
     type: 'system_alert',
     alertTitle: '⛔ *تم إيقاف محاولات إصلاح جلسة Rooster تلقائيًا مؤقتًا (حماية من التكرار)*',
     alertMessage:
       `فشلت محاولة تسجيل الدخول الكامل (Okta + Gmail OTP) ${consecutiveFailures} مرات متتالية، فأوقف النظام ` +
-      `نفسه تلقائيًا عن إعادة المحاولة لمدة ساعتين تقريبًا لمنع تكرار محاولات تسجيل دخول حقيقية بشكل مبالغ فيه ` +
+      `نفسه تلقائيًا عن إعادة المحاولة لمدة ~20 دقيقة لمنع تكرار محاولات تسجيل دخول حقيقية بشكل مبالغ فيه ` +
       `على حساب Okta.\n\n` +
       `*آخر سبب فشل:* ${reason}\n\n` +
-      `*الإجراء المطلوب:* راجع docs/ROOSTER_LIVE.md قسم SRS-012 (تأكد إن باسورد Okta و Gmail OAuth لسه صحيحين)، ` +
-      `أو حدّث الكوكيز يدويًا من المتصفح زي المعتاد لو مستعجل — النظام هيرجع يحاول تلقائيًا لوحده بعد فترة التهدئة.`,
+      `*ملاحظة:* النظام يحاول الإصلاح أوتوماتيك (بدون لصق كوكي يدوي). بعد انتهاء التهدئة هيرجع يحاول لوحده. ` +
+      `راجع ` +
+      `ROOSTER_OKTA_* و GMAIL_IMAP_* على Vercel لو الفشل استمر.`,
     priority: 'high',
     url: `${process.env.NEXT_PUBLIC_APP_URL || ''}/live-riders`,
   });

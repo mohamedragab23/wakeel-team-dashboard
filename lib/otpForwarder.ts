@@ -294,9 +294,22 @@ export async function forwardOktaOtpsForWindow(opts?: {
   forwardedCount: number;
   last?: ForwardResult;
   polls: number;
+  skippedForAuthRecovery?: boolean;
 }> {
-  const windowMs = Math.max(5_000, opts?.windowMs ?? 50_000);
-  const intervalMs = Math.max(3_000, opts?.intervalMs ?? 5_000);
+  // Yield Gmail to Layer-3 Okta recovery — same inbox, same IMAP account.
+  try {
+    const { isFullRecoveryLockHeld } = await import('@/lib/roosterLive/authRecovery/recoveryLock');
+    if (await isFullRecoveryLockHeld()) {
+      logStructured('info', 'otp_forwarder_burst_skipped_auth_recovery', {});
+      return { forwardedCount: 0, polls: 0, skippedForAuthRecovery: true };
+    }
+  } catch {
+    // ignore — forwarder must not depend on rooster module hard failures
+  }
+
+  // Shorter burst than a full minute so we don't monopolize IMAP vs live-sync recovery.
+  const windowMs = Math.max(5_000, opts?.windowMs ?? 25_000);
+  const intervalMs = Math.max(3_000, opts?.intervalMs ?? 8_000);
   const deadline = Date.now() + windowMs;
   let forwardedCount = 0;
   let polls = 0;

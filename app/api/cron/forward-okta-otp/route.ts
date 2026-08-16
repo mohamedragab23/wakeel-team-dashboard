@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const burst = await forwardOktaOtpsForWindow({ windowMs: 50_000, intervalMs: 5_000 });
+    const burst = await forwardOktaOtpsForWindow({ windowMs: 25_000, intervalMs: 8_000 });
     logStructured('info', 'otp_forwarder_cron_done', burst as Record<string, unknown>);
     return NextResponse.json({
       success: true,
