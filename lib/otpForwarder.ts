@@ -26,6 +26,7 @@
  *   Vercel cron fires once per minute; inside that minute we poll Gmail every
  *   ~5s (`forwardOktaOtpsForWindow`) so codes typically reach جروب الأكواد
  *   within a few seconds of the email landing — closer to جروب الإشعارات.
+ */
 import { createImapClient, getGmailImapConfig, isGmailImapConfigured } from '@/lib/gmailImap';
 import { redisCacheGet, redisCacheSet } from '@/lib/redisCache.optional';
 import { isUpstashConfigured, redisDel, redisGet, redisSetNx } from '@/lib/upstashRest';
