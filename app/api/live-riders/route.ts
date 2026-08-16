@@ -82,9 +82,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Scope to this viewer's riders — identical logic to /api/riders.
+    // Fresh Sheets join — avoid 15-min roster cache masking new assignments vs Rooster.
     let internalRiders =
-      decoded.role === 'admin' ? await getAllAssignedRiders(true) : await getSupervisorRiders(decoded.code, true);
+      decoded.role === 'admin'
+        ? await getAllAssignedRiders(false)
+        : await getSupervisorRiders(decoded.code, false);
 
     if (decoded.role === 'admin') {
       const allowedSup = await getSupervisorCodesInAdminDataScope(

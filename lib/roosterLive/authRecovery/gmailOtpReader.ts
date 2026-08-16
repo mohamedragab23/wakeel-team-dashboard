@@ -181,7 +181,13 @@ export async function waitForOktaOtpEmail(params: {
   while (Date.now() < deadline) {
     try {
       const code = await pollImapOnce(params.sinceEpochMs, seenUids);
-      if (code) return { success: true, code };
+      if (code) {
+        // Mirror to جروب الأكواد immediately (deduped) — don't wait for OTP cron.
+        void import('@/lib/otpForwarder')
+          .then((m) => m.forwardKnownOktaOtpToCodesGroup(code))
+          .catch(() => undefined);
+        return { success: true, code };
+      }
     } catch (err: any) {
       const reason = describeImapError(err);
       logStructured('error', 'rooster_gmail_otp_poll_error', {

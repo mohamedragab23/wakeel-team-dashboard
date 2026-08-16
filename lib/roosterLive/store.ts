@@ -21,7 +21,9 @@ import type { LiveRidersSnapshot } from '@/lib/roosterLive/types';
 const SNAPSHOT_TTL_MS = 6 * 60 * 1000; // 6 minutes
 const SNAPSHOT_TTL_SECONDS = Math.ceil(SNAPSHOT_TTL_MS / 1000);
 /** Past this age, the read API flags the data as stale in its response. */
-export const STALE_AFTER_MS = 150 * 1000; // 2.5 minutes — 2x+ the 60s cadence
+export const STALE_AFTER_MS = 90 * 1000; // 1.5 min — tighter than old 2.5m so UI warns sooner
+/** In-process L1 after Redis read/write — keep short so other syncs aren't masked. */
+const L1_CACHE_MS = 15_000;
 
 function snapshotKey(cityId: string): string {
   return `rooster_live:snapshot:${cityId}`;
@@ -79,7 +81,7 @@ export async function saveLiveRidersSnapshot(snapshot: LiveRidersSnapshot): Prom
     throw new Error(`Live riders snapshot write verify failed (key=${key})`);
   }
 
-  cache.set(key, snapshot, SNAPSHOT_TTL_MS);
+  cache.set(key, snapshot, L1_CACHE_MS);
   logStructured('info', 'rooster_live_snapshot_saved', {
     cityId: snapshot.cityId,
     riderCount: snapshot.riderCount,
@@ -111,6 +113,6 @@ export async function getLiveRidersSnapshot(cityId: string): Promise<LiveRidersS
     return null;
   }
 
-  cache.set(key, snapshot, 30_000);
+  cache.set(key, snapshot, L1_CACHE_MS);
   return snapshot;
 }

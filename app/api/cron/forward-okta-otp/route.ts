@@ -1,9 +1,9 @@
 /**
  * Cron: forward Okta OTP emails to "جروب الأكواد" on Telegram.
  *
- * Runs every minute. Replaces the slow Google Apps Script that used to do
- * the same job (Gmail → Telegram). Latency is typically < 5 seconds from
- * email arrival, vs. the Apps Script's trigger interval of 1–5 minutes.
+ * Vercel cron fires at most once per minute. Inside that minute we poll Gmail
+ * every ~5s so codes reach the group close to email arrival — comparable to
+ * جروب الإشعارات which is event-driven push.
  *
  * Group naming:
  *   جروب الإشعارات  = TELEGRAM_ADMIN_GROUP_CHAT_ID  (admin system alerts)
@@ -12,10 +12,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isCronAuthorized } from '@/lib/cronAuth';
 import { logStructured } from '@/lib/requestTrace';
-import { forwardLatestOktaOtp } from '@/lib/otpForwarder';
+import { forwardOktaOtpsForWindow } from '@/lib/otpForwarder';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
+/** Must cover the ~50s in-process Gmail poll window. */
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   if (!isCronAuthorized(req)) {
@@ -24,11 +25,17 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const result = await forwardLatestOktaOtp();
-    logStructured('info', 'otp_forwarder_cron_done', result as any);
-    return NextResponse.json({ success: true, ...result });
-  } catch (err: any) {
-    logStructured('error', 'otp_forwarder_cron_failed', { error: err?.message || String(err) });
-    return NextResponse.json({ success: false, error: err?.message || String(err) }, { status: 500 });
+    const burst = await forwardOktaOtpsForWindow({ windowMs: 50_000, intervalMs: 5_000 });
+    logStructured('info', 'otp_forwarder_cron_done', burst as Record<string, unknown>);
+    return NextResponse.json({
+      success: true,
+      forwardedCount: burst.forwardedCount,
+      polls: burst.polls,
+      last: burst.last ?? null,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logStructured('error', 'otp_forwarder_cron_failed', { error: message });
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

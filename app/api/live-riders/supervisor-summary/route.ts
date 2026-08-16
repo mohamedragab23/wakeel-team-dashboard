@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get all riders with supervisor assignments
-    let internalRiders = await getAllAssignedRiders(true);
+    let internalRiders = await getAllAssignedRiders(false);
 
     // Apply admin data scope filtering
     const allowedSup = await getSupervisorCodesInAdminDataScope(

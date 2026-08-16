@@ -49,6 +49,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, skipped: true, reason: ROOSTER_AUTO_SYNC_PAUSE_REASON });
   }
 
+  // Extra OTP scan (single pass) in parallel with live sync — fills gaps if the
+  // dedicated OTP cron is delayed; dedupe prevents double posts to جروب الأكواد.
+  void import('@/lib/otpForwarder')
+    .then((m) => m.forwardLatestOktaOtp())
+    .catch(() => undefined);
+
   const result = await runRoosterLiveSync();
 
   // Send Telegram alert on failure — the system already tried to self-heal

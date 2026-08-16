@@ -15,7 +15,7 @@ import SupervisorSummaryTable from '@/components/liveRiders/SupervisorSummaryTab
 import LiveRiderDrawer from '@/components/liveRiders/LiveRiderDrawer';
 import type { LiveRidersApiResponse, LiveRiderStatusBucket, LiveRiderWithAssignment } from '@/lib/roosterLive/types';
 
-const REFRESH_INTERVAL_MS = 60_000;
+const REFRESH_INTERVAL_MS = 20_000;
 
 const STATUS_FILTER_OPTIONS: { value: LiveRiderStatusBucket | 'all'; label: string }[] = [
   { value: 'all', label: 'كل الحالات' },

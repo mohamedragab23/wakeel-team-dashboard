@@ -21,7 +21,11 @@
  *   seconds — faster than a 1-minute cron can catch them. Instead we search
  *   for Okta OTP emails arrived in the last LOOKBACK_MS window and dedupe
  *   by UID in Redis (`otp_forwarder:uid:{uid}`).
- */
+ *
+ * Latency:
+ *   Vercel cron fires once per minute; inside that minute we poll Gmail every
+ *   ~5s (`forwardOktaOtpsForWindow`) so codes typically reach جروب الأكواد
+ *   within a few seconds of the email landing — closer to جروب الإشعارات.
 import { createImapClient, getGmailImapConfig, isGmailImapConfigured } from '@/lib/gmailImap';
 import { redisCacheGet, redisCacheSet } from '@/lib/redisCache.optional';
 import { isUpstashConfigured, redisDel, redisGet, redisSetNx } from '@/lib/upstashRest';
@@ -272,5 +276,95 @@ export async function forwardLatestOktaOtp(): Promise<ForwardResult> {
     }
   } finally {
     await client.logout().catch(() => {});
+  }
+}
+
+/**
+ * Near-real-time poll: keep scanning Gmail for most of one cron minute
+ * (default every 5s) so جروب الأكواد gets codes close to email arrival —
+ * same idea as notifications (push), but Gmail has no webhook so we poll tightly.
+ *
+ * Vercel cron min schedule is 1 minute; this burst fills the gap inside that minute.
+ */
+export async function forwardOktaOtpsForWindow(opts?: {
+  windowMs?: number;
+  intervalMs?: number;
+}): Promise<{
+  forwardedCount: number;
+  last?: ForwardResult;
+  polls: number;
+}> {
+  const windowMs = Math.max(5_000, opts?.windowMs ?? 50_000);
+  const intervalMs = Math.max(3_000, opts?.intervalMs ?? 5_000);
+  const deadline = Date.now() + windowMs;
+  let forwardedCount = 0;
+  let polls = 0;
+  let last: ForwardResult | undefined;
+
+  while (Date.now() < deadline) {
+    polls += 1;
+    try {
+      const result = await forwardLatestOktaOtp();
+      last = result;
+      if (result.forwarded) {
+        forwardedCount += 1;
+        // After a successful send, immediately scan again for any backlog
+        // without waiting the full interval.
+        continue;
+      }
+      // Config errors — no point retrying this window.
+      if (
+        !result.forwarded &&
+        (result.reason === 'gmail_imap_not_configured' ||
+          result.reason === 'telegram_otp_not_configured' ||
+          result.reason === 'chat_collision')
+      ) {
+        break;
+      }
+    } catch (err) {
+      logStructured('error', 'otp_forwarder_burst_poll_failed', {
+        error: err instanceof Error ? err.message : String(err),
+        polls,
+      });
+    }
+
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise((r) => setTimeout(r, Math.min(intervalMs, remaining)));
+  }
+
+  logStructured('info', 'otp_forwarder_burst_done', { forwardedCount, polls, windowMs });
+  return { forwardedCount, last, polls };
+}
+
+/**
+ * When Layer-3 auth already read an OTP from Gmail, also push it to جروب الأكواد
+ * immediately (deduped) so supervisors get it without waiting for the next cron tick.
+ */
+export async function forwardKnownOktaOtpToCodesGroup(otp: string): Promise<boolean> {
+  const code = String(otp || '').trim();
+  if (!/^\d{6}$/.test(code)) return false;
+  if (!process.env.TELEGRAM_OTP_BOT_TOKEN?.trim() || !process.env.TELEGRAM_OTP_CODES_CHAT_ID?.trim()) {
+    return false;
+  }
+  const codesChat = process.env.TELEGRAM_OTP_CODES_CHAT_ID.trim();
+  const notifChat =
+    process.env.TELEGRAM_ADMIN_GROUP_CHAT_ID?.trim() ||
+    process.env.TELEGRAM_DEFAULT_CHAT_ID?.trim() ||
+    '';
+  if (notifChat && codesChat === notifChat) return false;
+
+  const claimed = await claimOtpValue(code);
+  if (!claimed) return false;
+  try {
+    await sendOtpToTelegram(code);
+    logStructured('info', 'otp_forwarder_known_sent', { otp: code });
+    return true;
+  } catch (err) {
+    await redisDel(`otp_forwarder:otp:${code}`).catch(() => {});
+    logStructured('error', 'otp_forwarder_known_send_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
   }
 }
