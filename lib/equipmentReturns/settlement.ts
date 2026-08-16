@@ -299,3 +299,127 @@ export async function approveWaiver(
   if (!result.ok) return result;
   return { ok: true, settlement: result.settlement, issueUpdated: result.issueUpdated };
 }
+
+/**
+ * Supervisor equipment return → clear open liability as if paid in full.
+ * Stops future auto equipment REQUEST/deductions for this rider issue.
+ * Also zeroes remaining on open معدات obligations (best-effort).
+ */
+export async function settleLiabilityFullyOnEquipmentReturn(params: {
+  riderCode: string;
+  returnRowRef?: string;
+  returned: {
+    motorcyclePouch?: boolean;
+    bicyclePouch?: boolean;
+    tshirt?: boolean;
+    jacket?: boolean;
+    helmet?: boolean;
+  };
+  actor: { code: string; name: string };
+}): Promise<
+  | {
+      ok: true;
+      settled: boolean;
+      settlementId?: string;
+      equipmentIssueId?: string;
+      outstandingClearedMilli?: number;
+    }
+  | { ok: false; error: string }
+> {
+  const riderCode = String(params.riderCode || '').trim();
+  if (!riderCode) return { ok: false, error: 'كود المندوب مطلوب' };
+
+  const { listOpenIssues } = await import('@/lib/equipmentLiability/store');
+  const open = (await listOpenIssues()).find((i) => i.riderCode === riderCode);
+  if (!open) {
+    return { ok: true, settled: false };
+  }
+
+  const outstanding = Math.max(0, Math.trunc(open.outstandingMilli));
+
+  // Already zero balance but still "open" — close so it leaves auto-deduction population.
+  if (outstanding <= 0) {
+    const { markIssueWaived } = await import('@/lib/equipmentLiability/store');
+    const closed = await markIssueWaived(open.equipmentIssueId, params.actor);
+    if (!closed.ok) return { ok: false, error: closed.error };
+    return {
+      ok: true,
+      settled: true,
+      equipmentIssueId: open.equipmentIssueId,
+      outstandingClearedMilli: 0,
+    };
+  }
+
+  const created = await createSettlement(
+    {
+      equipmentIssueId: open.equipmentIssueId,
+      riderCode,
+      returnedMotorcyclePouch: Boolean(params.returned.motorcyclePouch),
+      returnedBicyclePouch: Boolean(params.returned.bicyclePouch),
+      returnedTshirt: Boolean(params.returned.tshirt),
+      returnedJacket: Boolean(params.returned.jacket),
+      returnedHelmet: Boolean(params.returned.helmet),
+      // Treat return as full cash settlement of remaining balance (no further deduct).
+      settlementPaidMilli: outstanding,
+      waivedMilli: 0,
+      waiverReason: '',
+      notes: [
+        'auto_full_settle_on_return',
+        params.returnRowRef ? `return_row:${params.returnRowRef}` : '',
+        `outstandingMilli:${outstanding}`,
+      ]
+        .filter(Boolean)
+        .join(';'),
+    },
+    params.actor
+  );
+  if (!created.ok) return { ok: false, error: created.error };
+
+  const approved = await approveSettlement(created.settlement.settlementId, params.actor);
+  if (!approved.ok) return { ok: false, error: approved.error };
+
+  // Best-effort: clear open REQUEST remainders so wallet/cycle prep won't re-queue them.
+  try {
+    const {
+      createSheetsObligationLedgerStore,
+      listPersistedObligations,
+      updatePersistedObligationEconomics,
+    } = await import('@/lib/equipmentDeductions/requestPersistence');
+    const {
+      appendToSheet,
+      ensureHeaderRow,
+      ensureSheetExists,
+      getSheetDataOrThrow,
+      updateSheetRow,
+    } = await import('@/lib/googleSheets');
+    const store = await createSheetsObligationLedgerStore({
+      ensureSheetExists,
+      ensureHeaderRow,
+      getSheetDataOrThrow,
+      appendToSheet,
+      updateSheetRow,
+    });
+    const rows = await listPersistedObligations(store);
+    for (const p of rows) {
+      if (p.obligation.equipmentIssueId !== open.equipmentIssueId) continue;
+      if (p.obligation.reason !== 'معدات') continue;
+      if (Math.trunc(Number(p.obligation.remainingAmount) || 0) <= 0) continue;
+      await updatePersistedObligationEconomics(store, {
+        ...p.obligation,
+        paidAmount: p.obligation.originalAmount,
+        remainingAmount: 0,
+        status: 'paid',
+      });
+    }
+  } catch (err) {
+    console.error('[equipmentReturns] clear obligations on return failed (non-blocking):', err);
+  }
+
+  return {
+    ok: true,
+    settled: true,
+    settlementId: approved.settlement.settlementId,
+    equipmentIssueId: open.equipmentIssueId,
+    outstandingClearedMilli: outstanding,
+  };
+}

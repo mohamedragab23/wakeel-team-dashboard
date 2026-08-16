@@ -191,6 +191,54 @@ export async function POST(request: NextRequest) {
 
     await appendToSheet(SHEET_EQUIPMENT_RETURN, [row], false);
 
+    let liabilitySettlement:
+      | {
+          settled: boolean;
+          settlementId?: string;
+          equipmentIssueId?: string;
+          outstandingClearedMilli?: number;
+        }
+      | undefined;
+
+    // On supervisor return submit: clear open equipment liability as paid-in-full
+    // so no further auto deductions (even 1 EGP) are generated for this rider.
+    try {
+      const { isEquipmentLedgerEnabled, isEquipmentReturnsV2Enabled } = await import(
+        '@/lib/srs014Flags'
+      );
+      if (isEquipmentLedgerEnabled() || isEquipmentReturnsV2Enabled()) {
+        const { settleLiabilityFullyOnEquipmentReturn } = await import(
+          '@/lib/equipmentReturns/settlement'
+        );
+        const settle = await settleLiabilityFullyOnEquipmentReturn({
+          riderCode: riderCode?.toString().trim() || '',
+          returned: {
+            motorcyclePouch: m > 0,
+            bicyclePouch: b > 0,
+            tshirt: t > 0,
+            jacket: j > 0,
+            helmet: h > 0,
+          },
+          actor: {
+            code: decoded.code?.toString().trim() || 'supervisor',
+            name: decoded.name?.toString().trim() || decoded.code?.toString().trim() || 'supervisor',
+          },
+        });
+        if (settle.ok) {
+          liabilitySettlement = {
+            settled: settle.settled,
+            settlementId: settle.settlementId,
+            equipmentIssueId: settle.equipmentIssueId,
+            outstandingClearedMilli: settle.outstandingClearedMilli,
+          };
+        } else {
+          console.error('[equipment-returns] auto settle on submit failed:', settle.error);
+        }
+      }
+    } catch (err) {
+      console.error('[equipment-returns] auto settle on submit error:', err);
+    }
+
     // إشعار الإدمن عبر Telegram
     const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL 
@@ -221,11 +269,15 @@ export async function POST(request: NextRequest) {
       v.mode === 'admin_review'
         ? ' لا يوجد لهذا المندوب سجل تسليم في الشيت أو لا يوجد تسليم معتمد بعد؛ سيراجع المدير الطلب يدوياً.'
         : '';
+    const settleHint = liabilitySettlement?.settled
+      ? ' تم تسوية عهدة المعدات بالكامل (كأنه سدد) ولن يُستقطع منه معدات بعد الآن.'
+      : '';
 
     return NextResponse.json({
       success: true,
-      message: `تم إرسال طلب الاسترجاع. سيظهر للمدير في لوحة التحكم وصفحة طلبات المعدات.${hint}`,
+      message: `تم إرسال طلب الاسترجاع. سيظهر للمدير في لوحة التحكم وصفحة طلبات المعدات.${hint}${settleHint}`,
       reviewMode: v.mode,
+      liabilitySettlement,
     });
   } catch (error: any) {
     console.error('[equipment-returns POST]', error);
@@ -299,36 +351,30 @@ export async function PUT(request: NextRequest) {
     let settlementId = '';
     if (action === 'approve') {
       try {
-        const { isEquipmentReturnsV2Enabled } = await import('@/lib/srs014Flags');
-        if (isEquipmentReturnsV2Enabled()) {
+        const { isEquipmentReturnsV2Enabled, isEquipmentLedgerEnabled } = await import(
+          '@/lib/srs014Flags'
+        );
+        if (isEquipmentReturnsV2Enabled() || isEquipmentLedgerEnabled()) {
           const riderCode = row[2]?.toString().trim() || '';
-          const { listOpenIssues, hasActiveEquipmentIssue } = await import('@/lib/equipmentLiability/store');
-          if (await hasActiveEquipmentIssue(riderCode)) {
-            const open = (await listOpenIssues()).find((i) => i.riderCode === riderCode);
-            if (open) {
-              const { createSettlement } = await import('@/lib/equipmentReturns/settlement');
-              const settlement = await createSettlement(
-                {
-                  equipmentIssueId: open.equipmentIssueId,
-                  riderCode,
-                  returnedMotorcyclePouch: Math.max(0, Number(row[5]) || 0) > 0,
-                  returnedBicyclePouch: Math.max(0, Number(row[6]) || 0) > 0,
-                  returnedTshirt: Math.max(0, Number(row[7]) || 0) > 0,
-                  returnedJacket: Math.max(0, Number(row[8]) || 0) > 0,
-                  returnedHelmet: Math.max(0, Number(row[9]) || 0) > 0,
-                  // Admin decides payment vs waiver on approve — do not pre-waive.
-                  settlementPaidMilli: 0,
-                  waivedMilli: 0,
-                  waiverReason: '',
-                  notes: `return_row:${rowIndex};outstandingMilli:${open.outstandingMilli}`,
-                },
-                { code: decoded.code || 'admin', name: approvedBy }
-              );
-              if (settlement.ok) {
-                settlementId = settlement.settlement.settlementId;
-                updated[15] = settlementId;
-              }
-            }
+          const { settleLiabilityFullyOnEquipmentReturn } = await import(
+            '@/lib/equipmentReturns/settlement'
+          );
+          // Idempotent if already settled on supervisor submit.
+          const settle = await settleLiabilityFullyOnEquipmentReturn({
+            riderCode,
+            returnRowRef: String(rowIndex),
+            returned: {
+              motorcyclePouch: Math.max(0, Number(row[5]) || 0) > 0,
+              bicyclePouch: Math.max(0, Number(row[6]) || 0) > 0,
+              tshirt: Math.max(0, Number(row[7]) || 0) > 0,
+              jacket: Math.max(0, Number(row[8]) || 0) > 0,
+              helmet: Math.max(0, Number(row[9]) || 0) > 0,
+            },
+            actor: { code: decoded.code || 'admin', name: approvedBy },
+          });
+          if (settle.ok && settle.settlementId) {
+            settlementId = settle.settlementId;
+            updated[15] = settlementId;
           }
         }
       } catch (err) {
