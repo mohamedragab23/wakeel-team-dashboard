@@ -26,6 +26,7 @@ import {
 import {
   PHASE_C_ERROR,
   PHASE_C_ERROR_AR,
+  assertPhaseCAdminOverride,
   assertPhaseCCandidateReady,
   type PhaseCErrorCode,
 } from './phaseCGates';
@@ -90,6 +91,14 @@ export type DeliveryLiabilityInput = {
   securityPaidUpfront?: boolean;
   jacketHeld?: boolean;
   helmetHeld?: boolean;
+  /**
+   * Admin-only: skip Candidate sheet when missing — must confirm security + supervisor.
+   */
+  adminOverride?: {
+    operatorConfirmation: boolean;
+    securityStatus: 'PAID' | 'NOT_PAID';
+    activationDate?: string;
+  };
 };
 
 /** Preserve originalLiabilityMilli on every balance mutation (immutability). */
@@ -128,6 +137,55 @@ export async function findCandidateByRiderCode(riderCodeRaw: string) {
   return (
     all.find((c) => normalizeRiderCodeForPerformance(c.riderCode) === normalized) || null
   );
+}
+
+async function resolvePhaseCGateForDelivery(
+  input: DeliveryLiabilityInput,
+  findCandidate: (riderCode: string) => Promise<import('@/lib/recruitment/types').Candidate | null>
+): Promise<
+  | {
+      ok: true;
+      riderCode: string;
+      securityPaidUpfront: boolean;
+      activationDate: string;
+      finalAssignedSupervisorCode: string;
+      viaAdminOverride: boolean;
+    }
+  | { ok: false; code: PhaseCErrorCode; error: string }
+> {
+  if (input.adminOverride?.operatorConfirmation) {
+    const over = assertPhaseCAdminOverride(input.riderCode, {
+      operatorConfirmation: true,
+      securityStatus: input.adminOverride.securityStatus,
+      activationDate: input.adminOverride.activationDate || input.activationDate,
+      finalAssignedSupervisorCode: input.supervisorCodeSnapshot,
+    });
+    if (!over.ok) {
+      return { ok: false, code: over.code, error: over.error };
+    }
+    return {
+      ok: true,
+      riderCode: over.riderCode,
+      securityPaidUpfront: over.securityPaidUpfront,
+      activationDate: over.activationDate,
+      finalAssignedSupervisorCode: over.finalAssignedSupervisorCode,
+      viaAdminOverride: true,
+    };
+  }
+
+  const candidate = await findCandidate(input.riderCode);
+  const gate = assertPhaseCCandidateReady(candidate, input.riderCode);
+  if (!gate.ok) {
+    return {
+      ok: false,
+      code: gate.code,
+      error:
+        gate.code === PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS
+          ? PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS
+          : PHASE_C_ERROR_AR[gate.code],
+    };
+  }
+  return { ...gate, viaAdminOverride: false };
 }
 
 let ensuredOnce = false;
@@ -369,16 +427,12 @@ export async function createLiabilityFromDelivery(
     return { ok: true, issue: existingByDelivery, created: false };
   }
 
-  const candidate = await findCandidate(input.riderCode);
-  const gate = assertPhaseCCandidateReady(candidate, input.riderCode);
+  const gate = await resolvePhaseCGateForDelivery(input, findCandidate);
   if (!gate.ok) {
     return {
       ok: false,
       code: gate.code,
-      error:
-        gate.code === PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS
-          ? PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS
-          : PHASE_C_ERROR_AR[gate.code],
+      error: gate.error,
     };
   }
 
@@ -498,7 +552,10 @@ export async function createLiabilityFromDelivery(
         entityCode: finalIssue.equipmentIssueId,
         actorCode: actor.code,
         actorName: actor.name,
-        after: finalIssue,
+        after: {
+          ...finalIssue,
+          viaAdminOverride: gate.viaAdminOverride,
+        },
       }).catch((err) => console.error('[equipmentLiability] audit create failed:', err));
     }
 
@@ -543,16 +600,12 @@ export async function createShirtSwapLiabilityFromDelivery(
     return { ok: true, issue: existingByDelivery, created: false };
   }
 
-  const candidate = await findCandidate(input.riderCode);
-  const gate = assertPhaseCCandidateReady(candidate, input.riderCode);
+  const gate = await resolvePhaseCGateForDelivery(input, findCandidate);
   if (!gate.ok) {
     return {
       ok: false,
       code: gate.code,
-      error:
-        gate.code === PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS
-          ? PHASE_C_ERROR.EQUIPMENT_LIABILITY_ALREADY_EXISTS
-          : PHASE_C_ERROR_AR[gate.code],
+      error: gate.error,
     };
   }
 

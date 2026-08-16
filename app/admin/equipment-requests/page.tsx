@@ -60,6 +60,10 @@ export default function AdminEquipmentRequestsPage() {
   const [canApprove, setCanApprove] = useState(false);
   const [tab, setTab] = useState<Tab>('delivery');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [overrideFor, setOverrideFor] = useState<DeliveryReq | null>(null);
+  const [overrideSecurity, setOverrideSecurity] = useState<'PAID' | 'NOT_PAID'>('NOT_PAID');
+  const [overrideConfirm, setOverrideConfirm] = useState(false);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
 
   useEffect(() => {
     const u = getStoredUser();
@@ -126,19 +130,70 @@ export default function AdminEquipmentRequestsPage() {
     } });
 
   const approveDel = useMutation({
-    mutationFn: async ({ id, action, rejectReason }: { id: number; action: 'approve' | 'reject'; rejectReason?: string }) => {
+    mutationFn: async ({
+      id,
+      action,
+      rejectReason,
+      adminOverride,
+    }: {
+      id: number;
+      action: 'approve' | 'reject';
+      rejectReason?: string;
+      adminOverride?: {
+        operatorConfirmation: boolean;
+        securityStatus: 'PAID' | 'NOT_PAID';
+      };
+    }) => {
       const res = await authFetch('/api/equipment-deliveries', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: id, action, rejectReason }) });
+        body: JSON.stringify({ requestId: id, action, rejectReason, adminOverride }),
+      });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error);
+      if (!data.success) {
+        const err = new Error(data.error || 'فشل') as Error & { code?: string };
+        err.code = data.code;
+        throw err;
+      }
       return data;
     },
     onSuccess: () => {
+      setOverrideFor(null);
+      setOverrideConfirm(false);
+      setOverrideError(null);
       queryClient.invalidateQueries({ queryKey: ['equipment-deliveries'] });
       queryClient.invalidateQueries({ queryKey: ['equipment-pending-count'] });
-    } });
+    },
+  });
+
+  const PHASE_C_OVERRIDE_CODES = new Set([
+    'CANDIDATE_NOT_FOUND',
+    'CANDIDATE_NOT_ACTIVATED',
+    'ADMIN_ASSIGNMENT_REQUIRED',
+    'SECURITY_FEE_INVALID',
+  ]);
+
+  const tryApproveDelivery = (row: DeliveryReq, adminOverride?: {
+    operatorConfirmation: boolean;
+    securityStatus: 'PAID' | 'NOT_PAID';
+  }) => {
+    approveDel.mutate(
+      { id: row.id, action: 'approve', adminOverride },
+      {
+        onError: (e: Error & { code?: string }) => {
+          if (!adminOverride && e.code && PHASE_C_OVERRIDE_CODES.has(e.code)) {
+            setOverrideFor(row);
+            setOverrideSecurity('NOT_PAID');
+            setOverrideConfirm(false);
+            setOverrideError(e.message);
+            return;
+          }
+          alert(e.message);
+        },
+        onSuccess: () => alert('تمت الموافقة'),
+      }
+    );
+  };
 
   const approveRet = useMutation({
     mutationFn: async ({ id, action, rejectReason }: { id: number; action: 'approve' | 'reject'; rejectReason?: string }) => {
@@ -315,14 +370,7 @@ export default function AdminEquipmentRequestsPage() {
                               type="button"
                               className="px-2 py-1 rounded bg-emerald-600 text-white text-xs"
                               disabled={approveDel.isPending}
-                              onClick={() =>
-                                approveDel.mutate(
-                                  { id: row.id, action: 'approve' },
-                                  {
-                                    onError: (e: Error) => alert(e.message),
-                                    onSuccess: () => alert('تمت الموافقة') }
-                                )
-                              }
+                              onClick={() => tryApproveDelivery(row)}
                             >
                               موافقة
                             </button>
@@ -476,6 +524,79 @@ export default function AdminEquipmentRequestsPage() {
             {summaryRows.length === 0 && !allDeliveriesQuery.isLoading && (
               <p className="p-4 text-[rgba(234,240,255,0.6)]">لا بيانات بعد.</p>
             )}
+          </div>
+        )}
+
+        {overrideFor && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-[2px]">
+            <div
+              className="w-full max-w-md rounded-xl border border-white/20 bg-[#12182B] p-5 text-[#EAF0FF] shadow-2xl space-y-3"
+              dir="rtl"
+              role="dialog"
+              aria-modal="true"
+            >
+              <h2 className="font-bold text-lg">إكمال بيانات المندوب ثم الموافقة</h2>
+              <p className="text-sm text-[rgba(234,240,255,0.75)]">
+                {overrideFor.riderName} ({overrideFor.riderCode}) — المشرف{' '}
+                {overrideFor.supervisorName} ({overrideFor.supervisorCode})
+              </p>
+              {overrideError && (
+                <p className="text-xs text-amber-100 bg-amber-950/70 border border-amber-500/40 rounded-lg p-2">
+                  {overrideError}
+                </p>
+              )}
+              <p className="text-xs text-[rgba(234,240,255,0.65)]">
+                المرشح غير مكتمل في شيت المرشحين. أدخل حالة الاستعلام الأمني يدوياً عشان الشغل ميتعطلش
+                (بدون Financial Apply).
+              </p>
+              <label className="block text-sm">
+                حالة الاستعلام الأمني
+                <select
+                  className="mt-1 w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-2"
+                  value={overrideSecurity}
+                  onChange={(e) =>
+                    setOverrideSecurity(e.target.value as 'PAID' | 'NOT_PAID')
+                  }
+                >
+                  <option value="NOT_PAID">غير مدفوع (يُحسب في العهدة)</option>
+                  <option value="PAID">مدفوع مسبقاً (لا يُحسب)</option>
+                </select>
+              </label>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={overrideConfirm}
+                  onChange={(e) => setOverrideConfirm(e.target.checked)}
+                />
+                أؤكد أن البيانات أعلاه صحيحة وأوافق على إنشاء العهدة بدون سجل مرشح مكتمل
+              </label>
+              <div className="flex gap-2 justify-end pt-1">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-md border border-white/25 hover:bg-white/10"
+                  onClick={() => {
+                    setOverrideFor(null);
+                    setOverrideError(null);
+                  }}
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  disabled={approveDel.isPending || !overrideConfirm}
+                  className="px-3 py-1.5 rounded-md bg-cyan-600 text-white disabled:opacity-50"
+                  onClick={() =>
+                    tryApproveDelivery(overrideFor, {
+                      operatorConfirmation: true,
+                      securityStatus: overrideSecurity,
+                    })
+                  }
+                >
+                  موافقة مع البيانات اليدوية
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

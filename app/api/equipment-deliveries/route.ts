@@ -267,7 +267,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { requestId, action, rejectReason } = body;
+    const { requestId, action, rejectReason, adminOverride } = body;
     if (requestId === undefined || requestId === null || !action) {
       return NextResponse.json({ success: false, error: 'معرف الطلب والإجراء مطلوبان' }, { status: 400 });
     }
@@ -347,6 +347,16 @@ export async function PUT(request: NextRequest) {
           bagType: bagType as 'motorcycle' | 'bicycle',
           jacketHeld: Math.max(0, Number(row[9]) || 0) > 0,
           helmetHeld: Math.max(0, Number(row[10]) || 0) > 0,
+          ...(adminOverride?.operatorConfirmation
+            ? {
+                adminOverride: {
+                  operatorConfirmation: true as const,
+                  securityStatus:
+                    adminOverride.securityStatus === 'PAID' ? ('PAID' as const) : ('NOT_PAID' as const),
+                  activationDate: String(adminOverride.activationDate || '').trim() || undefined,
+                },
+              }
+            : {}),
         };
 
         if (economic.kind === 'assignment_create_liability') {

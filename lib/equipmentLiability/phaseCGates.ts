@@ -115,3 +115,68 @@ export function assertPhaseCCandidateReady(
     finalAssignedSupervisorCode: ops,
   };
 }
+
+/**
+ * Admin explicit override when Candidate row is missing/incomplete.
+ * Never invents security — admin must choose PAID | NOT_PAID and confirm.
+ */
+export function assertPhaseCAdminOverride(
+  deliveryRiderCodeRaw: unknown,
+  override: {
+    operatorConfirmation?: boolean;
+    securityStatus?: string;
+    activationDate?: string;
+    finalAssignedSupervisorCode?: string;
+  }
+):
+  | {
+      ok: true;
+      riderCode: string;
+      securityPaidUpfront: boolean;
+      activationDate: string;
+      finalAssignedSupervisorCode: string;
+      viaAdminOverride: true;
+    }
+  | { ok: false; code: PhaseCErrorCode; error: string } {
+  if (!override?.operatorConfirmation) {
+    return {
+      ok: false,
+      code: PHASE_C_ERROR.CANDIDATE_NOT_FOUND,
+      error: 'يلزم تأكيد الأدمن لإكمال بيانات المندوب يدوياً',
+    };
+  }
+
+  const rider = normalizeAndValidateRiderCode(deliveryRiderCodeRaw);
+  if (!rider.ok) {
+    return { ok: false, code: rider.code, error: PHASE_C_ERROR_AR[rider.code] };
+  }
+
+  const ops = String(override.finalAssignedSupervisorCode || '').trim();
+  if (!ops) {
+    return {
+      ok: false,
+      code: PHASE_C_ERROR.ADMIN_ASSIGNMENT_REQUIRED,
+      error: PHASE_C_ERROR_AR.ADMIN_ASSIGNMENT_REQUIRED,
+    };
+  }
+
+  const fee = normalizeSecurityFeeInput(override.securityStatus);
+  if (!fee) {
+    return {
+      ok: false,
+      code: PHASE_C_ERROR.SECURITY_FEE_INVALID,
+      error: PHASE_C_ERROR_AR.SECURITY_FEE_INVALID,
+    };
+  }
+
+  return {
+    ok: true,
+    riderCode: rider.riderCode,
+    securityPaidUpfront: fee === 'PAID',
+    activationDate:
+      String(override.activationDate || '').trim() ||
+      new Date().toISOString().slice(0, 10),
+    finalAssignedSupervisorCode: ops,
+    viaAdminOverride: true,
+  };
+}

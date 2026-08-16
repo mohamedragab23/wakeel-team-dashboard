@@ -107,6 +107,9 @@ export type SupervisorEquipmentDeskRow = {
   amountDeductedEgp: number | null;
   settlementPaidEgp: number | null;
   originalLiabilityEgp: number | null;
+  /** Pending supervisor proposal awaiting Equipment Manager (does not create liability yet). */
+  pendingProposalId: string | null;
+  pendingProposalKind: ProposalKind | null;
 };
 
 function cell(row: unknown[], i: number): string {
@@ -308,6 +311,20 @@ export async function listSupervisorEquipmentDesk(
   const riders = await getSupervisorRiders(supervisorCode, false);
   const rosterCodes = riders.map((r) => r.code);
   const all = await listIssues();
+  const pendingProps = await listEquipmentPaymentProposals({
+    status: 'pending',
+    supervisorCode,
+  });
+  const pendingByRider = new Map<string, EquipmentPaymentProposal>();
+  for (const p of pendingProps) {
+    const key = normalizeRiderCodeForPerformance(p.riderCode);
+    if (!key) continue;
+    // Keep newest pending per rider.
+    const prev = pendingByRider.get(key);
+    if (!prev || String(p.createdAt) > String(prev.createdAt)) {
+      pendingByRider.set(key, p);
+    }
+  }
   const byRider = new Map<string, EquipmentLiabilityIssue>();
   for (const issue of all) {
     if (
@@ -328,7 +345,9 @@ export async function listSupervisorEquipmentDesk(
   }
 
   const rows: SupervisorEquipmentDeskRow[] = riders.map((r) => {
-    const issue = byRider.get(normalizeRiderCodeForPerformance(r.code));
+    const codeKey = normalizeRiderCodeForPerformance(r.code);
+    const pending = pendingByRider.get(codeKey) || null;
+    const issue = byRider.get(codeKey);
     if (!issue) {
       return {
         riderCode: r.code,
@@ -336,13 +355,22 @@ export async function listSupervisorEquipmentDesk(
         zone: r.region || '',
         hasLiability: false,
         equipmentIssueId: null,
-        status: 'لا توجد عهدة',
+        status: pending
+          ? 'اقتراح معلّق — بانتظار مدير المعدات'
+          : 'لا توجد عهدة',
         paymentStatus: null,
-        paymentStatusAr: '—',
+        paymentStatusAr: pending
+          ? EQUIPMENT_PAYMENT_STATUS_AR[pending.proposedPaymentStatus]
+          : '—',
         outstandingEgp: null,
         amountDeductedEgp: null,
-        settlementPaidEgp: null,
+        settlementPaidEgp:
+          pending?.proposedSettlementPaidEgp != null
+            ? pending.proposedSettlementPaidEgp
+            : null,
         originalLiabilityEgp: null,
+        pendingProposalId: pending?.proposalId || null,
+        pendingProposalKind: pending?.proposalKind || null,
       };
     }
     const view = issueToSupervisorView(issue);
@@ -359,6 +387,8 @@ export async function listSupervisorEquipmentDesk(
       amountDeductedEgp: view.amountDeductedEgp,
       settlementPaidEgp: view.settlementPaidEgp,
       originalLiabilityEgp: view.originalLiabilityEgp,
+      pendingProposalId: pending?.proposalId || null,
+      pendingProposalKind: pending?.proposalKind || null,
     };
   });
 
@@ -440,6 +470,20 @@ export async function createEquipmentPaymentProposal(input: {
       return {
         ok: false,
         error: 'المندوب لديه عهدة مفتوحة — استخدم اقتراح تحديث السداد',
+      };
+    }
+    const pendingSame = await listEquipmentPaymentProposals({ status: 'pending' });
+    const want = normalizeRiderCodeForPerformance(riderCode);
+    if (
+      pendingSame.some(
+        (p) =>
+          p.proposalKind === 'opening_report' &&
+          normalizeRiderCodeForPerformance(p.riderCode) === want
+      )
+    ) {
+      return {
+        ok: false,
+        error: 'يوجد اقتراح فتح عهدة معلّق لهذا المندوب — بانتظار مراجعة مدير المعدات',
       };
     }
   }

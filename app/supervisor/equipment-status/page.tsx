@@ -20,6 +20,8 @@ type DeskRow = {
   amountDeductedEgp: number | null;
   settlementPaidEgp: number | null;
   originalLiabilityEgp: number | null;
+  pendingProposalId: string | null;
+  pendingProposalKind: 'payment_update' | 'opening_report' | null;
 };
 
 const STATUS_OPTIONS = [
@@ -104,7 +106,12 @@ export default function SupervisorEquipmentStatusPage() {
         <p className="text-sm text-[rgba(234,240,255,0.75)]">
           دي صفحة المشرف لتسوية المعدات (مش صفحة الأدمن «تسوية افتتاحية»). تظهر{' '}
           <strong className="text-[#EAF0FF]">كل مناديبك</strong> من الروستر — اللي بدون عهدة اضغط
-          «اقتراح فتح عهدة»، واللي عنده عهدة اضغط «اقتراح تحديث». مسؤول المعدات يراجع ويقبل.
+          «اقتراح فتح عهدة»، واللي عنده عهدة اضغط «اقتراح تحديث».
+        </p>
+        <p className="text-xs text-cyan-100/90 bg-cyan-950/50 border border-cyan-500/30 rounded-lg p-3">
+          <strong>مهم:</strong> الاقتراح <u>لا يغيّر</u> أرقام العهدة فوراً (المتبقي/المخصوم تفضل «—»
+          لحد ما مدير المعدات يقبل من صفحة «اقتراحات سداد المعدات»). بعد القبول تظهر العهدة هنا، وبعدها
+          الأدمن يجهّز طلبات الاستقطاع من «دورات القبض» — مش أوتوماتيك بمجرد إرسال الاقتراح.
         </p>
         <p className="text-xs text-amber-100 bg-amber-950/80 border border-amber-500/40 rounded-lg p-3">
           مهم قبل الاستقطاع الأوتوماتيك: المناديب القديمة لازم تتظبط عهدتهم (Opening / اقتراح فتح) عشان
@@ -180,7 +187,14 @@ export default function SupervisorEquipmentStatusPage() {
                       <div className="font-medium text-[#EAF0FF]">{row.riderName || '—'}</div>
                       <div className="text-xs text-[rgba(234,240,255,0.55)]">{row.riderCode}</div>
                     </td>
-                    <td className="px-3 py-2">{row.status}</td>
+                    <td className="px-3 py-2">
+                      <div>{row.status}</div>
+                      {row.pendingProposalId && (
+                        <div className="text-[11px] text-amber-200 mt-0.5">
+                          اقتراح معلّق بانتظار مدير المعدات
+                        </div>
+                      )}
+                    </td>
                     <td className="px-3 py-2">{row.paymentStatusAr}</td>
                     <td className="px-3 py-2">
                       {row.outstandingEgp == null ? '—' : row.outstandingEgp.toFixed(2)}
@@ -192,22 +206,26 @@ export default function SupervisorEquipmentStatusPage() {
                       {row.settlementPaidEgp == null ? '—' : row.settlementPaidEgp.toFixed(2)}
                     </td>
                     <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        className="text-cyan-300 hover:text-cyan-200 underline text-xs font-medium"
-                        onClick={() => {
-                          setProposeFor(row);
-                          setProposedStatus(row.paymentStatus || 'UNPAID');
-                          setPaidEgp(
-                            row.settlementPaidEgp != null && row.settlementPaidEgp > 0
-                              ? String(row.settlementPaidEgp)
-                              : ''
-                          );
-                          setNote('');
-                        }}
-                      >
-                        {row.hasLiability ? 'اقتراح تحديث' : 'اقتراح فتح عهدة'}
-                      </button>
+                      {row.pendingProposalId && !row.hasLiability ? (
+                        <span className="text-xs text-amber-200">تم الإرسال — انتظر القبول</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-cyan-300 hover:text-cyan-200 underline text-xs font-medium"
+                          onClick={() => {
+                            setProposeFor(row);
+                            setProposedStatus(row.paymentStatus || 'UNPAID');
+                            setPaidEgp(
+                              row.settlementPaidEgp != null && row.settlementPaidEgp > 0
+                                ? String(row.settlementPaidEgp)
+                                : ''
+                            );
+                            setNote('');
+                          }}
+                        >
+                          {row.hasLiability ? 'اقتراح تحديث' : 'اقتراح فتح عهدة'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
