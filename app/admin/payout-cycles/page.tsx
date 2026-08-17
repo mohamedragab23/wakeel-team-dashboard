@@ -145,7 +145,7 @@ export default function PayoutCyclesPage() {
       a.download = `استقطاعات-${cycle.year}-${String(cycle.month).padStart(2, '0')}-دورة${cycle.cycleNumber}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
-      notify.success('تم تنزيل ملف الدورة — ارفعه لحسابات طلبات');
+      notify.success('تم تنزيل ملف الدورة من العهدة + الخصم اليدوي — ارفعه لحسابات طلبات');
     } catch (e) {
       notify.error(e instanceof Error ? e.message : 'فشل التحميل');
     }

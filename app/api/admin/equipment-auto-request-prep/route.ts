@@ -290,6 +290,7 @@ export async function GET(request: NextRequest) {
         payoutDate: cycle.payoutDate,
       },
       outstandingLiabilities: outstanding.length,
+      skippedEquipment: sheet.skippedEquipment,
       sheetRows: sheet.total,
       equipmentRows: sheet.equipment,
       manualRows: sheet.manual,

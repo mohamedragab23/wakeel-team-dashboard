@@ -653,6 +653,32 @@ async function acceptOpeningReport(
   );
 
   if (!created.ok) {
+    if (created.code === 'OPEN_LIABILITY_EXISTS') {
+      const want = normalizeRiderCodeForPerformance(proposal.riderCode);
+      const open = await listOpenIssues();
+      const existing =
+        open.find((i) => normalizeRiderCodeForPerformance(i.riderCode) === want) || null;
+      if (existing) {
+        const now = new Date().toISOString();
+        const updated: EquipmentPaymentProposal = {
+          ...proposal,
+          equipmentIssueId: existing.equipmentIssueId,
+          status: input.action === 'modify_accept' ? 'modified_accepted' : 'accepted',
+          reviewerCode: input.reviewerCode,
+          reviewerName: input.reviewerName,
+          reviewerNote: input.reviewerNote || 'العهدة موجودة مسبقاً — تم الربط بدون تكرار',
+          reviewedAt: now,
+          afterOutstandingMilli: existing.outstandingMilli,
+          afterSettlementPaidMilli: existing.settlementPaidMilli || 0,
+        };
+        await updateSheetRow(
+          SHEET_EQUIPMENT_PAYMENT_PROPOSALS,
+          proposal.sheetRow!,
+          proposalToRow(updated)
+        );
+        return { ok: true, proposal: updated, issue: existing };
+      }
+    }
     return { ok: false, error: created.error || created.code || 'فشل إنشاء العهدة' };
   }
 
