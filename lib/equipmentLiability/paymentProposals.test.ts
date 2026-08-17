@@ -133,6 +133,8 @@ describe('Equipment payment proposals — supervisor view + safety', () => {
     assert.ok(mod.includes('listSupervisorEquipmentDesk'));
     assert.ok(mod.includes('opening_report'));
     assert.ok(mod.includes('fromEquipmentManagerProposal'));
+    assert.ok(mod.includes('OPEN_LIABILITY_EXISTS'));
+    assert.ok(mod.includes('applyAcceptedSettlementToIssue') || mod.includes('العهدة كانت مفتوحة مسبقاً'));
     assert.ok(mod.includes('getSupervisorRiders'));
     assert.ok(!mod.includes('FEATURE_SRS014_FINANCIAL_APPLY_ENABLED=true'));
 

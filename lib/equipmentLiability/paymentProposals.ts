@@ -653,31 +653,30 @@ async function acceptOpeningReport(
   );
 
   if (!created.ok) {
-    if (created.code === 'OPEN_LIABILITY_EXISTS') {
-      const want = normalizeRiderCodeForPerformance(proposal.riderCode);
+    if (String(created.code || '') === 'OPEN_LIABILITY_EXISTS') {
       const open = await listOpenIssues();
-      const existing =
-        open.find((i) => normalizeRiderCodeForPerformance(i.riderCode) === want) || null;
-      if (existing) {
-        const now = new Date().toISOString();
-        const updated: EquipmentPaymentProposal = {
-          ...proposal,
-          equipmentIssueId: existing.equipmentIssueId,
-          status: input.action === 'modify_accept' ? 'modified_accepted' : 'accepted',
-          reviewerCode: input.reviewerCode,
-          reviewerName: input.reviewerName,
-          reviewerNote: input.reviewerNote || 'العهدة موجودة مسبقاً — تم الربط بدون تكرار',
-          reviewedAt: now,
-          afterOutstandingMilli: existing.outstandingMilli,
-          afterSettlementPaidMilli: existing.settlementPaidMilli || 0,
-        };
-        await updateSheetRow(
-          SHEET_EQUIPMENT_PAYMENT_PROPOSALS,
-          proposal.sheetRow!,
-          proposalToRow(updated)
-        );
-        return { ok: true, proposal: updated, issue: existing };
+      const want = normalizeRiderCodeForPerformance(proposal.riderCode);
+      const existing = open.find(
+        (i) => normalizeRiderCodeForPerformance(i.riderCode) === want
+      );
+      if (!existing) {
+        return { ok: false, error: created.error || 'عهدة مفتوحة موجودة لكن تعذر قراءتها' };
       }
+      const targetStatus = proposal.proposedPaymentStatus;
+      const settlementTargetEgp =
+        Number.isFinite(input.opening.historicalPaidEgp)
+          ? input.opening.historicalPaidEgp
+          : proposal.proposedSettlementPaidEgp;
+      return applyAcceptedSettlementToIssue(proposal, existing, {
+        reviewerCode: input.reviewerCode,
+        reviewerName: input.reviewerName,
+        reviewerNote:
+          input.reviewerNote ||
+          'العهدة كانت مفتوحة مسبقاً — تم تطبيق السداد عليها بدل فتح عهدة مكررة',
+        action: input.action,
+        targetStatus,
+        settlementTargetEgp,
+      });
     }
     return { ok: false, error: created.error || created.code || 'فشل إنشاء العهدة' };
   }
@@ -718,6 +717,119 @@ async function acceptOpeningReport(
   }).catch(() => undefined);
 
   return { ok: true, proposal: updated, issue: created.issue };
+}
+
+async function applyAcceptedSettlementToIssue(
+  proposal: EquipmentPaymentProposal,
+  issue: EquipmentLiabilityIssue,
+  input: {
+    reviewerCode: string;
+    reviewerName: string;
+    reviewerNote: string;
+    action: 'accept' | 'modify_accept';
+    targetStatus: EquipmentPaymentStatus;
+    settlementTargetEgp: number | null | undefined;
+  }
+): Promise<
+  | { ok: true; proposal: EquipmentPaymentProposal; issue: EquipmentLiabilityIssue }
+  | { ok: false; error: string }
+> {
+  const now = new Date().toISOString();
+  let settlementTargetEgp = input.settlementTargetEgp;
+  const targetStatus = input.targetStatus;
+
+  if (targetStatus === 'PAID' && (settlementTargetEgp == null || !Number.isFinite(settlementTargetEgp))) {
+    settlementTargetEgp = milliemesToEgp(issue.outstandingMilli + (issue.settlementPaidMilli || 0));
+  }
+  if (targetStatus === 'UNPAID') {
+    const updated: EquipmentPaymentProposal = {
+      ...proposal,
+      equipmentIssueId: issue.equipmentIssueId,
+      status: input.action === 'modify_accept' ? 'modified_accepted' : 'accepted',
+      proposedPaymentStatus: targetStatus,
+      reviewerCode: input.reviewerCode,
+      reviewerName: input.reviewerName,
+      reviewerNote: input.reviewerNote || 'تم الاعتماد بدون تغيير أرصدة (لم يدفع)',
+      reviewedAt: now,
+      afterOutstandingMilli: issue.outstandingMilli,
+      afterSettlementPaidMilli: issue.settlementPaidMilli || 0,
+    };
+    await updateSheetRow(SHEET_EQUIPMENT_PAYMENT_PROPOSALS, proposal.sheetRow!, proposalToRow(updated));
+    return { ok: true, proposal: updated, issue };
+  }
+
+  if (settlementTargetEgp == null || !Number.isFinite(settlementTargetEgp) || settlementTargetEgp < 0) {
+    return { ok: false, error: 'مبلغ السداد المقترح مطلوب للتطبيق' };
+  }
+
+  const targetPaidMilli = egpToMilliemes(settlementTargetEgp);
+  const currentPaid = issue.settlementPaidMilli || 0;
+  const delta = targetPaidMilli - currentPaid;
+  if (delta < 0) {
+    return {
+      ok: false,
+      error: 'تخفيض مبلغ السداد المسجّل غير مدعوم من هذا المسار — راجع مكتب العهدة',
+    };
+  }
+  if (delta === 0) {
+    const updated: EquipmentPaymentProposal = {
+      ...proposal,
+      equipmentIssueId: issue.equipmentIssueId,
+      status: input.action === 'modify_accept' ? 'modified_accepted' : 'accepted',
+      proposedPaymentStatus: targetStatus,
+      proposedSettlementPaidEgp: settlementTargetEgp,
+      reviewerCode: input.reviewerCode,
+      reviewerName: input.reviewerName,
+      reviewerNote: input.reviewerNote || 'لا تغيير — المبلغ مطابق',
+      reviewedAt: now,
+      afterOutstandingMilli: issue.outstandingMilli,
+      afterSettlementPaidMilli: currentPaid,
+    };
+    await updateSheetRow(SHEET_EQUIPMENT_PAYMENT_PROPOSALS, proposal.sheetRow!, proposalToRow(updated));
+    return { ok: true, proposal: updated, issue };
+  }
+
+  const applied = await applySettlementPayment(issue.equipmentIssueId, delta, {
+    code: input.reviewerCode,
+    name: input.reviewerName,
+  });
+  if (!applied.ok) return { ok: false, error: applied.error };
+
+  const updated: EquipmentPaymentProposal = {
+    ...proposal,
+    equipmentIssueId: issue.equipmentIssueId,
+    status: input.action === 'modify_accept' ? 'modified_accepted' : 'accepted',
+    proposedPaymentStatus: targetStatus,
+    proposedSettlementPaidEgp: settlementTargetEgp,
+    reviewerCode: input.reviewerCode,
+    reviewerName: input.reviewerName,
+    reviewerNote: input.reviewerNote,
+    reviewedAt: now,
+    afterOutstandingMilli: applied.issue.outstandingMilli,
+    afterSettlementPaidMilli: applied.issue.settlementPaidMilli || 0,
+  };
+  await updateSheetRow(SHEET_EQUIPMENT_PAYMENT_PROPOSALS, proposal.sheetRow!, proposalToRow(updated));
+
+  void appendAuditLog({
+    domain: 'equipment',
+    action: 'equipment_payment_proposal_accepted',
+    entityType: 'equipment_payment_proposal',
+    entityCode: proposal.proposalId,
+    actorCode: input.reviewerCode,
+    actorName: input.reviewerName,
+    before: {
+      outstandingMilli: proposal.beforeOutstandingMilli,
+      settlementPaidMilli: proposal.beforeSettlementPaidMilli,
+    },
+    after: {
+      outstandingMilli: updated.afterOutstandingMilli,
+      settlementPaidMilli: updated.afterSettlementPaidMilli,
+      status: updated.status,
+      reusedExistingLiability: true,
+    },
+  }).catch(() => undefined);
+
+  return { ok: true, proposal: updated, issue: applied.issue };
 }
 
 /**
@@ -804,111 +916,17 @@ export async function reviewEquipmentPaymentProposal(input: {
       ? input.modifiedPaymentStatus
       : proposal.proposedPaymentStatus;
 
-  let settlementTargetEgp =
+  const settlementTargetEgp =
     input.action === 'modify_accept' && input.modifiedSettlementPaidEgp != null
       ? Number(input.modifiedSettlementPaidEgp)
       : proposal.proposedSettlementPaidEgp;
 
-  if (targetStatus === 'PAID' && (settlementTargetEgp == null || !Number.isFinite(settlementTargetEgp))) {
-    settlementTargetEgp = milliemesToEgp(issue.outstandingMilli + (issue.settlementPaidMilli || 0));
-  }
-  if (targetStatus === 'UNPAID') {
-    const updated: EquipmentPaymentProposal = {
-      ...proposal,
-      status: input.action === 'modify_accept' ? 'modified_accepted' : 'accepted',
-      proposedPaymentStatus: targetStatus,
-      reviewerCode: input.reviewerCode,
-      reviewerName: input.reviewerName,
-      reviewerNote: note || 'تم الاعتماد بدون تغيير أرصدة (لم يدفع)',
-      reviewedAt: now,
-      afterOutstandingMilli: issue.outstandingMilli,
-      afterSettlementPaidMilli: issue.settlementPaidMilli || 0,
-    };
-    await updateSheetRow(
-      SHEET_EQUIPMENT_PAYMENT_PROPOSALS,
-      proposal.sheetRow,
-      proposalToRow(updated)
-    );
-    return { ok: true, proposal: updated, issue };
-  }
-
-  if (settlementTargetEgp == null || !Number.isFinite(settlementTargetEgp) || settlementTargetEgp < 0) {
-    return { ok: false, error: 'مبلغ السداد المقترح مطلوب للتطبيق' };
-  }
-
-  const targetPaidMilli = egpToMilliemes(settlementTargetEgp);
-  const currentPaid = issue.settlementPaidMilli || 0;
-  const delta = targetPaidMilli - currentPaid;
-  if (delta < 0) {
-    return {
-      ok: false,
-      error: 'تخفيض مبلغ السداد المسجّل غير مدعوم من هذا المسار — راجع مكتب العهدة',
-    };
-  }
-  if (delta === 0) {
-    const updated: EquipmentPaymentProposal = {
-      ...proposal,
-      status: input.action === 'modify_accept' ? 'modified_accepted' : 'accepted',
-      proposedPaymentStatus: targetStatus,
-      proposedSettlementPaidEgp: settlementTargetEgp,
-      reviewerCode: input.reviewerCode,
-      reviewerName: input.reviewerName,
-      reviewerNote: note || 'لا تغيير — المبلغ مطابق',
-      reviewedAt: now,
-      afterOutstandingMilli: issue.outstandingMilli,
-      afterSettlementPaidMilli: currentPaid,
-    };
-    await updateSheetRow(
-      SHEET_EQUIPMENT_PAYMENT_PROPOSALS,
-      proposal.sheetRow,
-      proposalToRow(updated)
-    );
-    return { ok: true, proposal: updated, issue };
-  }
-
-  const applied = await applySettlementPayment(issue.equipmentIssueId, delta, {
-    code: input.reviewerCode,
-    name: input.reviewerName,
-  });
-  if (!applied.ok) {
-    return { ok: false, error: applied.error };
-  }
-
-  const updated: EquipmentPaymentProposal = {
-    ...proposal,
-    status: input.action === 'modify_accept' ? 'modified_accepted' : 'accepted',
-    proposedPaymentStatus: targetStatus,
-    proposedSettlementPaidEgp: settlementTargetEgp,
+  return applyAcceptedSettlementToIssue(proposal, issue, {
     reviewerCode: input.reviewerCode,
     reviewerName: input.reviewerName,
     reviewerNote: note,
-    reviewedAt: now,
-    afterOutstandingMilli: applied.issue.outstandingMilli,
-    afterSettlementPaidMilli: applied.issue.settlementPaidMilli || 0,
-  };
-  await updateSheetRow(
-    SHEET_EQUIPMENT_PAYMENT_PROPOSALS,
-    proposal.sheetRow,
-    proposalToRow(updated)
-  );
-
-  void appendAuditLog({
-    domain: 'equipment',
-    action: 'equipment_payment_proposal_accepted',
-    entityType: 'equipment_payment_proposal',
-    entityCode: proposal.proposalId,
-    actorCode: input.reviewerCode,
-    actorName: input.reviewerName,
-    before: {
-      outstandingMilli: proposal.beforeOutstandingMilli,
-      settlementPaidMilli: proposal.beforeSettlementPaidMilli,
-    },
-    after: {
-      outstandingMilli: updated.afterOutstandingMilli,
-      settlementPaidMilli: updated.afterSettlementPaidMilli,
-      status: updated.status,
-    },
-  }).catch(() => undefined);
-
-  return { ok: true, proposal: updated, issue: applied.issue };
+    action: input.action,
+    targetStatus,
+    settlementTargetEgp,
+  });
 }

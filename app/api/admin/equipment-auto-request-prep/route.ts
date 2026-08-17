@@ -290,11 +290,11 @@ export async function GET(request: NextRequest) {
         payoutDate: cycle.payoutDate,
       },
       outstandingLiabilities: outstanding.length,
-      skippedEquipment: sheet.skippedEquipment,
       sheetRows: sheet.total,
       equipmentRows: sheet.equipment,
       manualRows: sheet.manual,
       otherRows: sheet.other,
+      filledFromLiabilities: sheet.filledFromLiabilities,
       note:
         sheet.total > 0
           ? 'حمّل ملف Excel من نفس الصفحة وارفعه لحسابات طلبات.'
