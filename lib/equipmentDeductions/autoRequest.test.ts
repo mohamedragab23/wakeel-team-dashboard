@@ -360,6 +360,50 @@ describe('Phase 4C — Auto REQUEST integration', () => {
     assert.equal((await listPersistedObligations(store)).length, 1);
   });
 
+  it('adminExplicitPrep includes non-opening liabilities even if activation is after cycle start', async () => {
+    const store = createMemoryObligationLedgerStore();
+    const cycles = [
+      c({ cycleId: 'C2', cycleNumber: 2, startDate: '2026-08-10', endDate: '2026-08-16' }),
+    ];
+    const open = [
+      issue({
+        equipmentIssueId: 'ISSUE-NEW',
+        activationDate: '2026-08-17',
+      }),
+    ];
+    const blocked = await runEquipmentAutoRequestsForDate(
+      '2026-08-16',
+      { code: 't', name: 't' },
+      {
+        cycleId: 'C2',
+        deps: {
+          isEnabled: () => true,
+          listPayoutCycles: async () => cycles,
+          listOpenIssues: async () => open,
+          obligationStore: store,
+        },
+      }
+    );
+    assert.equal(blocked.requested, 0);
+
+    const store2 = createMemoryObligationLedgerStore();
+    const allowed = await runEquipmentAutoRequestsForDate(
+      '2026-08-16',
+      { code: 't', name: 't' },
+      {
+        cycleId: 'C2',
+        adminExplicitPrep: true,
+        deps: {
+          isEnabled: () => true,
+          listPayoutCycles: async () => cycles,
+          listOpenIssues: async () => open,
+          obligationStore: store2,
+        },
+      }
+    );
+    assert.equal(allowed.requested, 1);
+  });
+
   it('REQUEST emit path never increments paidAmount (AT-18)', async () => {
     const store = createMemoryObligationLedgerStore();
     const id = stableEquipmentInstallmentDeductionId('ISSUE-D', 1);

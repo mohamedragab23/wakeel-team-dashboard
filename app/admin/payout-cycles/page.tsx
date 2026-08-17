@@ -124,6 +124,33 @@ export default function PayoutCyclesPage() {
     onError: (e: Error) => notify.error(e.message),
   });
 
+  async function downloadCycleFile(cycle: Cycle) {
+    try {
+      const qs = new URLSearchParams({
+        cycleId: cycle.cycleId,
+        year: String(cycle.year),
+        month: String(cycle.month),
+        cycleNumber: String(cycle.cycleNumber),
+        format: 'xlsx',
+      });
+      const res = await authFetch(`/api/admin/equipment-auto-request-prep?${qs.toString()}`);
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || 'فشل تحميل الملف');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `استقطاعات-${cycle.year}-${String(cycle.month).padStart(2, '0')}-دورة${cycle.cycleNumber}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      notify.success('تم تنزيل ملف الدورة — ارفعه لحسابات طلبات');
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : 'فشل التحميل');
+    }
+  }
+
   const cycles = list.data || [];
   const title = useMemo(() => `دورات القبض — ${monthFilter}/${yearFilter}`, [monthFilter, yearFilter]);
 
@@ -132,8 +159,8 @@ export default function PayoutCyclesPage() {
       <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-6" dir="rtl">
         <h1 className="text-2xl font-bold text-slate-800">{title}</h1>
         <p className="text-sm text-slate-600">
-          عيّن تواريخ الدورة ويوم القبض. زر «تجهيز طلبات المعدات» يفعّل الدورة لو كانت مسودة ويكتب صفوف المعدات
-          على شيت الاستقطاعات عشان ترفعها لحسابات طلبات. الخصم اليدوي من المشرف يُضاف لنفس الشيت فورًا.
+          عيّن تواريخ الدورة ويوم القبض. «تجهيز طلبات المعدات» يكتب أقساط المعدات على شيت الاستقطاعات.
+          «تحميل ملف طلبات» ينزّل Excel فيه معدات + خصم يدوي لهذه الدورة عشان ترفعه لحسابات طلبات.
         </p>
         <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 space-y-1">
           <p className="font-semibold text-slate-800">حمايات مفعّلة في النظام</p>
@@ -294,6 +321,13 @@ export default function PayoutCyclesPage() {
                             تجهيز طلبات المعدات
                           </button>
                         ) : null}
+                        <button
+                          type="button"
+                          className="text-emerald-700 underline ml-2"
+                          onClick={() => downloadCycleFile(c)}
+                        >
+                          تحميل ملف طلبات
+                        </button>
                         {c.status !== 'finalized' ? (
                           <button
                             type="button"

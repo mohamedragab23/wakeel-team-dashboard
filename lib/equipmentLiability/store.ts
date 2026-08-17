@@ -388,6 +388,16 @@ export async function listOpenIssues(): Promise<EquipmentLiabilityIssue[]> {
   return listIssues({ status: 'open' });
 }
 
+/** Admin cycle prep: anyone still owing, even if status cell is messy. */
+export async function listOutstandingIssues(): Promise<EquipmentLiabilityIssue[]> {
+  const all = await listIssues();
+  return all.filter((i) => {
+    if (Math.trunc(i.outstandingMilli) <= 0) return false;
+    if (i.status === 'waived' || i.status === 'closed') return false;
+    return true;
+  });
+}
+
 export async function getById(equipmentIssueId: string): Promise<EquipmentLiabilityIssue | null> {
   const all = await readAllIssues();
   return all.find((i) => i.equipmentIssueId === equipmentIssueId) || null;

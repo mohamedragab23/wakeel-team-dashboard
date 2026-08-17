@@ -31,7 +31,7 @@ import { listPayoutCycles } from '@/lib/payoutCycles/store';
 import type { PayoutCycle } from '@/lib/payoutCycles/types';
 import { isRiderCode, normalizeRiderCodeForPerformance } from '@/lib/riderCodeUtils';
 import { isAutoEquipmentDeductionsEnabled } from '@/lib/srs014Flags';
-import { listOpenIssues, type EquipmentLiabilityIssue } from '@/lib/equipmentLiability/store';
+import { listOpenIssues, listOutstandingIssues, type EquipmentLiabilityIssue } from '@/lib/equipmentLiability/store';
 import { isOpenForAllocation } from '@/lib/equipmentDeductions/obligations';
 import {
   createSheetsObligationLedgerStore,
@@ -233,7 +233,7 @@ function bumpSkip(result: EquipmentAutoRequestRunResult, reason: string): void {
 export async function runEquipmentAutoRequestsForDate(
   asOfDate: string,
   actor: { code: string; name: string },
-  opts?: { deps?: AutoRequestRunDeps; cycleId?: string }
+  opts?: { deps?: AutoRequestRunDeps; cycleId?: string; adminExplicitPrep?: boolean }
 ): Promise<EquipmentAutoRequestRunResult> {
   const deps = opts?.deps || {};
   const enabled = (deps.isEnabled ?? isAutoEquipmentDeductionsEnabled)();
@@ -253,7 +253,8 @@ export async function runEquipmentAutoRequestsForDate(
   if (!enabled) return result;
 
   const listCycles = deps.listPayoutCycles ?? listPayoutCycles;
-  const listOpen = deps.listOpenIssues ?? listOpenIssues;
+  const adminExplicitPrep = Boolean(opts?.adminExplicitPrep);
+  const listOpen = deps.listOpenIssues ?? (adminExplicitPrep ? listOutstandingIssues : listOpenIssues);
 
   let cycles: PayoutCycle[];
   try {
@@ -264,9 +265,9 @@ export async function runEquipmentAutoRequestsForDate(
     return result;
   }
 
-  const forcedId = String(opts?.cycleId || '').trim();
+  const forcedId = String(opts?.cycleId || '').trim().toLowerCase();
   const cycle = forcedId
-    ? cycles.find((c) => c.cycleId === forcedId) || null
+    ? cycles.find((c) => String(c.cycleId || '').trim().toLowerCase() === forcedId) || null
     : resolveCycleForDeductionDate(cycles, asOfDate);
   if (!cycle) {
     result.errors.push(forcedId ? 'cycle_not_found' : 'no_cycle_for_date');
@@ -412,7 +413,7 @@ export async function runEquipmentAutoRequestsForDate(
       activationDate: issue.activationDate,
       riderCode: issue.riderCode,
       equipmentIssueId: issue.equipmentIssueId,
-      existingFleetLiability: isExistingFleetLiability(issue),
+      existingFleetLiability: adminExplicitPrep || isExistingFleetLiability(issue),
     });
 
     if (decision.action === 'skip') {

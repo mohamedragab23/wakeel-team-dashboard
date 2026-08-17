@@ -51,9 +51,9 @@ function explainEmptyPrep(params: {
   }
   if (params.processed === 0) {
     return (
-      'مفيش عهدات معدات مفتوحة تتحوّل لاستقطاع. ' +
-      'للطيارين الجدد: اعتمد تسليم المعدات. للناس القديمة: اعتمد اقتراح العهدة/التسوية من مسؤول المعدات. ' +
-      'بعدها اضغط تجهيز طلبات المعدات تاني.'
+      'مفيش عهدات معدات مفتوحة في شيت «عهدة_المعدات». ' +
+      'خصم المعدات مش هيظهر غير بعد اعتماد تسليم المعدات (الجدد) أو اعتماد اقتراح العهدة/التسوية (القدامى). ' +
+      'الخصم اليدوي موجود على نفس شيت الاستقطاعات — حمّل ملف الدورة من الزر الأخضر وارفعه لطلبات.'
     );
   }
   const skips = arabicSkipSummary(params.skipReasons);
@@ -149,6 +149,7 @@ export async function POST(request: NextRequest) {
 
     const result = await runEquipmentAutoRequestsForDate(asOfDate, actor, {
       cycleId: cycle.cycleId,
+      adminExplicitPrep: true,
       deps: {
         // Explicit admin prep — not blocked by cron AUTO flag.
         isEnabled: () => true,
@@ -222,6 +223,85 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'حدث خطأ';
     console.error('[admin/equipment-auto-request-prep POST]', error);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
+}
+
+export async function GET(request: NextRequest) {
+  const token = extractBearerToken(request);
+  if (!token) return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
+  const decoded = verifyToken(token) as {
+    role?: string;
+    code?: string;
+    name?: string;
+    permissions?: string;
+  } | null;
+  const accessEq = await assertAdminApiAccess(decoded, 'equipment_liability');
+  const canPrepFromCycles = adminFeatureAllowed(decoded?.permissions, 'payout_cycles');
+  if (accessEq && !canPrepFromCycles) return accessEq;
+
+  if (!isPayoutCyclesEnabled()) {
+    return NextResponse.json(SRS014_FLAG_OFF_BODY, { status: 503 });
+  }
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const cycle = await findPayoutCycleForPrep({
+      cycleId: String(searchParams.get('cycleId') || '').trim(),
+      year: searchParams.get('year') ? Number(searchParams.get('year')) : undefined,
+      month: searchParams.get('month') ? Number(searchParams.get('month')) : undefined,
+      cycleNumber: searchParams.get('cycleNumber')
+        ? Number(searchParams.get('cycleNumber'))
+        : undefined,
+    });
+    if (!cycle) {
+      return NextResponse.json({ success: false, error: 'دورة القبض غير موجودة' }, { status: 404 });
+    }
+
+    const format = String(searchParams.get('format') || 'json').trim().toLowerCase();
+    if (format === 'xlsx') {
+      const { buildCycleDeductionXlsx } = await import('@/lib/equipmentDeductions/cycleSheetExport');
+      const file = await buildCycleDeductionXlsx(cycle);
+      return new NextResponse(new Uint8Array(file.buffer), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="${encodeURIComponent(file.filename)}"`,
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
+    const { listOutstandingIssues } = await import('@/lib/equipmentLiability/store');
+    const { loadCycleDeductionExport } = await import('@/lib/equipmentDeductions/cycleSheetExport');
+    const [outstanding, sheet] = await Promise.all([
+      listOutstandingIssues(),
+      loadCycleDeductionExport(cycle),
+    ]);
+
+    return NextResponse.json({
+      success: true,
+      cycle: {
+        cycleId: cycle.cycleId,
+        cycleNumber: cycle.cycleNumber,
+        status: cycle.status,
+        startDate: cycle.startDate,
+        endDate: cycle.endDate,
+        payoutDate: cycle.payoutDate,
+      },
+      outstandingLiabilities: outstanding.length,
+      sheetRows: sheet.total,
+      equipmentRows: sheet.equipment,
+      manualRows: sheet.manual,
+      otherRows: sheet.other,
+      note:
+        sheet.total > 0
+          ? 'حمّل ملف Excel من نفس الصفحة وارفعه لحسابات طلبات.'
+          : 'مفيش صفوف على شيت الاستقطاعات لهذه الدورة بعد. جهّز المعدات أو استخدم الخصم اليدوي.',
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'حدث خطأ';
+    console.error('[admin/equipment-auto-request-prep GET]', error);
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
