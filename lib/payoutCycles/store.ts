@@ -1,4 +1,4 @@
-import { appendToSheet, ensureSheetExists, getSheetData, updateSheetRow } from '@/lib/googleSheets';
+import { appendToSheet, ensureSheetExists, getSheetDataOrThrow, updateSheetRow } from '@/lib/googleSheets';
 import { appendAuditLog } from '@/lib/auditLog';
 import { PAYOUT_CYCLE_HEADERS, SHEET_PAYOUT_CYCLES } from './constants';
 import type { PayoutCycle, PayoutCycleInput, PayoutCycleStatus } from './types';
@@ -73,7 +73,12 @@ export async function listPayoutCycles(filters?: {
   status?: PayoutCycleStatus;
 }): Promise<PayoutCycle[]> {
   await ensurePayoutCyclesSheet();
-  const data = await getSheetData(SHEET_PAYOUT_CYCLES, false);
+  // Fail closed: empty-on-error made prep look like "cycle not found".
+  const data = await getSheetDataOrThrow(
+    SHEET_PAYOUT_CYCLES,
+    false,
+    `${SHEET_PAYOUT_CYCLES}!A:AZ`
+  );
   const out: PayoutCycle[] = [];
   for (let i = 1; i < data.length; i++) {
     const c = rowToPayoutCycle(data[i], i + 1);
@@ -90,9 +95,42 @@ export async function listPayoutCycles(filters?: {
   });
 }
 
+function normalizeCycleId(id: string): string {
+  return String(id || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[{}]/g, '');
+}
+
 export async function getPayoutCycleById(cycleId: string): Promise<PayoutCycle | null> {
+  const want = normalizeCycleId(cycleId);
+  if (!want) return null;
   const all = await listPayoutCycles();
-  return all.find((c) => c.cycleId === cycleId) || null;
+  return all.find((c) => normalizeCycleId(c.cycleId) === want) || null;
+}
+
+/** Prep lookup: UUID first, then year/month/cycleNumber (sheet IDs can drift). */
+export async function findPayoutCycleForPrep(params: {
+  cycleId?: string;
+  year?: number;
+  month?: number;
+  cycleNumber?: number;
+}): Promise<PayoutCycle | null> {
+  const all = await listPayoutCycles();
+  const wantId = normalizeCycleId(params.cycleId || '');
+  if (wantId) {
+    const byId = all.find((c) => normalizeCycleId(c.cycleId) === wantId);
+    if (byId) return byId;
+  }
+  const year = Number(params.year);
+  const month = Number(params.month);
+  const cycleNumber = Number(params.cycleNumber);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(cycleNumber)) {
+    return null;
+  }
+  return (
+    all.find((c) => c.year === year && c.month === month && c.cycleNumber === cycleNumber) || null
+  );
 }
 
 export async function createPayoutCycle(

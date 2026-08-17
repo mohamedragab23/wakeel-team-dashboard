@@ -7,7 +7,8 @@ import {
   SRS014_FLAG_OFF_BODY,
   isPayoutCyclesEnabled,
 } from '@/lib/srs014Flags';
-import { getPayoutCycleById, updatePayoutCycle } from '@/lib/payoutCycles/store';
+import { findPayoutCycleForPrep, updatePayoutCycle } from '@/lib/payoutCycles/store';
+import { adminFeatureAllowed } from '@/lib/adminFeatureAccess';
 import { runEquipmentAutoRequestsForDate } from '@/lib/equipmentDeductions/autoRequest';
 import { appendAuditLog } from '@/lib/auditLog';
 
@@ -75,8 +76,9 @@ export async function POST(request: NextRequest) {
     name?: string;
     permissions?: string;
   } | null;
-  const access = await assertAdminApiAccess(decoded, 'equipment_liability');
-  if (access) return access;
+  const accessEq = await assertAdminApiAccess(decoded, 'equipment_liability');
+  const canPrepFromCycles = adminFeatureAllowed(decoded?.permissions, 'payout_cycles');
+  if (accessEq && !canPrepFromCycles) return accessEq;
 
   if (!isPayoutCyclesEnabled()) {
     return NextResponse.json(SRS014_FLAG_OFF_BODY, { status: 503 });
@@ -86,7 +88,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const cycleId = String(body.cycleId || '').trim();
     const operatorConfirmation = Boolean(body.operatorConfirmation);
-    if (!cycleId) {
+    if (!cycleId && !(body.year && body.month && body.cycleNumber)) {
       return NextResponse.json({ success: false, error: 'cycleId مطلوب' }, { status: 400 });
     }
     if (!operatorConfirmation) {
@@ -101,14 +103,26 @@ export async function POST(request: NextRequest) {
       name: decoded?.name || decoded?.code || 'admin',
     };
 
-    let cycle = await getPayoutCycleById(cycleId);
+    let cycle = await findPayoutCycleForPrep({
+      cycleId,
+      year: body.year != null ? Number(body.year) : undefined,
+      month: body.month != null ? Number(body.month) : undefined,
+      cycleNumber: body.cycleNumber != null ? Number(body.cycleNumber) : undefined,
+    });
     if (!cycle) {
-      return NextResponse.json({ success: false, error: 'دورة القبض غير موجودة' }, { status: 404 });
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'دورة القبض غير موجودة في الشيت. حدّث الصفحة ثم أعد المحاولة. لو الرسالة تكررت فشل قراءة شيت دورات_القبض.',
+        },
+        { status: 404 }
+      );
     }
 
     let activatedFromDraft = false;
     if (cycle.status === 'draft') {
-      const activated = await updatePayoutCycle(cycleId, { status: 'active' }, actor);
+      const activated = await updatePayoutCycle(cycle.cycleId, { status: 'active' }, actor);
       if (!activated.ok) {
         return NextResponse.json(
           {
@@ -145,7 +159,7 @@ export async function POST(request: NextRequest) {
       domain: 'equipment',
       action: 'admin_prepare_cycle_equipment_requests',
       entityType: 'payout_cycle',
-      entityCode: cycleId,
+      entityCode: cycle.cycleId,
       actorCode: decoded?.code || '',
       actorName: decoded?.name || '',
       after: {
@@ -171,7 +185,7 @@ export async function POST(request: NextRequest) {
             skipReasons: result.skipReasons,
             errors: result.errors,
           }),
-          cycleId,
+          cycleId: cycle.cycleId,
           asOfDate,
           activatedFromDraft,
           result: {
@@ -190,7 +204,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      cycleId,
+      cycleId: cycle.cycleId,
       asOfDate,
       activatedFromDraft,
       result: {

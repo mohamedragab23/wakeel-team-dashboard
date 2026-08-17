@@ -100,11 +100,17 @@ export default function PayoutCyclesPage() {
   });
 
   const prepMut = useMutation({
-    mutationFn: async (cycleId: string) => {
+    mutationFn: async (cycle: Cycle) => {
       const res = await authFetch('/api/admin/equipment-auto-request-prep', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cycleId, operatorConfirmation: true }),
+        body: JSON.stringify({
+          cycleId: cycle.cycleId,
+          year: cycle.year,
+          month: cycle.month,
+          cycleNumber: cycle.cycleNumber,
+          operatorConfirmation: true,
+        }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'فشل تجهيز الطلبات');
@@ -281,7 +287,7 @@ export default function PayoutCyclesPage() {
                                   'تجهيز طلبات استقطاع المعدات (REQUEST) لهذه الدورة على شيت الاستقطاعات؟ بدون خصم محفظة.'
                                 )
                               ) {
-                                prepMut.mutate(c.cycleId);
+                                prepMut.mutate(c);
                               }
                             }}
                           >
