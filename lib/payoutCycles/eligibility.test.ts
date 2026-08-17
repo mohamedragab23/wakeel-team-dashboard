@@ -81,4 +81,16 @@ describe('payout cycle eligibility', () => {
     assert.equal(isCycleEligibleForEquipmentDeduction(finalized, all, '2026-08-01').reason, 'cycle_finalized');
     assert.equal(isCycleEligibleForEquipmentDeduction(draft, all, '2026-08-01').reason, 'cycle_draft');
   });
+
+  it('opening / old-fleet liability is eligible on the current active cycle', () => {
+    const cycle2 = c({ cycleId: '2', cycleNumber: 2, startDate: '2026-08-08', endDate: '2026-08-14' });
+    const blocked = isCycleEligibleForEquipmentDeduction(cycle2, [cycle2], '2026-08-17');
+    assert.equal(blocked.eligible, false);
+    assert.equal(blocked.reason, 'cycle_not_after_activation');
+
+    const opening = isCycleEligibleForEquipmentDeduction(cycle2, [cycle2], '2026-08-17', {
+      existingFleetLiability: true,
+    });
+    assert.equal(opening.eligible, true);
+  });
 });

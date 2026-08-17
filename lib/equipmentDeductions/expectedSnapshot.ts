@@ -98,10 +98,13 @@ export function buildExpectedDeductionSnapshot(params: {
     if (issue.status !== 'open') continue;
     const outstanding = Math.max(0, Math.trunc(issue.outstandingMilli));
     const first = findFirstEligibleEquipmentCycle(allCycles, issue.activationDate);
+    const existingFleetLiability =
+      String(issue.equipmentIssueId || '').startsWith('opening_');
     const eligibility = isCycleEligibleForEquipmentDeduction(
       cycle,
       allCycles,
-      issue.activationDate
+      issue.activationDate,
+      { existingFleetLiability }
     );
 
     let expected = 0;

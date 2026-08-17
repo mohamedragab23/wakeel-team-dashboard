@@ -300,6 +300,66 @@ describe('Phase 4C — Auto REQUEST integration', () => {
     assert.equal((await listPersistedObligations(store)).length, 0);
   });
 
+  it('draft cycle writes nothing (admin must activate first)', async () => {
+    const store = createMemoryObligationLedgerStore();
+    const cycles = [
+      c({
+        cycleId: 'C2',
+        cycleNumber: 2,
+        startDate: '2026-08-08',
+        endDate: '2026-08-14',
+        status: 'draft',
+      }),
+    ];
+    const result = await runEquipmentAutoRequestsForDate(
+      '2026-08-14',
+      { code: 't', name: 't' },
+      {
+        cycleId: 'C2',
+        deps: {
+          isEnabled: () => true,
+          listPayoutCycles: async () => cycles,
+          listOpenIssues: async () => [issue({ equipmentIssueId: 'ISSUE-DRAFT' })],
+          obligationStore: store,
+        },
+      }
+    );
+    assert.equal(result.requested, 0);
+    assert.ok(result.errors.includes('cycle_draft'));
+    assert.equal((await listPersistedObligations(store)).length, 0);
+  });
+
+  it('opening fleet liability requests on the selected cycle even if activationDate is today', async () => {
+    const store = createMemoryObligationLedgerStore();
+    const cycles = [
+      c({ cycleId: 'C1', cycleNumber: 1, startDate: '2026-08-01', endDate: '2026-08-07' }),
+      c({ cycleId: 'C2', cycleNumber: 2, startDate: '2026-08-08', endDate: '2026-08-14' }),
+    ];
+    const open = [
+      issue({
+        equipmentIssueId: 'opening_1001_1',
+        activationDate: '2026-08-17',
+        pricingSource: 'OPENING_MIGRATION',
+      }),
+    ];
+    const result = await runEquipmentAutoRequestsForDate(
+      '2026-08-14',
+      { code: 't', name: 't' },
+      {
+        cycleId: 'C2',
+        deps: {
+          isEnabled: () => true,
+          listPayoutCycles: async () => cycles,
+          listOpenIssues: async () => open,
+          obligationStore: store,
+        },
+      }
+    );
+    assert.equal(result.requested, 1);
+    assert.equal(result.cycleId, 'C2');
+    assert.equal((await listPersistedObligations(store)).length, 1);
+  });
+
   it('REQUEST emit path never increments paidAmount (AT-18)', async () => {
     const store = createMemoryObligationLedgerStore();
     const id = stableEquipmentInstallmentDeductionId('ISSUE-D', 1);

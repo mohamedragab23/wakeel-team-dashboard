@@ -7,11 +7,59 @@ import {
   SRS014_FLAG_OFF_BODY,
   isPayoutCyclesEnabled,
 } from '@/lib/srs014Flags';
-import { getPayoutCycleById } from '@/lib/payoutCycles/store';
+import { getPayoutCycleById, updatePayoutCycle } from '@/lib/payoutCycles/store';
 import { runEquipmentAutoRequestsForDate } from '@/lib/equipmentDeductions/autoRequest';
 import { appendAuditLog } from '@/lib/auditLog';
 
 export const dynamic = 'force-dynamic';
+
+const SKIP_REASON_AR: Record<string, string> = {
+  cycle_draft: 'الدورة مسودة',
+  cycle_finalized: 'الدورة مقفلة',
+  cycle_not_found: 'الدورة غير موجودة',
+  no_cycle_for_date: 'لا توجد دورة مطابقة لتاريخ التوليد',
+  missing_activation_date: 'تاريخ التفعيل ناقص على العهدة',
+  activation_in_current_cycle: 'التفعيل داخل نفس الدورة (الاستقطاع يبدأ من الدورة التالية)',
+  cycle_not_after_activation: 'الدورة ليست بعد تاريخ التفعيل',
+  closing_cycle: 'دورة تقفيلة',
+  equipment_deduction_disabled: 'استقطاع المعدات غير مفعّل على الدورة',
+  no_outstanding: 'لا تبقّى مبلغ على العهدة',
+  no_open_liabilities: 'لا توجد عهدات معدات مفتوحة',
+};
+
+function arabicSkipSummary(skipReasons: Record<string, number>): string {
+  const parts = Object.entries(skipReasons)
+    .filter(([, n]) => n > 0)
+    .map(([reason, n]) => `${SKIP_REASON_AR[reason] || reason}: ${n}`);
+  return parts.join(' · ');
+}
+
+function explainEmptyPrep(params: {
+  processed: number;
+  skipReasons: Record<string, number>;
+  errors: string[];
+}): string {
+  if (params.errors.some((e) => e.startsWith('sheets_failure'))) {
+    return `فشل قراءة الشيت: ${params.errors[0]}`;
+  }
+  if (params.errors.includes('cycle_draft')) {
+    return 'الدورة ما زالت مسودة. فعّلها ثم أعد التجهيز.';
+  }
+  if (params.errors.includes('cycle_finalized')) {
+    return 'الدورة مقفلة — لا يمكن تجهيز طلبات معدات عليها.';
+  }
+  if (params.processed === 0) {
+    return (
+      'مفيش عهدات معدات مفتوحة تتحوّل لاستقطاع. ' +
+      'للطيارين الجدد: اعتمد تسليم المعدات. للناس القديمة: اعتمد اقتراح العهدة/التسوية من مسؤول المعدات. ' +
+      'بعدها اضغط تجهيز طلبات المعدات تاني.'
+    );
+  }
+  const skips = arabicSkipSummary(params.skipReasons);
+  return skips
+    ? `اتعالج ${params.processed} مندوب لكن مفيش صف استقطاع اتكتب. الأسباب: ${skips}`
+    : `اتعالج ${params.processed} مندوب لكن مفيش صف استقطاع اتكتب على شيت الاستقطاعات.`;
+}
 
 /**
  * Manual admin prep of equipment REQUEST rows for a payout cycle.
@@ -48,14 +96,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const cycle = await getPayoutCycleById(cycleId);
+    const actor = {
+      code: decoded?.code || 'admin',
+      name: decoded?.name || decoded?.code || 'admin',
+    };
+
+    let cycle = await getPayoutCycleById(cycleId);
     if (!cycle) {
       return NextResponse.json({ success: false, error: 'دورة القبض غير موجودة' }, { status: 404 });
     }
 
-    const asOfDate = String(
-      cycle.deductionGenerationDate || cycle.endDate || ''
-    ).trim();
+    let activatedFromDraft = false;
+    if (cycle.status === 'draft') {
+      const activated = await updatePayoutCycle(cycleId, { status: 'active' }, actor);
+      if (!activated.ok) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: activated.errors?.[0]?.message || 'تعذر تفعيل الدورة من المسودة',
+          },
+          { status: 409 }
+        );
+      }
+      cycle = activated.cycle;
+      activatedFromDraft = true;
+    }
+
+    const asOfDate = String(cycle.deductionGenerationDate || cycle.endDate || '').trim();
     if (!asOfDate) {
       return NextResponse.json(
         {
@@ -66,19 +133,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await runEquipmentAutoRequestsForDate(
-      asOfDate,
-      {
-        code: decoded?.code || 'admin',
-        name: decoded?.name || decoded?.code || 'admin',
+    const result = await runEquipmentAutoRequestsForDate(asOfDate, actor, {
+      cycleId: cycle.cycleId,
+      deps: {
+        // Explicit admin prep — not blocked by cron AUTO flag.
+        isEnabled: () => true,
       },
-      {
-        deps: {
-          // Explicit admin prep — not blocked by cron AUTO flag.
-          isEnabled: () => true,
-        },
-      }
-    );
+    });
 
     void appendAuditLog({
       domain: 'equipment',
@@ -92,25 +153,57 @@ export async function POST(request: NextRequest) {
         requested: result.requested,
         queued: result.queued,
         skipped: result.skipped,
+        skipReasons: result.skipReasons,
         errors: result.errors,
+        processed: result.processed,
+        activatedFromDraft,
         financialApplyEnabled: isSrs014FinancialApplyEnabled(),
       },
     }).catch(() => undefined);
+
+    const wrote = result.requested + result.queued;
+    if (wrote === 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: explainEmptyPrep({
+            processed: result.processed,
+            skipReasons: result.skipReasons,
+            errors: result.errors,
+          }),
+          cycleId,
+          asOfDate,
+          activatedFromDraft,
+          result: {
+            enabled: result.enabled,
+            processed: result.processed,
+            requested: result.requested,
+            queued: result.queued,
+            skipped: result.skipped,
+            skipReasons: result.skipReasons,
+            errors: result.errors,
+          },
+        },
+        { status: 409 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
       cycleId,
       asOfDate,
+      activatedFromDraft,
       result: {
         enabled: result.enabled,
         processed: result.processed,
         requested: result.requested,
         queued: result.queued,
         skipped: result.skipped,
+        skipReasons: result.skipReasons,
         errors: result.errors,
       },
       financialApplyEnabled: isSrs014FinancialApplyEnabled(),
-      note: 'REQUEST فقط على الاستقطاعات — لا خصم محفظة. خصم يدوي V2 يُضاف للورقة عند رفع المشرف.',
+      note: 'اتكتب على شيت الاستقطاعات (معدات) — الأدمن يرفع الشيت لحسابات طلبات. لا خصم محفظة من الداشبورد.',
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'حدث خطأ';

@@ -112,7 +112,7 @@ export default function PayoutCyclesPage() {
     },
     onSuccess: (json) => {
       notify.success(
-        `تم تجهيز REQUEST: جديد ${json.result?.requested ?? 0} · ترحيل ${json.result?.queued ?? 0} (بدون FA)`
+        `اتكتب على شيت الاستقطاعات: جديد ${json.result?.requested ?? 0} · ترحيل ${json.result?.queued ?? 0}`
       );
     },
     onError: (e: Error) => notify.error(e.message),
@@ -126,9 +126,8 @@ export default function PayoutCyclesPage() {
       <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-6" dir="rtl">
         <h1 className="text-2xl font-bold text-slate-800">{title}</h1>
         <p className="text-sm text-slate-600">
-          عيّن <strong>تاريخ توليد الاستقطاع</strong> لكل دورة. زر «تجهيز طلبات المعدات» يكتب REQUEST على
-          شيت الاستقطاعات (معدات) — بدون خصم محفظة. الخصم اليدوي V2 من المشرف يُضاف لنفس الشيت.
-          بعد رفع محفظة Talabat تُحضَّر طلبات الدورة التالية تلقائياً.
+          عيّن تواريخ الدورة ويوم القبض. زر «تجهيز طلبات المعدات» يفعّل الدورة لو كانت مسودة ويكتب صفوف المعدات
+          على شيت الاستقطاعات عشان ترفعها لحسابات طلبات. الخصم اليدوي من المشرف يُضاف لنفس الشيت فورًا.
         </p>
         <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 space-y-1">
           <p className="font-semibold text-slate-800">حمايات مفعّلة في النظام</p>
@@ -248,6 +247,7 @@ export default function PayoutCyclesPage() {
                   <tr>
                     <th className="p-2 text-right">#</th>
                     <th className="p-2 text-right">الفترة</th>
+                    <th className="p-2 text-right">يوم القبض</th>
                     <th className="p-2 text-right">توليد الاستقطاع</th>
                     <th className="p-2 text-right">تقفيلة</th>
                     <th className="p-2 text-right">معدات</th>
@@ -262,10 +262,13 @@ export default function PayoutCyclesPage() {
                       <td className="p-2">
                         {c.startDate} → {c.endDate}
                       </td>
+                      <td className="p-2">{c.payoutDate || '—'}</td>
                       <td className="p-2">{c.deductionGenerationDate}</td>
                       <td className="p-2">{c.isClosing ? 'نعم' : 'لا'}</td>
                       <td className="p-2">{c.equipmentDeductionEnabled ? 'نعم' : 'لا'}</td>
-                      <td className="p-2">{c.status}</td>
+                      <td className="p-2">
+                        {c.status === 'draft' ? 'مسودة' : c.status === 'finalized' ? 'مقفلة' : 'نشطة'}
+                      </td>
                       <td className="p-2 space-x-2 space-x-reverse">
                         {c.status !== 'finalized' && c.equipmentDeductionEnabled && !c.isClosing ? (
                           <button
@@ -301,7 +304,7 @@ export default function PayoutCyclesPage() {
                   ))}
                   {!cycles.length && !list.isLoading && (
                     <tr>
-                      <td colSpan={7} className="p-4 text-slate-500 text-center">
+                      <td colSpan={8} className="p-4 text-slate-500 text-center">
                         لا توجد دورات لهذا الشهر
                       </td>
                     </tr>

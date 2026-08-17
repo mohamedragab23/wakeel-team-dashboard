@@ -89,6 +89,8 @@ export function computeAutoRequestDecision(params: {
   activationDate: string;
   riderCode: string;
   equipmentIssueId: string;
+  /** Opening / old-fleet liabilities: do not wait for a post-activation cycle. */
+  existingFleetLiability?: boolean;
 }): AutoRequestDecision {
   const remaining = Math.trunc(params.remainingMilli);
   if (!Number.isFinite(remaining)) {
@@ -109,7 +111,8 @@ export function computeAutoRequestDecision(params: {
   const eligibility = isCycleEligibleForEquipmentDeduction(
     params.cycle as PayoutCycle,
     params.allCycles,
-    params.activationDate
+    params.activationDate,
+    { existingFleetLiability: Boolean(params.existingFleetLiability) }
   );
   if (!eligibility.eligible) {
     return { action: 'skip', reason: eligibility.reason || 'cycle_ineligible' };
@@ -158,6 +161,8 @@ export type EquipmentAutoRequestRunResult = {
   /** Open remainders queued (currentCycleId update only). */
   queued: number;
   skipped: number;
+  /** Why riders were skipped (reason → count). */
+  skipReasons: Record<string, number>;
   errors: string[];
   auditTrail: Array<{
     timestamp: string;
@@ -204,15 +209,31 @@ async function defaultObligationStore(): Promise<ObligationLedgerStore> {
   });
 }
 
+function isExistingFleetLiability(issue: EquipmentLiabilityIssue): boolean {
+  return (
+    issue.pricingSource === 'OPENING_MIGRATION' ||
+    String(issue.equipmentIssueId || '').startsWith('opening_') ||
+    String(issue.deliveryRowRef || '').startsWith('opening:')
+  );
+}
+
+function bumpSkip(result: EquipmentAutoRequestRunResult, reason: string): void {
+  result.skipped += 1;
+  result.skipReasons[reason] = (result.skipReasons[reason] || 0) + 1;
+}
+
 /**
  * Cron entry (Phase 4C): emit/queue REQUEST obligations only.
  * No-op when `FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED` is off.
  * Financial side effects remain zero (no wallet / ledger / liability mutation).
+ *
+ * Admin prep may pass `cycleId` so the selected payout cycle is used instead of
+ * re-resolving by deductionGenerationDate (which silently no-ops on draft cycles).
  */
 export async function runEquipmentAutoRequestsForDate(
   asOfDate: string,
   actor: { code: string; name: string },
-  opts?: { deps?: AutoRequestRunDeps }
+  opts?: { deps?: AutoRequestRunDeps; cycleId?: string }
 ): Promise<EquipmentAutoRequestRunResult> {
   const deps = opts?.deps || {};
   const enabled = (deps.isEnabled ?? isAutoEquipmentDeductionsEnabled)();
@@ -224,6 +245,7 @@ export async function runEquipmentAutoRequestsForDate(
     requested: 0,
     queued: 0,
     skipped: 0,
+    skipReasons: {},
     errors: [],
     auditTrail: [],
   };
@@ -242,22 +264,25 @@ export async function runEquipmentAutoRequestsForDate(
     return result;
   }
 
-  const cycle = resolveCycleForDeductionDate(cycles, asOfDate);
+  const forcedId = String(opts?.cycleId || '').trim();
+  const cycle = forcedId
+    ? cycles.find((c) => c.cycleId === forcedId) || null
+    : resolveCycleForDeductionDate(cycles, asOfDate);
   if (!cycle) {
-    result.errors.push('no_cycle_for_date');
-    result.skipped += 1;
+    result.errors.push(forcedId ? 'cycle_not_found' : 'no_cycle_for_date');
+    bumpSkip(result, forcedId ? 'cycle_not_found' : 'no_cycle_for_date');
     return result;
   }
   result.cycleId = cycle.cycleId;
 
   if (cycle.status === 'finalized') {
     result.errors.push('cycle_finalized');
-    result.skipped += 1;
+    bumpSkip(result, 'cycle_finalized');
     return result;
   }
   if (cycle.status === 'draft') {
     result.errors.push('cycle_draft');
-    result.skipped += 1;
+    bumpSkip(result, 'cycle_draft');
     return result;
   }
 
@@ -276,19 +301,18 @@ export async function runEquipmentAutoRequestsForDate(
   const monthLabel = monthLabelForPayout(cycle);
   const uploadedAt = new Date().toISOString();
 
+  let persisted;
+  try {
+    persisted = await listPersistedObligations(store);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    result.errors.push(`sheets_failure:obligation_list:${msg}`);
+    return result;
+  }
+
   for (const issue of openIssues) {
     result.processed += 1;
     const schedule = scheduleForIssue(issue);
-
-    let persisted;
-    try {
-      persisted = await listPersistedObligations(store);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      result.errors.push(`obligation_list_failed:${issue.equipmentIssueId}:${msg}`);
-      result.skipped += 1;
-      continue;
-    }
 
     const openRemainders = persisted.filter(
       (p) =>
@@ -339,7 +363,7 @@ export async function runEquipmentAutoRequestsForDate(
               financialSideEffects: emit.financialSideEffects,
             });
           } else {
-            result.skipped += 1;
+            bumpSkip(result, 'already_exists_closed');
             result.auditTrail.push({
               timestamp: uploadedAt,
               actor: actor.code,
@@ -388,10 +412,11 @@ export async function runEquipmentAutoRequestsForDate(
       activationDate: issue.activationDate,
       riderCode: issue.riderCode,
       equipmentIssueId: issue.equipmentIssueId,
+      existingFleetLiability: isExistingFleetLiability(issue),
     });
 
     if (decision.action === 'skip') {
-      result.skipped += 1;
+      bumpSkip(result, decision.reason);
       result.auditTrail.push({
         timestamp: uploadedAt,
         actor: actor.code,
@@ -493,7 +518,7 @@ export async function runEquipmentAutoRequestsForDate(
           financialSideEffects: emit.financialSideEffects,
         });
       } else {
-        result.skipped += 1;
+        bumpSkip(result, 'already_exists_closed');
         result.auditTrail.push({
           timestamp: uploadedAt,
           actor: actor.code,

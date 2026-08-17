@@ -53,11 +53,13 @@ export function findFirstEligibleEquipmentCycle(
  * - Must not be closing / equipment-disabled
  * - Activation cycle itself excluded: need startDate > activationDate
  * - Must be on/after the first eligible cycle (same or later)
+ * - Opening / old-fleet liabilities skip the activation-cycle wait: they already hold equipment.
  */
 export function isCycleEligibleForEquipmentDeduction(
   cycle: PayoutCycle,
   allCycles: PayoutCycle[],
-  activationDate: string
+  activationDate: string,
+  opts?: { existingFleetLiability?: boolean }
 ): { eligible: boolean; reason?: string } {
   if (cycle.status === 'finalized') {
     return { eligible: false, reason: 'cycle_finalized' };
@@ -70,6 +72,9 @@ export function isCycleEligibleForEquipmentDeduction(
       eligible: false,
       reason: cycle.isClosing ? 'closing_cycle' : 'equipment_deduction_disabled',
     };
+  }
+  if (opts?.existingFleetLiability) {
+    return { eligible: true };
   }
   if (!activationDate) {
     return { eligible: false, reason: 'missing_activation_date' };

@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
         deductionGenerationDate: String(body.deductionGenerationDate || ''),
         isClosing: Boolean(body.isClosing),
         equipmentDeductionEnabled: body.equipmentDeductionEnabled !== false,
-        status: body.status,
+        status: body.status || 'active',
         notes: body.notes ? String(body.notes) : '',
       },
       {
