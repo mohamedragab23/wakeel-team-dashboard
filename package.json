@@ -66,7 +66,7 @@
     "googleapis": "^126.0.1",
     "imapflow": "^1.6.5",
     "jsonwebtoken": "^9.0.2",
-    "next": "^14.0.4",
+    "next": "^14.2.35",
     "papaparse": "^5.5.3",
     "postgres": "^3.4.9",
     "react": "^18.2.0",
