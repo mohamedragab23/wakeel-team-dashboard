@@ -37,16 +37,17 @@ git branch -M main
 git push -u origin main
 ```
 
-**ملاحظة مهمة:** 
+**ملاحظة مهمة:**
 - استبدل `YOUR_USERNAME` باسم المستخدم الخاص بك على GitHub
 - استبدل `REPO_NAME` باسم Repository الذي أنشأته
 
 ### 1.3 التحقق من الأمان
 
 **قبل الرفع، تأكد من:**
-- ✅ ملف `.env.local` غير موجود في المشروع (يتم تجاهله تلقائياً)
-- ✅ ملف `sup-478117-f78f716bf392.json` غير موجود (يتم تجاهله تلقائياً)
-- ✅ جميع ملفات Excel الحساسة غير موجودة
+- ملف `.env.local` غير موجود في المشروع (يتم تجاهله تلقائياً)
+- ملفات حساب الخدمة (`credentials/*.json`) غير موجودة في Git
+- جميع ملفات Excel الحساسة غير موجودة
+- لا تضع `GOOGLE_PRIVATE_KEY` أو `JWT_SECRET` أو `CRON_SECRET` في أي ملف داخل المستودع
 
 ## الخطوة 2: نشر النظام على Vercel
 
@@ -66,21 +67,26 @@ git push -u origin main
 
 ### 2.3 إعداد متغيرات البيئة (Environment Variables)
 
-في صفحة إعداد المشروع، اذهب إلى **"Environment Variables"** وأضف:
+في صفحة إعداد المشروع، اذهب إلى **Project Settings → Environment Variables** وأضف القيم هناك فقط. لا تضعها في Git ولا في هذا الدليل.
+
+أسماء المتغيرات المطلوبة:
 
 ```
-GOOGLE_SHEETS_SPREADSHEET_ID=1Oxdp2vH0DHkEZwxxUdQhzMgfco9yVKlkJ9llkB4oSqE
-GOOGLE_SERVICE_ACCOUNT_EMAIL=sheets-api@sup-478117.iam.gserviceaccount.com
-GOOGLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDp1dA2d+SXLpze\n6mmpEWDryS5YxMOw5X9gmpv2bGJEpoVLiFSvlNbuwxe9fykDO9WZJD1Fv6h4YtSN\nSScJJrjyFjmOjeLMdpU56TV0H+fA1x3qQ0u/CrR+j5mazu4l+Q8r0wL42RTNArjQ\nVJ5inl1uUXLnH7eC/OjwxN1vEL1akAdqJCM5yEL75tuM65+xQmndIsclsR4+G2WE\nBjAwDjzI0/DsDvqhkK/CeDPn48J2qrEExePmF1FDqhHnXbf/s6s7qW3TOQMCKAQv\nAIeW0/EEr0Q3j19jRd4UkLO/lEdBSbotSq2ZNrtC9hFjz4WT86SyFzELLeEHOjw8\nl17ChbAlAgMBAAECggEABFsjB0C6zI4vKxIyQ/soU1ePOlL25bWTC1A6ldaZ5gl+\nYZ2Lr3Y6osdxU8YXgcgzR99VPN+tbJwfR9FdVIKZA2c030fSgzP+4xa3pjOTGMsf\n80D1G2rSxxelKS1mz3baSu1GhlOnNrAw3S5fgYiEj+ivYCP9sAdGqeWOqU/dFyjD\nvGvSfcxbjkLktCk7nfTDZ/p9L0OG/ypc4WgRElBQDxxTOozVvQR9+iM4SstJlG5I\nx9VRSZkIMhx3vEx569wQ4ckA564KmVamhr13vaKHD1bu6CARxxxPGwXb/w7Ow6iX\nBEzk9Yl1qo2+95UAdWPmGjMgIlem+KUquJ8ylUw16QKBgQD6EQohuyS8dxzRKSpJ\nWlKQnNxUlLF7jP53bhv9b79PgxQs4el4LQ+OBq+4z+aH+i9jc4mMhuMS0Mh+/B5q\nZnEqtr306K3HWtoptJJ8WWhWE18gpQdYEdSSvxEgm37j6IAEuI2k44RYd4ZUobxj\npO+S0lmtvNCD5Iju0QzbDQOk9wKBgQDvYi5N108RBexY1PDGARCDmjlDSdrLpUPc\n0dZEdwvePGHftvoDeX0WwfFPWw7S5jF6aoM4gWf9kKM9FdwLU5X7fOptzyVTY3Zh\ntJrRA8oeeawNAOwpCk9W22/YFgP9wnyU24EojUnywhgCGKcauNdc3KrAKuHZ7YXC\nlyxhk184wwKBgQDaq93dQ0ZLnClR6hp1TIuYs+Kj/+b38IJxM5M8WuTDhg81dFPx\n6A2LF+O/y+V+kNOxts3YWfflczdwe82pI23geS7BJFsaUiMmhyX1oUVwx73O0SEL\n7YOi03wJtJAQgja4ah5Kyz3nEpYgGdKgnBF3pYQQPmVkgIsRszL3tniyXwKBgHIn\n+vbqB22RyozuN0fleA+aO1aIYMueq0ch1jFeKA25896wrnd7txhkMoRqYx5V4iCD\nrMIEjCfSktXtl7rbCHoertjg4ObsVqbvbqjgSsHPuimVWAmWPhGooaSFky+vUKPY\nLba98hbPUo2lXgMTRLinDtKHYJ8BczlByEtb8RvrAoGBAM08eBL2MhMfOpVOfx4y\nbtlU8vaM+4VWjpOSpgpimLMGutvW74Nhg+YWkJ89WrnCvfSdyXF84a/Xq6OSv2oh\nFceBve+Dv9qGJQvd6HyAir9mIjSv4ZF5QiYfwfJyDs7MwzQABRy6MFHbIa1ET03I\nalY0rAEOs+vwgGceY46q6Z/A\n-----END PRIVATE KEY-----\n
-GOOGLE_PROJECT_ID=sup-478117
-JWT_SECRET=007sup-secret-key-change-in-production-2024
-NEXT_PUBLIC_APP_URL=https://your-app-name.vercel.app
+GOOGLE_SHEETS_SPREADSHEET_ID
+GOOGLE_SERVICE_ACCOUNT_EMAIL
+GOOGLE_PRIVATE_KEY
+GOOGLE_PROJECT_ID
+JWT_SECRET
+CRON_SECRET
+NEXT_PUBLIC_APP_URL
 ```
 
 **ملاحظات مهمة:**
-- في `GOOGLE_PRIVATE_KEY`، يجب أن تحافظ على `\n` كما هي (لا تحولها إلى سطور جديدة)
-- في `NEXT_PUBLIC_APP_URL`، استبدل `your-app-name` باسم المشروع الذي سيعطيه Vercel
-- يمكنك تغيير `JWT_SECRET` إلى قيمة عشوائية قوية
+- ضع كل الأسرار في Vercel فقط (Production / Preview / Development).
+- في `GOOGLE_PRIVATE_KEY`، يجب أن تحافظ على `\n` كما هي (لا تحولها إلى سطور جديدة).
+- في `NEXT_PUBLIC_APP_URL`، استخدم رابط التطبيق الفعلي من Vercel.
+- استخدم `JWT_SECRET` و`CRON_SECRET` قيمتين عشوائيتين طويلتين (مثلاً `openssl rand -base64 48`).
+- لا تضع `CRON_SECRET` في رابط أو query string — استخدم `Authorization: Bearer` أو الهيدر `x-cron-secret`.
 
 ### 2.4 إعدادات البناء (Build Settings)
 
@@ -131,9 +137,9 @@ https://your-app-name.vercel.app
 
 ### 4.3 إعدادات الأمان
 
-- ✅ تأكد من تغيير `JWT_SECRET` في Vercel إلى قيمة قوية
-- ✅ استخدم HTTPS دائماً (Vercel يوفرها تلقائياً)
-- ✅ لا تشارك ملفات `.env` أو Service Account Keys
+- تأكد من أن `JWT_SECRET` و`CRON_SECRET` في Vercel قيمتان قويتين وعشوائيتين
+- استخدم HTTPS دائماً (Vercel يوفرها تلقائياً)
+- لا تشارك ملفات `.env` أو Service Account Keys
 
 ## استكشاف الأخطاء
 
@@ -147,8 +153,8 @@ https://your-app-name.vercel.app
 ### المشكلة: النظام لا يتصل بـ Google Sheets
 
 **الحل:**
-1. تحقق من `GOOGLE_SHEETS_SPREADSHEET_ID`
-2. تحقق من `GOOGLE_SERVICE_ACCOUNT_EMAIL`
+1. تحقق من `GOOGLE_SHEETS_SPREADSHEET_ID` في Vercel
+2. تحقق من `GOOGLE_SERVICE_ACCOUNT_EMAIL` في Vercel
 3. تأكد من أن Service Account لديه صلاحيات على Google Sheet
 
 ### المشكلة: الخطأ 500 Internal Server Error
@@ -164,4 +170,3 @@ https://your-app-name.vercel.app
 - [Vercel Documentation](https://vercel.com/docs)
 - [Next.js Documentation](https://nextjs.org/docs)
 - Logs في Vercel Dashboard
-

@@ -71,7 +71,7 @@ git revert <phase-3-commit-sha>
 |----|--------|-----------------|
 | P3-CR-01 | `lib/cronAuth.ts` — centralized cron auth | Single policy |
 | P3-CR-02 | Removed `x-vercel-cron` header-only trust | Spoofed header no longer authorizes |
-| P3-CR-03 | Requires `CRON_SECRET` match via: `Authorization: Bearer`, `x-cron-secret`, or `?cron_secret=` | Vercel Cron uses Bearer when `CRON_SECRET` env is set |
+| P3-CR-03 | Requires `CRON_SECRET` via `Authorization: Bearer` or `x-cron-secret` only. Do not put the secret in a URL/query string (`?cron_secret=` is not accepted). | Vercel Cron uses Bearer when `CRON_SECRET` env is set |
 | P3-CR-04 | Both cron routes updated | `performance-sync`, `rooster-sync` |
 
 ### 3. Error visibility

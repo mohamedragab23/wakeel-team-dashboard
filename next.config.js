@@ -33,11 +33,6 @@ const nextConfig = {
 
     return config;
   },
-
-  env: {
-    GOOGLE_SHEETS_SPREADSHEET_ID:
-      process.env.GOOGLE_SHEETS_SPREADSHEET_ID || '1Oxdp2vH0DHkEZwxxUdQhzMgfco9yVKlkJ9llkB4oSqE',
-  },
 };
 
 module.exports = withSentryConfig(nextConfig, {
