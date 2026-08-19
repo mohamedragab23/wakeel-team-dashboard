@@ -2,11 +2,11 @@
 
 import { authFetch } from '@/lib/authFetch';
 import { useState } from 'react';
-import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import Button from '@/components/ui-v2/Button';
 import Card from '@/components/ui-v2/Card';
 import type { CandidateInput } from '@/lib/recruitment/types';
+import { readRecruitmentExcelRows, sheetRowsToCandidates } from '@/lib/recruitment/bulkExcelImport';
 
 const inputClass =
   'w-full rounded-lg bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.12)] px-3 py-2 text-sm text-[#EAF0FF] font-mono';
@@ -24,24 +24,6 @@ function parseTextLines(text: string): CandidateInput[] {
         jobAd: parts[2] || 'غير محدد',
         appliedDate: parts[3] || '' };
     });
-}
-
-function sheetRowsToCandidates(rows: Record<string, unknown>[]): CandidateInput[] {
-  return rows.map((row) => {
-    const keys = Object.keys(row);
-    const find = (...names: string[]) => {
-      for (const n of names) {
-        const k = keys.find((key) => key.toLowerCase().includes(n.toLowerCase()));
-        if (k && row[k] != null) return String(row[k]).trim();
-      }
-      return '';
-    };
-    return {
-      fullName: find('اسم', 'name', 'full') || String(row[keys[0]] ?? ''),
-      phone: find('هاتف', 'phone', 'mobile') || String(row[keys[1]] ?? ''),
-      jobAd: find('إعلان', 'job', 'ad') || 'غير محدد',
-      appliedDate: find('تاريخ', 'date') || '' };
-  });
 }
 
 type Props = {
@@ -99,14 +81,7 @@ export default function BulkImportPanel({ isLegacy, title, description, onImport
           } });
         return;
       }
-      const wb = XLSX.read(buf, { type: 'array' });
-      const firstSheet = wb.SheetNames[0];
-      if (!firstSheet) {
-        setError('لم يتم العثور على أي Sheet داخل الملف');
-        return;
-      }
-      const ws = wb.Sheets[firstSheet];
-      const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+      const json = await readRecruitmentExcelRows(buf, file.name);
       const parsed = sheetRowsToCandidates(json);
       if (!parsed.length) {
         setError('الملف لا يحتوي على بيانات صالحة للاستيراد');

@@ -18,6 +18,7 @@ import {
   buildRiderStrategicTemplateBuffer,
   RIDER_STRATEGIC_TEMPLATE_FILENAME,
 } from '@/lib/riderStrategic/templateExcel';
+import { readStrategicBulkMatrix } from '@/lib/riderStrategic/bulkExcelRead';
 
 const RISK_COLORS: Record<RiskLevel, string> = {
   green: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
@@ -130,11 +131,8 @@ export default function RiderStrategicProfilesPage() {
   }, []);
 
   const handleBulkFile = async (file: File) => {
-    const XLSX = await import('xlsx');
     const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, { type: 'array' });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][];
+    const rows = await readStrategicBulkMatrix(buf, file.name);
     const res = await authFetch('/api/rider-strategic-profiles/bulk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

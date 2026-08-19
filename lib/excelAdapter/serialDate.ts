@@ -27,6 +27,56 @@ export function excelSerialToIsoDate(serial: number): string | null {
   return `${y}-${pad2(m)}-${pad2(day)}`;
 }
 
+/**
+ * Inverse of excelSerialToIsoDate using local Y-M-D (and optional time-of-day).
+ * For ExcelJS Date cells vs SheetJS file serials, use dateToExcelSerialUtc.
+ */
+export function dateToExcelSerial(d: Date): number {
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return Number.NaN;
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  const frac =
+    (d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000) /
+    86400;
+
+  if (y === 1900 && m === 2 && day === 29) return 60 + frac;
+
+  const utc = Date.UTC(y, m - 1, day);
+  const origin = Date.UTC(1900, 0, 1);
+  const daysSinceJan1 = Math.round((utc - origin) / 86400000);
+  let serial = daysSinceJan1 + 1;
+  if (serial >= 60) serial += 1;
+  return serial + frac;
+}
+
+/**
+ * Convert a JS Date to the Excel serial SheetJS emits for the same cell
+ * (UTC calendar + time fraction, including the 1900 leap bug).
+ * ExcelJS Date cells are timezone-shifted; local Y-M-D would be off by the UTC offset.
+ */
+export function dateToExcelSerialUtc(d: Date): number {
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return Number.NaN;
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth() + 1;
+  const day = d.getUTCDate();
+  const frac =
+    (d.getUTCHours() * 3600 +
+      d.getUTCMinutes() * 60 +
+      d.getUTCSeconds() +
+      d.getUTCMilliseconds() / 1000) /
+    86400;
+
+  if (y === 1900 && m === 2 && day === 29) return 60 + frac;
+
+  const utc = Date.UTC(y, m - 1, day);
+  const origin = Date.UTC(1900, 0, 1);
+  const daysSinceJan1 = Math.round((utc - origin) / 86400000);
+  let serial = daysSinceJan1 + 1;
+  if (serial >= 60) serial += 1;
+  return serial + frac;
+}
+
 /** Excel time is a fraction of a 24h day. Values ≥ 1 use the fractional part only. */
 export function excelFractionToHHMM(value: number): string | null {
   if (!Number.isFinite(value)) return null;

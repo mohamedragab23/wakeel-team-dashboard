@@ -7,6 +7,9 @@ import {
   parseCsvToMatrix,
   downloadBuffer,
   excelSerialToIsoDate,
+  dateToExcelSerial,
+  dateToExcelSerialUtc,
+  excelJsDateToSerial,
   excelFractionToHHMM,
   assertNotLegacyXls,
   UnsupportedLegacyXlsError,
@@ -41,6 +44,33 @@ describe('excelAdapter serial dates', () => {
   it('rejects non-finite serials', () => {
     assert.equal(excelSerialToIsoDate(Number.NaN), null);
     assert.equal(excelSerialToIsoDate(-1), null);
+  });
+
+  it('dateToExcelSerial round-trips ordinary calendar dates including 2023-01-01', () => {
+    assert.equal(dateToExcelSerial(new Date(2023, 0, 1)), 44927);
+    assert.equal(dateToExcelSerial(new Date(1900, 1, 28)), 59);
+    assert.equal(dateToExcelSerial(new Date(1900, 2, 1)), 61);
+    assert.equal(excelSerialToIsoDate(dateToExcelSerial(new Date(2023, 0, 1))), '2023-01-01');
+  });
+
+  it('dateToExcelSerial includes time-of-day as a day fraction', () => {
+    assert.equal(dateToExcelSerial(new Date(2023, 0, 1, 12, 0, 0)), 44927.5);
+  });
+
+  it('dateToExcelSerialUtc matches SheetJS datenum for timezone-shifted Date cells', () => {
+    const excelJsStyle = new Date('2022-12-31T22:00:00.000Z');
+    const serial = dateToExcelSerialUtc(excelJsStyle);
+    assert.equal(serial, (excelJsStyle.getTime() - Date.UTC(1899, 11, 30)) / 86400000);
+    assert.ok(Math.abs(serial - 44926.916666666664) < 1e-9);
+  });
+
+  it('excelJsDateToSerial recovers file serials including 60 without calendar Y-M-D', () => {
+    const fromExcelJs = (serial: number) => new Date((serial - 25569) * 86400000);
+    assert.equal(excelJsDateToSerial(fromExcelJs(59)), 59);
+    assert.equal(excelJsDateToSerial(fromExcelJs(60)), 60);
+    assert.equal(excelJsDateToSerial(fromExcelJs(61)), 61);
+    assert.equal(excelJsDateToSerial(fromExcelJs(44927)), 44927);
+    assert.equal(excelJsDateToSerial(fromExcelJs(44927.5)), 44927.5);
   });
 });
 

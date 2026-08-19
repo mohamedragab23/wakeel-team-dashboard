@@ -24,7 +24,7 @@
     "test:srs014:equipment-desk": "npx --yes tsx --test lib/equipmentLiability/equipmentDesk.test.ts lib/equipmentLiability/paymentReconcile.test.ts",
     "test:srs014:gate": "npx --yes tsx --test lib/srs014SafetyGate.test.ts",
     "test:enterprise-cert": "npx --yes tsx --test lib/strategicOps/enterpriseCert/enterpriseCert.test.ts",
-    "test:excel-adapter": "npx --yes tsx --test lib/excelAdapter/excelAdapter.test.ts lib/strategicOps/ghostRidersExcelExport.test.ts lib/recruitment/recruitmentExport.test.ts lib/supervisorTableExcel.test.ts lib/ridersPerformanceExcel.test.ts lib/riderStrategic/templateExcel.test.ts lib/strategicOps/clientExport.excel.test.ts",
+    "test:excel-adapter": "npx --yes tsx --test lib/excelAdapter/excelAdapter.test.ts lib/excelAdapter/sheetjsParity.test.ts lib/excelAdapter/track3bPerformanceParity.test.ts lib/strategicOps/ghostRidersExcelExport.test.ts lib/recruitment/recruitmentExport.test.ts lib/supervisorTableExcel.test.ts lib/ridersPerformanceExcel.test.ts lib/riderStrategic/templateExcel.test.ts lib/strategicOps/clientExport.excel.test.ts lib/riderStrategic/bulkExcelRead.test.ts lib/recruitment/bulkExcelImport.test.ts",
     "cert:enterprise-gate": "npx --yes tsx scripts/enterprise-cert-gate.ts",
     "migrate:simulation": "npx --yes tsx scripts/migrate-simulation-scenarios.ts",
     "migrate:ticketing": "npx --yes tsx scripts/migrate-ticketing.ts",

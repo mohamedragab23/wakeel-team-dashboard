@@ -1,10 +1,27 @@
 import ExcelJS from 'exceljs';
 import { assertNotLegacyXls } from './legacyXls';
 import { excelSerialToIsoDate } from './serialDate';
+import { excelJsDateToSerial, formatSsfDisplay } from './ssfDisplay';
 
 export type MatrixExtractOptions = {
   defval?: unknown;
-  raw?: boolean;
+  /**
+   * true: native/raw values (default).
+   * false: stringify numbers; dates become local YYYY-MM-DD unless dateMode is excel-serial.
+   * 'ssf-display': SheetJS raw:false — format via Excel numFmt + SSF (not cell.text).
+   */
+  raw?: boolean | 'ssf-display';
+  /**
+   * SheetJS raw:true + cellDates:false returns Excel date cells as serial numbers.
+   * ExcelJS returns Date objects. `excel-serial` recovers the file serial
+   * (including serial 60) without JS calendar arithmetic.
+   */
+  dateMode?: 'native' | 'excel-serial';
+  /**
+   * exceljs-fill (default): merged children expose the anchor value (ExcelJS).
+   * sheetjs-anchor-only: children are empty like SheetJS header:1.
+   */
+  merged?: 'exceljs-fill' | 'sheetjs-anchor-only';
 };
 
 export type JsonSheetOptions = {
@@ -60,37 +77,113 @@ function isEmptyCell(value: unknown): boolean {
   return value == null || value === '';
 }
 
-function formatCell(value: unknown, raw: boolean): unknown {
+function colLettersToNumber(letters: string): number {
+  let n = 0;
+  const up = letters.toUpperCase();
+  for (let i = 0; i < up.length; i++) {
+    n = n * 26 + (up.charCodeAt(i) - 64);
+  }
+  return n;
+}
+
+function decodeA1(addr: string): { row: number; col: number } | null {
+  const m = addr.trim().match(/^([A-Z]+)(\d+)$/i);
+  if (!m) return null;
+  return { col: colLettersToNumber(m[1]), row: parseInt(m[2], 10) };
+}
+
+function mergeChildSet(ws: ExcelJS.Worksheet): Set<string> {
+  const set = new Set<string>();
+  const merges = ((ws.model as { merges?: string[] } | undefined)?.merges ?? []) as string[];
+  for (const range of merges) {
+    const [tl, br] = String(range).split(':');
+    const a = decodeA1(tl);
+    const b = decodeA1(br || tl);
+    if (!a || !b) continue;
+    const top = Math.min(a.row, b.row);
+    const left = Math.min(a.col, b.col);
+    const bottom = Math.max(a.row, b.row);
+    const right = Math.max(a.col, b.col);
+    for (let r = top; r <= bottom; r++) {
+      for (let c = left; c <= right; c++) {
+        if (r === top && c === left) continue;
+        set.add(`${r},${c}`);
+      }
+    }
+  }
+  return set;
+}
+
+function numericFromUnwrapped(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (value instanceof Date) {
-    if (raw) return value;
-    const y = value.getFullYear();
-    const m = String(value.getMonth() + 1).padStart(2, '0');
-    const d = String(value.getDate()).padStart(2, '0');
+    const serial = excelJsDateToSerial(value);
+    return Number.isFinite(serial) ? serial : null;
+  }
+  return null;
+}
+
+function formatCell(
+  cell: ExcelJS.Cell,
+  unwrapped: unknown,
+  opts: MatrixExtractOptions
+): unknown {
+  const dateMode = opts.dateMode ?? 'native';
+  const isSsf = opts.raw === 'ssf-display';
+  const raw = opts.raw !== false && !isSsf;
+
+  if (isSsf) {
+    if (typeof unwrapped === 'string') return unwrapped;
+    const numeric = numericFromUnwrapped(unwrapped);
+    if (numeric != null) return formatSsfDisplay(numeric, cell.numFmt);
+    if (unwrapped instanceof Date) {
+      const y = unwrapped.getFullYear();
+      const m = String(unwrapped.getMonth() + 1).padStart(2, '0');
+      const d = String(unwrapped.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    return unwrapped;
+  }
+
+  if (unwrapped instanceof Date) {
+    if (dateMode === 'excel-serial') {
+      const serial = excelJsDateToSerial(unwrapped);
+      return Number.isFinite(serial) ? serial : unwrapped;
+    }
+    if (raw) return unwrapped;
+    const y = unwrapped.getFullYear();
+    const m = String(unwrapped.getMonth() + 1).padStart(2, '0');
+    const d = String(unwrapped.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
   }
-  if (typeof value === 'number' && !raw) {
-    return String(value);
+  if (typeof unwrapped === 'number' && !raw) {
+    return String(unwrapped);
   }
-  return value;
+  return unwrapped;
 }
 
 function rowFromWorksheet(
   ws: ExcelJS.Worksheet,
   rowNumber: number,
   columnCount: number,
-  opts: MatrixExtractOptions
+  opts: MatrixExtractOptions,
+  childMerges: Set<string>
 ): unknown[] {
   const defval = opts.defval ?? '';
-  const raw = opts.raw !== false ? true : false;
+  const hideChildren = opts.merged === 'sheetjs-anchor-only';
   const row = ws.getRow(rowNumber);
   const out: unknown[] = [];
   for (let c = 1; c <= columnCount; c++) {
+    if (hideChildren && childMerges.has(`${rowNumber},${c}`)) {
+      out.push(defval);
+      continue;
+    }
     const cell = row.getCell(c);
     const unwrapped = unwrapCellValue(cell.value);
     if (isEmptyCell(unwrapped)) {
       out.push(defval);
     } else {
-      out.push(formatCell(unwrapped, raw));
+      out.push(formatCell(cell, unwrapped, opts));
     }
   }
   return out;
@@ -115,9 +208,11 @@ export class AdapterWorkbook {
     const rowCount = Math.max(ws.actualRowCount || 0, ws.rowCount || 0);
     if (!rowCount) return [];
     const cols = Math.max(columnCount, 1);
+    const childMerges =
+      opts.merged === 'sheetjs-anchor-only' ? mergeChildSet(ws) : new Set<string>();
     const matrix: unknown[][] = [];
     for (let r = 1; r <= rowCount; r++) {
-      matrix.push(rowFromWorksheet(ws, r, cols, opts));
+      matrix.push(rowFromWorksheet(ws, r, cols, opts, childMerges));
     }
     return matrix;
   }
