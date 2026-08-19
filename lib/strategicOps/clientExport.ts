@@ -2,15 +2,41 @@ import type { StrategicOpsReport } from '@/lib/strategicOps/buildReport';
 import { formatStrategicOpsChatGptText } from '@/lib/strategicOps/formatReportText';
 import { GHOST_CATEGORY_LABELS_AR } from '@/lib/strategicOps/ghostRiderAudit';
 import { MATCH_METHOD_LABELS_AR } from '@/lib/strategicOps/codeNormalization';
+import { createWorkbook, downloadBuffer } from '@/lib/excelAdapter';
 
-export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
-  import('xlsx').then((XLSX) => {
-    const wb = XLSX.utils.book_new();
+export const STRATEGIC_OPS_EXCEL_SHEET_NAMES = [
+  'الملخص التنفيذي',
+  'Talabat Ops',
+  'سلامة البيانات',
+  'تدقيق Ghost Riders',
+  'Ghost Root Cause',
+  'تدقيق تاريخ الانضمام',
+  'ثقة المؤشرات',
+  'تتبع 2200',
+  'POST NORM VALIDATION',
+  'TOP 50 RECOVERED',
+  'REMAINING GHOSTS',
+  'CODE NORMALIZATION AUDIT',
+  'CODE NORM DETAIL',
+  'FINAL KPI AUDIT',
+  'FINAL Ghost Top100',
+  'FINAL KPI Gates',
+  'ذكاء الحقيقة STI',
+  'توقع المخاطر ORPS',
+  'توزيع النشاط',
+  'الساعات المهدرة',
+  'مؤشرات النمو والتوسع',
+  'المشرفون',
+  'مراجعة المعادلات',
+  'تدقيق الإقالات',
+  'تدقيق البيانات',
+] as const;
+
+export async function buildStrategicOpsExcelBuffer(report: StrategicOpsReport): Promise<Buffer> {
+    const wb = createWorkbook();
     const es = report.executiveSummary;
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
+    wb.addAoASheet('الملخص التنفيذي', [
         ['مركز العمليات الاستراتيجي'],
         ['الفترة', `${report.meta.startDate} → ${report.meta.endDate}`],
         ['الزون', report.meta.zone],
@@ -29,13 +55,9 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
         ['الإقالات المعتمدة', es.approvedResignations],
         ['نسبة التسرب %', es.attritionRate],
         ['درجة صحة التشغيل', report.operationalHealth.disabled ? 'بيانات غير كافية' : report.operationalHealth.score],
-      ]),
-      'الملخص التنفيذي'
-    );
+      ]);
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
+    wb.addAoASheet('Talabat Ops', [
         ['Talabat Operations KPIs'],
         ['Headcount', report.talabatOperations.headcount],
         ['Active Riders (avg daily)', report.talabatOperations.activeRiders],
@@ -54,13 +76,9 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
           m.talabatValue ?? '—',
           m.matchPercent ?? '—',
         ]),
-      ]),
-      'Talabat Ops'
-    );
+      ]);
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
+    wb.addAoASheet('سلامة البيانات', [
         ['تقرير سلامة البيانات'],
         ['درجة الجودة', report.dataIntegrity.dataQualityScore],
         ['متوسط تشغيلي س/يوم', report.dataIntegrity.operationalAverageHoursPerDay],
@@ -77,14 +95,9 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
         ['غير معيّنين', report.dataIntegrity.unassignedRiderCount],
         ['أيام بيانات صالحة', report.meta.validDaysInDataset],
         ['أيام تقويم', report.meta.periodDays],
-      ]),
-      'سلامة البيانات'
-    );
+      ]);
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        report.ghostRiderAudit.riders.map((g) => ({
+    wb.addJsonSheet('تدقيق Ghost Riders', report.ghostRiderAudit.riders.map((g) => ({
           الكود_الخام: g.rawRiderCode,
           الكود_المطبّع: g.riderCode,
           الاسم: g.riderName,
@@ -97,14 +110,9 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
           التصنيف_عربي: GHOST_CATEGORY_LABELS_AR[g.category],
           السبب: g.reasonAr,
           كود_المناديب_إن_وُجد: g.masterCodeIfFound ?? '',
-        }))
-      ),
-      'تدقيق Ghost Riders'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
+    wb.addAoASheet('Ghost Root Cause', [
         ['ملخص Ghost Root Cause'],
         ['إجمالي Ghost', report.ghostRiderAudit.totalGhostRiders],
         ['مستبعدون بالفلتر', report.ghostRiderAudit.totalScopeExcludedRiders],
@@ -113,27 +121,17 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
         ['C فشل تطبيع %', report.ghostRiderAudit.rootCauseSummary.normalizationFailedPercent],
         ['D فلتر زون %', report.ghostRiderAudit.rootCauseSummary.zoneFilteringPercent],
         ['E ربط مشرف %', report.ghostRiderAudit.rootCauseSummary.supervisorMappingPercent],
-      ]),
-      'Ghost Root Cause'
-    );
+      ]);
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        report.joinDateAudit.riders.map((r) => ({
+    wb.addJsonSheet('تدقيق تاريخ الانضمام', report.joinDateAudit.riders.map((r) => ({
           الكود: r.riderCode,
           الاسم: r.name,
           تاريخ_الانضمام: r.joinDate ?? '',
           المشرف: r.supervisorCode,
           صالح: r.hasValidJoinDate ? 'نعم' : 'لا',
-        }))
-      ),
-      'تدقيق تاريخ الانضمام'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
+    wb.addAoASheet('ثقة المؤشرات', [
         ['مستوى ثقة المؤشرات'],
         ['المستوى', report.kpiTrust.level],
         ['الوصف', report.kpiTrust.labelAr],
@@ -141,13 +139,9 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
         ['تسرب Ghost %', report.kpiTrust.ghostLeakagePercent],
         ['ثقة كاملة', report.kpiTrust.fullStrategicKpis ? 'نعم' : 'لا'],
         ['تعطيل STI/ORPS', report.kpiTrust.disableStiOrpsGrowthRoadmap ? 'نعم' : 'لا'],
-      ]),
-      'ثقة المؤشرات'
-    );
+      ]);
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
+    wb.addAoASheet('تتبع 2200', [
         ['تتبع خارطة 2200'],
         ['الفجوة اليومية', report.hoursRoadmap.dailyGap],
         ['طيارون إضافيون', report.hoursRoadmap.additionalActiveRidersNeeded],
@@ -160,15 +154,11 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
         ['rawCalculation', report.hoursRoadmap.ridersAudit.rawCalculation],
         ['roundedResult', report.hoursRoadmap.ridersAudit.roundedResult],
         ['validationPassed', report.hoursRoadmap.ridersAudit.validationPassed],
-      ]),
-      'تتبع 2200'
-    );
+      ]);
 
     const cn = report.codeNormalizationAudit;
     const pn = report.postNormalizationValidation;
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
+    wb.addAoASheet('POST NORM VALIDATION', [
         ['POST-NORMALIZATION VALIDATION REPORT'],
         ['Generated', pn.generatedAt],
         ['Proof', pn.proofStatementAr],
@@ -219,43 +209,27 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
         ['CAN TRUST?', pn.trustImpact.after.canTrustAnswerAr],
         ['Score Delta', pn.trustImpact.accuracyScoreDelta],
         ['Ghost Delta %', pn.trustImpact.ghostLeakageDelta],
-      ]),
-      'POST NORM VALIDATION'
-    );
+      ]);
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        pn.top50Recovered.map((r) => ({
+    wb.addJsonSheet('TOP 50 RECOVERED', pn.top50Recovered.map((r) => ({
           Original_Code: r.originalCode,
           Normalized_Code: r.normalizedCode,
           Hours_Recovered: r.hoursRecovered,
           Orders_Recovered: r.ordersRecovered,
           Confidence: r.confidence,
           Match_Method: r.matchMethod,
-        }))
-      ),
-      'TOP 50 RECOVERED'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        pn.remainingGhosts.riders.map((r) => ({
+    wb.addJsonSheet('REMAINING GHOSTS', pn.remainingGhosts.riders.map((r) => ({
           Original_Code: r.originalCode,
           Legacy_Code: r.legacyCode,
           Effective_Code: r.effectiveCode,
           Hours: r.hours,
           Orders: r.orders,
           Reason: r.reasonAr,
-        }))
-      ),
-      'REMAINING GHOSTS'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
+    wb.addAoASheet('CODE NORMALIZATION AUDIT', [
         ['CODE NORMALIZATION AUDIT'],
         ['Pipeline', cn.pipelinePath],
         ['Codes Normalized', cn.codesNormalized],
@@ -269,14 +243,9 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
         ['Recovered Hours', cn.recoveredHours],
         ['Recovered Orders', cn.recoveredOrders],
         ['Recovered Riders', cn.recoveredRiders],
-      ]),
-      'CODE NORMALIZATION AUDIT'
-    );
+      ]);
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        cn.entries.map((e) => ({
+    wb.addJsonSheet('CODE NORM DETAIL', cn.entries.map((e) => ({
           Original_Code: e.originalCode,
           Legacy_Normalized: e.legacyNormalizedCode,
           Normalized_Code: e.normalizedCode,
@@ -292,15 +261,10 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
           Orders: e.totalOrders,
           Rows: e.rowCount,
           Rejection_Reason: e.rejectionReason ?? '',
-        }))
-      ),
-      'CODE NORM DETAIL'
-    );
+        })));
 
     const fa = report.finalKpiAccuracyAudit;
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
+    wb.addAoASheet('FINAL KPI AUDIT', [
         ['FINAL KPI ACCURACY AUDIT'],
         ['Executive Accuracy Score', fa.executiveAccuracyScore.score],
         ['Grade', fa.executiveAccuracyScore.gradeLabelAr],
@@ -335,109 +299,62 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
         ['Data Quality', fa.kpiTrustVerification.dataQualityScore],
         ['Gate Status', fa.kpiTrustVerification.gateStatusAr],
         ...fa.managementTrust.reasons.map((r) => ['Trust Reason', r]),
-      ]),
-      'FINAL KPI AUDIT'
-    );
+      ]);
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        fa.ghostVerification.top100.map((g) => ({
+    wb.addJsonSheet('FINAL Ghost Top100', fa.ghostVerification.top100.map((g) => ({
           Code: g.code,
           Name: g.name,
           Hours: g.hours,
           Orders: g.orders,
           Root_Cause: g.rootCauseLabelAr,
-        }))
-      ),
-      'FINAL Ghost Top100'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        fa.kpiTrustVerification.kpiGates.map((g) => ({
+    wb.addJsonSheet('FINAL KPI Gates', fa.kpiTrustVerification.kpiGates.map((g) => ({
           KPI: g.kpiAr,
           Enabled: g.enabled ? 'yes' : 'no',
           Reason: g.reasonAr,
-        }))
-      ),
-      'FINAL KPI Gates'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        report.operationalTruthIntelligence.supervisorTruthIndex.map((s) => ({
+    wb.addJsonSheet('ذكاء الحقيقة STI', report.operationalTruthIntelligence.supervisorTruthIndex.map((s) => ({
           المشرف: s.supervisorName,
           STI: s.stiScore,
           الترتيب: s.rank,
           تسرب_Ghost: s.ghostDependencyRatio,
           احتفاظ: s.retentionScore,
           المستوى: s.riskLevel,
-        }))
-      ),
-      'ذكاء الحقيقة STI'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        report.operationalTruthIntelligence.operationalRiskPrediction.map((o) => ({
+    wb.addJsonSheet('توقع المخاطر ORPS', report.operationalTruthIntelligence.operationalRiskPrediction.map((o) => ({
           المشرف: o.supervisorName,
           ORPS: o.orpsScore,
           المستوى: o.riskLevel,
           السبب_الرئيسي: o.primaryRiskDriver,
-        }))
-      ),
-      'توقع المخاطر ORPS'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        report.activityDistribution.buckets.map((b) => ({
+    wb.addJsonSheet('توزيع النشاط', report.activityDistribution.buckets.map((b) => ({
           الفئة: b.label,
           العدد: b.count,
           النسبة: b.percent,
           متوسط_يومي_للطيار: b.avgDailyHoursPerRider,
           ساعات_الفترة: b.hoursContribution,
-        }))
-      ),
-      'توزيع النشاط'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        report.lostHours.breakdown.map((b) => ({
+    wb.addJsonSheet('الساعات المهدرة', report.lostHours.breakdown.map((b) => ({
           الفئة: b.category,
           مهدرة_يومياً: b.hoursDual.daily,
           مهدرة_الفترة: b.hours,
           النسبة: b.percent,
           العدد: b.riderCount,
-        }))
-      ),
-      'الساعات المهدرة'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        report.growthExpansion.indicators.map((ind) => ({
+    wb.addJsonSheet('مؤشرات النمو والتوسع', report.growthExpansion.indicators.map((ind) => ({
           المؤشر: ind.labelAr,
           القيمة: ind.displayValue,
           الصيغة: ind.formula,
           الحساب: ind.calculation,
-        }))
-      ),
-      'مؤشرات النمو والتوسع'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        report.supervisorPerformance.rows.map((s) => ({
+    wb.addJsonSheet('المشرفون', report.supervisorPerformance.rows.map((s) => ({
           الكود: s.code,
           الاسم: s.name,
           معيّنون: s.assignedRiders,
@@ -449,30 +366,18 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
           طلبات_يومياً: s.avgOrdersDaily,
           إقالات: s.resignations,
           إنتاجية: s.productivityScore,
-        }))
-      ),
-      'المشرفون'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        report.operationalFormulaAudit.validationTable.map((row) => ({
+    wb.addJsonSheet('مراجعة المعادلات', report.operationalFormulaAudit.validationTable.map((row) => ({
           المؤشر: row.kpi,
           الصيغة: row.formula,
           البيانات_الخام: row.rawData,
           النتيجة: row.result,
           الحالة: row.status === 'valid' ? 'صالح' : 'تحذير',
           ملاحظة: row.statusReason ?? '',
-        }))
-      ),
-      'مراجعة المعادلات'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        report.operationalFormulaAudit.approvedResignations.records.map((rec) => ({
+    wb.addJsonSheet('تدقيق الإقالات', report.operationalFormulaAudit.approvedResignations.records.map((rec) => ({
           صف_الشيت: rec.sheetRow,
           كود_الطيار: rec.riderCode,
           الاسم: rec.riderName,
@@ -481,27 +386,23 @@ export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
           تاريخ_الموافقة: rec.approvalDate,
           مُحتسب: rec.included ? 'نعم' : 'لا',
           ملاحظة_التكرار: rec.dedupeNote ?? '',
-        }))
-      ),
-      'تدقيق الإقالات'
-    );
+        })));
 
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        report.dataValidation.map((d) => ({
+    wb.addJsonSheet('تدقيق البيانات', report.dataValidation.map((d) => ({
           المؤشر: d.kpi,
           الشيت: d.sourceSheet,
           الأعمدة: d.columns,
           السجلات: d.recordsRead,
           الحساب: d.formula,
           النتيجة: d.result,
-        }))
-      ),
-      'تدقيق البيانات'
-    );
+        })));
 
-    XLSX.writeFile(wb, `strategic-ops-${report.meta.startDate}_${report.meta.endDate}.xlsx`);
+    return wb.writeBuffer();
+}
+
+export function exportStrategicOpsExcel(report: StrategicOpsReport): void {
+  void buildStrategicOpsExcelBuffer(report).then((buffer) => {
+    downloadBuffer(buffer, `strategic-ops-${report.meta.startDate}_${report.meta.endDate}.xlsx`);
   });
 }
 

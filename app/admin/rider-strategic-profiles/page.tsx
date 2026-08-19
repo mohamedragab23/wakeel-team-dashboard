@@ -13,7 +13,11 @@ import {
   type RiderStatusOption,
   type RiskLevel,
 } from '@/lib/riderStrategic/types';
-import { BULK_TEMPLATE_HEADERS } from '@/lib/riderStrategic/bulkImport';
+import { downloadBuffer } from '@/lib/excelAdapter';
+import {
+  buildRiderStrategicTemplateBuffer,
+  RIDER_STRATEGIC_TEMPLATE_FILENAME,
+} from '@/lib/riderStrategic/templateExcel';
 
 const RISK_COLORS: Record<RiskLevel, string> = {
   green: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
@@ -147,11 +151,8 @@ export default function RiderStrategicProfilesPage() {
   };
 
   const downloadTemplate = async () => {
-    const XLSX = await import('xlsx');
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([BULK_TEMPLATE_HEADERS]);
-    XLSX.utils.book_append_sheet(wb, ws, 'قالب');
-    XLSX.writeFile(wb, 'rider-strategic-template.xlsx');
+    const buffer = await buildRiderStrategicTemplateBuffer();
+    downloadBuffer(buffer, RIDER_STRATEGIC_TEMPLATE_FILENAME);
   };
 
   return (

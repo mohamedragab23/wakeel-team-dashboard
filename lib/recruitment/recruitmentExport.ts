@@ -1,10 +1,10 @@
 /**
  * تصدير المرشحين إلى Excel
  */
-import * as XLSX from 'xlsx';
+import { createWorkbook } from '@/lib/excelAdapter';
 import type { Candidate } from './types';
 
-const EXPORT_HEADERS_AR = [
+export const EXPORT_HEADERS_AR = [
   'المعرف',
   'الاسم الكامل',
   'رقم الهاتف',
@@ -88,10 +88,9 @@ function candidateToExportRow(c: Candidate): (string | boolean)[] {
   ];
 }
 
-export function candidatesToExcelBuffer(candidates: Candidate[]): Buffer {
+export async function candidatesToExcelBuffer(candidates: Candidate[]): Promise<Buffer> {
   const rows = [EXPORT_HEADERS_AR, ...candidates.map(candidateToExportRow)];
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'المرشحين');
-  return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+  const wb = createWorkbook();
+  wb.addAoASheet('المرشحين', rows);
+  return wb.writeBuffer();
 }

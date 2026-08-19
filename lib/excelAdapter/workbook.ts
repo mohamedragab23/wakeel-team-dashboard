@@ -1,0 +1,217 @@
+import ExcelJS from 'exceljs';
+import { assertNotLegacyXls } from './legacyXls';
+import { excelSerialToIsoDate } from './serialDate';
+
+export type MatrixExtractOptions = {
+  defval?: unknown;
+  raw?: boolean;
+};
+
+export type JsonSheetOptions = {
+  columns?: string[];
+  colWidths?: number[];
+};
+
+export type AoASheetOptions = {
+  colWidths?: number[];
+};
+
+type CellObject = {
+  formula?: unknown;
+  result?: unknown;
+  richText?: Array<{ text?: string }>;
+  text?: unknown;
+  hyperlink?: unknown;
+};
+
+function toUint8Array(input: ArrayBuffer | Buffer | Uint8Array): Uint8Array {
+  if (input instanceof Uint8Array) return input;
+  return new Uint8Array(input);
+}
+
+function clipSheetName(name: string): string {
+  const trimmed = name.trim() || 'Sheet1';
+  return trimmed.slice(0, 31);
+}
+
+function applyColWidths(ws: ExcelJS.Worksheet, colWidths?: number[]): void {
+  if (!colWidths?.length) return;
+  colWidths.forEach((w, i) => {
+    const col = ws.getColumn(i + 1);
+    col.width = w;
+  });
+}
+
+function unwrapCellValue(value: unknown): unknown {
+  if (value == null) return null;
+  if (typeof value !== 'object') return value;
+  if (value instanceof Date) return value;
+  const obj = value as CellObject;
+  if (Array.isArray(obj.richText)) {
+    return obj.richText.map((p) => p.text ?? '').join('');
+  }
+  if (obj.result != null) return unwrapCellValue(obj.result);
+  if (obj.text != null) return obj.text;
+  if (obj.formula != null) return obj.formula;
+  return value;
+}
+
+function isEmptyCell(value: unknown): boolean {
+  return value == null || value === '';
+}
+
+function formatCell(value: unknown, raw: boolean): unknown {
+  if (value instanceof Date) {
+    if (raw) return value;
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  if (typeof value === 'number' && !raw) {
+    return String(value);
+  }
+  return value;
+}
+
+function rowFromWorksheet(
+  ws: ExcelJS.Worksheet,
+  rowNumber: number,
+  columnCount: number,
+  opts: MatrixExtractOptions
+): unknown[] {
+  const defval = opts.defval ?? '';
+  const raw = opts.raw !== false ? true : false;
+  const row = ws.getRow(rowNumber);
+  const out: unknown[] = [];
+  for (let c = 1; c <= columnCount; c++) {
+    const cell = row.getCell(c);
+    const unwrapped = unwrapCellValue(cell.value);
+    if (isEmptyCell(unwrapped)) {
+      out.push(defval);
+    } else {
+      out.push(formatCell(unwrapped, raw));
+    }
+  }
+  return out;
+}
+
+export class AdapterWorkbook {
+  constructor(private readonly wb: ExcelJS.Workbook) {}
+
+  get sheetNames(): string[] {
+    return this.wb.worksheets.map((s) => s.name);
+  }
+
+  sheet(name?: string): ExcelJS.Worksheet {
+    const ws = name ? this.wb.getWorksheet(name) : this.wb.worksheets[0];
+    if (!ws) throw new Error(name ? `Sheet not found: ${name}` : 'Workbook has no sheets');
+    return ws;
+  }
+
+  sheetToMatrix(name?: string, opts: MatrixExtractOptions = {}): unknown[][] {
+    const ws = this.sheet(name);
+    const columnCount = Math.max(ws.actualColumnCount || 0, ws.columnCount || 0);
+    const rowCount = Math.max(ws.actualRowCount || 0, ws.rowCount || 0);
+    if (!rowCount) return [];
+    const cols = Math.max(columnCount, 1);
+    const matrix: unknown[][] = [];
+    for (let r = 1; r <= rowCount; r++) {
+      matrix.push(rowFromWorksheet(ws, r, cols, opts));
+    }
+    return matrix;
+  }
+
+  sheetToObjects(
+    name?: string,
+    opts: MatrixExtractOptions = {}
+  ): Record<string, unknown>[] {
+    const matrix = this.sheetToMatrix(name, opts);
+    if (matrix.length === 0) return [];
+    const defval = opts.defval ?? '';
+    const headerRow = matrix[0].map((h) => String(h ?? '').trim());
+    const objects: Record<string, unknown>[] = [];
+    for (let i = 1; i < matrix.length; i++) {
+      const row = matrix[i];
+      const obj: Record<string, unknown> = {};
+      let empty = true;
+      headerRow.forEach((header, idx) => {
+        if (!header) return;
+        const value = idx < row.length ? row[idx] : defval;
+        obj[header] = value;
+        if (!isEmptyCell(value) && value !== defval) empty = false;
+      });
+      if (!empty) objects.push(obj);
+    }
+    return objects;
+  }
+
+  addAoASheet(name: string, rows: unknown[][], opts: AoASheetOptions = {}): void {
+    const ws = this.wb.addWorksheet(clipSheetName(name));
+    rows.forEach((row) => {
+      if (!row.length) {
+        ws.addRow([null]);
+        return;
+      }
+      ws.addRow(row.map((cell) => (cell == null ? null : cell)));
+    });
+    applyColWidths(ws, opts.colWidths);
+  }
+
+  addJsonSheet(
+    name: string,
+    rows: Record<string, unknown>[],
+    opts: JsonSheetOptions = {}
+  ): void {
+    const columns =
+      opts.columns && opts.columns.length
+        ? opts.columns
+        : rows.length
+          ? Object.keys(rows[0])
+          : [];
+    if (!columns.length && !rows.length) {
+      this.addAoASheet(name, [], { colWidths: opts.colWidths });
+      return;
+    }
+    const aoa: unknown[][] = [columns];
+    for (const row of rows) {
+      aoa.push(columns.map((col) => (row[col] == null ? null : row[col])));
+    }
+    this.addAoASheet(name, aoa, { colWidths: opts.colWidths });
+  }
+
+  columnWidths(name?: string): number[] {
+    const ws = this.sheet(name);
+    const columnCount = Math.max(ws.actualColumnCount || 0, ws.columnCount || 0);
+    const widths: number[] = [];
+    for (let c = 1; c <= columnCount; c++) {
+      const width = ws.getColumn(c).width;
+      widths.push(typeof width === 'number' ? width : 0);
+    }
+    return widths;
+  }
+
+  async writeBuffer(): Promise<Buffer> {
+    const buf = await this.wb.xlsx.writeBuffer();
+    return Buffer.from(buf);
+  }
+}
+
+export function createWorkbook(): AdapterWorkbook {
+  return new AdapterWorkbook(new ExcelJS.Workbook());
+}
+
+export async function readWorkbook(
+  input: ArrayBuffer | Buffer | Uint8Array,
+  opts?: { filename?: string }
+): Promise<AdapterWorkbook> {
+  const bytes = toUint8Array(input);
+  assertNotLegacyXls(bytes, opts?.filename);
+  const copy = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(copy).set(bytes);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(copy);
+  return new AdapterWorkbook(wb);
+}
+
+export { excelSerialToIsoDate };

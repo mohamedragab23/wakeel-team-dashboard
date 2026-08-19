@@ -29,6 +29,12 @@ const nextConfig = {
     if (isServer) {
       config.externals = config.externals || [];
       config.externals.push('@resvg/resvg-js');
+    } else {
+      // ExcelJS Node entry pulls fs/stream; client exports use the browser bundle.
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        exceljs: require.resolve('exceljs/dist/exceljs.min.js'),
+      };
     }
 
     return config;

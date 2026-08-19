@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
       q: searchParams.get('q') || undefined,
     });
 
-    const buf = candidatesToExcelBuffer(candidates);
+    const buf = await candidatesToExcelBuffer(candidates);
     return new NextResponse(new Uint8Array(buf), {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

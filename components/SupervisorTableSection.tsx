@@ -9,9 +9,10 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
-import * as XLSX from 'xlsx';
 import Button from '@/components/ui-v2/Button';
 import { cn } from '@/components/ui-v2/cn';
+import { downloadBuffer } from '@/lib/excelAdapter';
+import { buildSupervisorTableExcelBuffer } from '@/lib/supervisorTableExcel';
 
 export type SupervisorExportRow = Record<string, string | number | null | undefined>;
 
@@ -142,11 +143,9 @@ export default function SupervisorTableSection({
     if (!getExportRows) return;
     const rows = getExportRows();
     if (!rows.length) return;
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31) || 'Sheet1');
+    const buffer = await buildSupervisorTableExcelBuffer(rows, sheetName);
     const day = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `${fileNameBase}-${day}.xlsx`);
+    downloadBuffer(buffer, `${fileNameBase}-${day}.xlsx`);
   }, [onExportExcel, getExportRows, sheetName, fileNameBase]);
 
   const lightBtn =

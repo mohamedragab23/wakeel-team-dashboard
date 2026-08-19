@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { buildStrategicOpsReport, type StrategicOpsFilters } from '@/lib/strategicOps/buildReport';
-import * as XLSX from 'xlsx';
+import { buildGhostRidersExcelBuffer } from '@/lib/strategicOps/ghostRidersExcelExport';
 import { AUTH_COOKIE_NAME } from '@/lib/requestAuth';
 
 export const runtime = 'nodejs';
@@ -63,45 +63,18 @@ export async function GET(request: NextRequest) {
         : 'هذا المندوب غير موجود في قائمة المناديب - يجب إضافته أو تصحيح الكود',
     }));
 
-    // Create workbook
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(excelData);
-
-    // Set column widths
-    ws['!cols'] = [
-      { wch: 30 }, // كود المندوب
-      { wch: 35 }, // الاسم
-      { wch: 18 }, // عدد أيام العمل
-      { wch: 18 }, // إجمالي الساعات
-      { wch: 20 }, // إجمالي الأوردرات
-      { wch: 22 }, // متوسط يومي
-      { wch: 30 }, // الفئة
-      { wch: 50 }, // السبب
-      { wch: 30 }, // الحالة
-      { wch: 25 }, // كود في القائمة الرسمية
-      { wch: 60 }, // ملاحظات
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, 'Ghost Riders');
-
-    // Add summary sheet
     const summaryData = [
-      { 'المقياس': 'إجمالي المناديب الأشباح', 'القيمة': ghostRiders.length },
-      { 'المقياس': 'نسبة التسرب', 'القيمة': `${report.dataIntegrity.ghostLeakagePercent}%` },
-      { 'المقياس': 'الفترة', 'القيمة': `${startDate} إلى ${endDate}` },
-      { 'المقياس': 'المنطقة', 'القيمة': zone === 'all' ? 'جميع المناطق' : zone },
-      { 'المقياس': 'تاريخ التصدير', 'القيمة': new Date().toLocaleString('ar-EG') },
+      { المقياس: 'إجمالي المناديب الأشباح', القيمة: ghostRiders.length },
+      { المقياس: 'نسبة التسرب', القيمة: `${report.dataIntegrity.ghostLeakagePercent}%` },
+      { المقياس: 'الفترة', القيمة: `${startDate} إلى ${endDate}` },
+      { المقياس: 'المنطقة', القيمة: zone === 'all' ? 'جميع المناطق' : zone },
+      { المقياس: 'تاريخ التصدير', القيمة: new Date().toLocaleString('ar-EG') },
     ];
 
-    const wsSummary = XLSX.utils.json_to_sheet(summaryData);
-    wsSummary['!cols'] = [{ wch: 30 }, { wch: 50 }];
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'ملخص');
-
-    // Generate buffer
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const buffer = await buildGhostRidersExcelBuffer(excelData, summaryData);
 
     // Return as download
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

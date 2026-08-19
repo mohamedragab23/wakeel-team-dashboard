@@ -4,7 +4,11 @@ import { authFetch } from '@/lib/authFetch';
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import Layout from '@/components/Layout';
 import SupervisorTableSection from '@/components/SupervisorTableSection';
-import * as XLSX from 'xlsx';
+import { downloadBuffer } from '@/lib/excelAdapter';
+import {
+  buildRidersPerformanceExcelBuffer,
+  ridersPerformanceFileName,
+} from '@/lib/ridersPerformanceExcel';
 import {
   RidersExcelColumnMenu,
   defaultTextFilter,
@@ -227,50 +231,12 @@ export default function RidersPage() {
         'نسبة القبول %': Number.isFinite(r.acceptance) ? Number(r.acceptance) : 0,
         'المديونية': Number.isFinite(r.debt) ? Number(r.debt) : 0 }));
 
-      const worksheet = XLSX.utils.json_to_sheet(rows, {
-        header: [
-          'كود المندوب',
-          'اسم المندوب',
-          'الحالة التشغيلية',
-          'انتهاء العقد',
-          'التاريخ/الفترة',
-          'عدد أيام العمل',
-          'ساعات العمل',
-          'البريك',
-          'التأخير',
-          'الغياب',
-          'الطلبات',
-          'نسبة القبول %',
-          'المديونية',
-        ] });
-
-      worksheet['!cols'] = [
-        { wch: 14 },
-        { wch: 22 },
-        { wch: 14 },
-        { wch: 14 },
-        { wch: 22 },
-        { wch: 12 },
-        { wch: 12 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 14 },
-        { wch: 12 },
-      ];
-
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'أداء المناديب');
-
-      const safeStart = (startDate || '').replaceAll(':', '-');
-      const safeEnd = (endDate || '').replaceAll(':', '-');
-      const suffix = safeStart && safeEnd ? `${safeStart}_to_${safeEnd}` : new Date().toISOString().split('T')[0];
-      const fileName = `riders_performance_${suffix}.xlsx`;
+      const workbookBuffer = await buildRidersPerformanceExcelBuffer(rows);
+      const fileName = ridersPerformanceFileName(startDate, endDate);
       await new Promise<void>((resolve, reject) => {
         const run = () => {
           try {
-            XLSX.writeFile(workbook, fileName);
+            downloadBuffer(workbookBuffer, fileName);
             resolve();
           } catch (err) {
             reject(err);
