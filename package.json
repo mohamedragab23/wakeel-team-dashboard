@@ -96,6 +96,12 @@
     "eslint-config-next": "14.0.4",
     "jsonwebtoken": {
       "jws": "3.2.3"
+    },
+    "google-auth-library": {
+      "jws": "4.0.1"
+    },
+    "gtoken": {
+      "jws": "4.0.1"
     }
   }
 }
