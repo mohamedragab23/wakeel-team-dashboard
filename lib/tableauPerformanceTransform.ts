@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { readFirstSheetMatrix } from '@/lib/excelAdapter';
 import { normalizeRiderCodeForPerformance } from '@/lib/dataFilter';
 
 export type TableauPerformanceRow = {
@@ -86,27 +87,34 @@ function detectColumns(headers: string[]): ColMap | null {
   };
 }
 
-function matrixFromBuffer(buffer: ArrayBuffer, format: 'excel' | 'csv'): any[][] {
+async function matrixFromBuffer(buffer: ArrayBuffer, format: 'excel' | 'csv'): Promise<any[][]> {
   if (format === 'csv') {
     const text = new TextDecoder('utf-8').decode(new Uint8Array(buffer));
     const wb = XLSX.read(text, { type: 'string', raw: false });
     const ws = wb.Sheets[wb.SheetNames[0]];
     return XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' }) as any[][];
   }
-  const wb = XLSX.read(buffer, { type: 'array', raw: false });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' }) as any[][];
+  // Production Tableau Excel contract (Golden Spike):
+  // XLSX.read({ raw:false }) + sheet_to_json({ header:1, defval:'' }) without raw
+  // ⇒ numeric cells remain numbers. Do NOT use ssf-display.
+  return (await readFirstSheetMatrix(buffer, {
+    raw: true,
+    dateMode: 'excel-serial',
+    merged: 'sheetjs-anchor-only',
+    defval: '',
+    legacyXlsFallback: true,
+  })) as any[][];
 }
 
 /**
  * Parse Tableau Rider Performance crosstab → rows ready for sheet merge (debt filled later).
  */
-export function parseTableauPerformanceExport(
+export async function parseTableauPerformanceExport(
   buffer: ArrayBuffer,
   format: 'excel' | 'csv'
-): { rows: TableauPerformanceRow[]; warnings: string[] } {
+): Promise<{ rows: TableauPerformanceRow[]; warnings: string[] }> {
   const warnings: string[] = [];
-  const matrix = matrixFromBuffer(buffer, format);
+  const matrix = await matrixFromBuffer(buffer, format);
   if (!matrix.length) {
     return { rows: [], warnings: ['ملف Tableau فارغ'] };
   }

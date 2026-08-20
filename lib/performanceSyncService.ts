@@ -43,7 +43,7 @@ export async function pullAndProcessTableauForDate(targetDate: string): Promise<
     format = res.format;
   }
 
-  const { rows: parsed, warnings } = parseTableauPerformanceExport(buffer, format);
+  const { rows: parsed, warnings } = await parseTableauPerformanceExport(buffer, format);
   if (warnings.length) console.warn('[performanceSync]', warnings.join('; '));
 
   const debtMap = await loadCodDebtByRiderForDate(targetDate);

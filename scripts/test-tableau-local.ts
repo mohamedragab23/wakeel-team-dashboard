@@ -34,7 +34,7 @@ async function main() {
   console.log(`   OK — ${format}, ${buffer.byteLength} bytes`);
 
   console.log('\n2) Parsing export…');
-  const { rows, warnings } = parseTableauPerformanceExport(buffer, format);
+  const { rows, warnings } = await parseTableauPerformanceExport(buffer, format);
   warnings.forEach((w) => console.log('   warn:', w));
   console.log(`   wakeel riders parsed: ${rows.length}`);
 

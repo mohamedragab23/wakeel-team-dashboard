@@ -54,11 +54,11 @@ function legacyToTableauRows(
 }
 
 /** Parse Tableau crosstab export, or fall back to legacy 9-column sheet format. */
-export function parsePerformanceFileBuffer(
+export async function parsePerformanceFileBuffer(
   buffer: ArrayBuffer,
   forcedDate: string
-): { rows: TableauPerformanceRow[]; warnings: string[]; source: 'tableau' | 'legacy' } {
-  const tableau = parseTableauPerformanceExport(buffer, 'excel');
+): Promise<{ rows: TableauPerformanceRow[]; warnings: string[]; source: 'tableau' | 'legacy' }> {
+  const tableau = await parseTableauPerformanceExport(buffer, 'excel');
   if (tableau.rows.length > 0) {
     return { rows: tableau.rows, warnings: tableau.warnings, source: 'tableau' };
   }
@@ -82,7 +82,7 @@ export async function buildPerformanceImportPreview(
   performanceBuffer: ArrayBuffer,
   codBuffer?: ArrayBuffer
 ): Promise<PerformanceImportPreview> {
-  const { rows, warnings, source } = parsePerformanceFileBuffer(performanceBuffer, targetDate);
+  const { rows, warnings, source } = await parsePerformanceFileBuffer(performanceBuffer, targetDate);
 
   let debtMap: Map<string, number>;
   const hadCodFile = !!codBuffer?.byteLength;
@@ -159,7 +159,7 @@ export async function applyPerformanceImport(
     await saveCodSnapshotForDate(targetDate, debtMap, true);
   }
 
-  const { rows } = parsePerformanceFileBuffer(performanceBuffer, targetDate);
+  const { rows } = await parsePerformanceFileBuffer(performanceBuffer, targetDate);
   let debtMap = await loadCodDebtByRiderForDate(targetDate);
   const merged = mergeCodDebt(rows, debtMap);
   const { written, deleted } = await applyPerformanceToSheet(targetDate, merged);

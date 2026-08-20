@@ -375,7 +375,7 @@ describe('Track 3B raw:true upload-path vs adapter excel-serial', () => {
 describe('Track 3B business parsers on both matrices', () => {
   it('adapter ssf-display cells match the Tableau SheetJS formatted matrix', async () => {
     const buf = writeTableauCrosstab();
-    const produced = parseTableauPerformanceExport(toAb(buf), 'excel');
+    const produced = await parseTableauPerformanceExport(toAb(buf), 'excel');
     assert.equal(produced.rows.length, 3);
     assert.equal(produced.rows[0].acceptance, '85%');
     assert.equal(produced.rows[1].acceptance, '85%');
@@ -410,9 +410,9 @@ describe('Track 3B business parsers on both matrices', () => {
     assert.ok(sjF.data.every((d) => d.date === '2026-08-19'));
   });
 
-  it('parsePerformanceFileBuffer uses Tableau first then legacy+forcedDate; COD merge does not parse Excel', () => {
+  it('parsePerformanceFileBuffer uses Tableau first then legacy+forcedDate; COD merge does not parse Excel', async () => {
     const buf = writeLegacyNineCol();
-    const parsed = parsePerformanceFileBuffer(toAb(buf), '2026-08-19');
+    const parsed = await parsePerformanceFileBuffer(toAb(buf), '2026-08-19');
     assert.equal(parsed.source, 'legacy');
     assert.ok(parsed.warnings.some((w) => w.includes('rider_id')));
     assert.ok(parsed.rows.every((r) => r.hours >= 0));
@@ -422,12 +422,12 @@ describe('Track 3B business parsers on both matrices', () => {
 });
 
 describe('Track 3B CSV current behavior (do not migrate)', () => {
-  it('SheetJS string raw:false vs PapaParse parseCsvToMatrix is not identical', () => {
+  it('SheetJS string raw:false vs PapaParse parseCsvToMatrix is not identical', async () => {
     const text =
       'Rider ID,Actual Working Hours,Acceptance Rate,Contract Name\nW1,8.5,85%,wakeel\nW2,,,\n"W3, quoted",1.25,0.85,wakeel\n';
     const sj = sheetJsCsvMatrix(text);
     const papa = parseCsvToMatrix(text, { defval: '' });
-    const produced = parseTableauPerformanceExport(toAb(Buffer.from(text, 'utf8')), 'csv');
+    const produced = await parseTableauPerformanceExport(toAb(Buffer.from(text, 'utf8')), 'csv');
     console.log('[3B] CSV SheetJS', JSON.stringify(sj));
     console.log('[3B] CSV Papa', JSON.stringify(papa));
     console.log('[3B] CSV parseTableau rows', produced.rows);
@@ -440,9 +440,9 @@ describe('Track 3B .xls production-path evidence', () => {
   it('SheetJS production parsers can read bookType=xls; ExcelJS readWorkbook rejects OLE', async () => {
     const xls = writeLegacyXls();
     assert.equal(xls[0], 0xd0);
-    const tab = parseTableauPerformanceExport(toAb(xls), 'excel');
+    const tab = await parseTableauPerformanceExport(toAb(xls), 'excel');
     assert.equal(tab.rows[0]?.riderCode, 'Wxls');
-    const parsed = parsePerformanceFileBuffer(toAb(xls), '2026-08-19');
+    const parsed = await parsePerformanceFileBuffer(toAb(xls), '2026-08-19');
     assert.equal(parsed.source, 'tableau');
     await assert.rejects(() => readWorkbook(xls, { filename: 'perf.xls' }), UnsupportedLegacyXlsError);
   });
