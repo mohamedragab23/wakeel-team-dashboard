@@ -5,15 +5,30 @@
  * is true (default), this module uses a narrowly scoped `xlsx` read for those
  * inputs only. OOXML (.xlsx) always goes through ExcelJS. Do not use this as a
  * second general Excel abstraction — callers should keep using these helpers.
+ *
+ * `preserveSheetJsRefShape` (default false): opt-in SheetJS matrix shape parity
+ * (trailing empty rows/cols from OOXML dimension / SheetJS !ref). Default keeps
+ * historical trimTrailingEmptyRows behavior for existing callers.
  */
 import * as XLSX from 'xlsx';
 import { isLegacyXlsInput } from './legacyXls';
+import {
+  applySheetRefShape,
+  readFirstSheetOoxmlDimension,
+} from './ooxmlSheetDimension';
 import { readWorkbook, type MatrixExtractOptions } from './workbook';
 
 export type ReadFirstSheetOptions = MatrixExtractOptions & {
   filename?: string;
   /** When true (default), OLE / .xls filenames use SheetJS. ExcelJS cannot read BIFF. */
   legacyXlsFallback?: boolean;
+  /**
+   * When true, preserve SheetJS-equivalent used range shape:
+   * - .xlsx: pad/clip to OOXML `<dimension ref>` (not a full SheetJS value parse)
+   * - .xls fallback: do not trim SheetJS sheet_to_json output
+   * Default false: trim trailing empty rows (existing callers).
+   */
+  preserveSheetJsRefShape?: boolean;
 };
 
 function toUint8Array(input: ArrayBuffer | Buffer | Uint8Array): Uint8Array {
@@ -44,23 +59,33 @@ export async function readFirstSheetMatrix(
 ): Promise<unknown[][]> {
   const bytes = toUint8Array(input);
   const fallback = opts.legacyXlsFallback !== false;
+  const preserveShape = opts.preserveSheetJsRefShape === true;
+  const defval = opts.defval ?? '';
+
   if (fallback && isLegacyXlsInput(bytes, opts.filename)) {
     const ws = sheetJsFirstSheet(bytes);
     const matrix = XLSX.utils.sheet_to_json(ws, {
       header: 1,
       raw: opts.raw === 'ssf-display' ? false : opts.raw !== false,
-      defval: opts.defval ?? '',
+      defval,
     }) as unknown[][];
-    return trimTrailingEmptyRows(matrix);
+    return preserveShape ? matrix : trimTrailingEmptyRows(matrix);
   }
 
   const wb = await readWorkbook(bytes, { filename: opts.filename });
-  const matrix = wb.sheetToMatrix(undefined, {
-    defval: opts.defval ?? '',
+  let matrix = wb.sheetToMatrix(undefined, {
+    defval,
     raw: opts.raw,
     dateMode: opts.dateMode ?? 'excel-serial',
     merged: opts.merged,
   });
+
+  if (preserveShape) {
+    const box = await readFirstSheetOoxmlDimension(bytes);
+    if (box) matrix = applySheetRefShape(matrix, box, defval);
+    return matrix;
+  }
+
   return trimTrailingEmptyRows(matrix);
 }
 
