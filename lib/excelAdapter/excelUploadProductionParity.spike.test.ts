@@ -1,28 +1,22 @@
 /**
- * SPIKE ONLY — ExcelUploadEnhanced client Excel matrix vs adapter candidate.
+ * ExcelUploadEnhanced matrix parity — historical SheetJS client contract vs
+ * migrated adapter path (Candidate #1).
  *
- * Production source of truth (components/ExcelUploadEnhanced.tsx):
- *   const data = new Uint8Array(arrayBuffer);
+ * Historical SheetJS oracle (pre-migration):
  *   XLSX.read(data, { type: 'array', cellDates: false });
- *   XLSX.utils.sheet_to_json(worksheet, {
- *     header: 1,
- *     defval: '',
- *     raw: true,
- *   });
+ *   sheet_to_json(ws, { header: 1, defval: '', raw: true });
  *
- * Downstream: JSON body `{ type, data: any[][] }` → `/api/admin/upload`
- *   → processRidersExcel / processPerformanceExcel (matrix consumers).
- * Legacy FormData path uses excelProcessorServer (OUT OF SCOPE for this spike).
- *
- * Candidate (NOT authorized to migrate):
+ * Migrated production path (components/ExcelUploadEnhanced.tsx):
  *   readFirstSheetMatrix(buffer, {
  *     raw: true,
  *     dateMode: 'excel-serial',
  *     merged: 'sheetjs-anchor-only',
  *     defval: '',
  *     legacyXlsFallback: true,
+ *     preserveSheetJsRefShape: true,
  *   })
  *
+ * Downstream unchanged: JSON `{ type, data: any[][] }` → `/api/admin/upload`.
  * Do NOT compare against sheet_to_json({ raw:false }) or ssf-display.
  * Do NOT normalize values to make tests pass.
  */
@@ -46,12 +40,13 @@ type Mismatch = {
   numFmt?: string;
 };
 
-const ADAPTER_CANDIDATE = {
+const ADAPTER_MIGRATED = {
   raw: true as const,
   dateMode: 'excel-serial' as const,
   merged: 'sheetjs-anchor-only' as const,
   defval: '',
   legacyXlsFallback: true,
+  preserveSheetJsRefShape: true,
 };
 
 /**
@@ -253,8 +248,8 @@ function writeOleXls(): Buffer {
   return Buffer.from(XLSX.write(book, { type: 'buffer', bookType: 'xls' }) as Buffer);
 }
 
-describe('SPIKE: ExcelUploadEnhanced production SheetJS vs adapter candidate', () => {
-  it('documents production contract spot-checks (value + typeof)', () => {
+describe('ExcelUploadEnhanced migrated adapter parity vs historical SheetJS', () => {
+  it('documents historical SheetJS contract spot-checks (value + typeof)', () => {
     const { buf } = writeGoldenWorkbook();
     const prod = productionExcelUploadMatrix(buf);
 
@@ -287,10 +282,10 @@ describe('SPIKE: ExcelUploadEnhanced production SheetJS vs adapter candidate', (
     }
   });
 
-  it('golden workbook: value+typeof match adapter candidate', async () => {
+  it('golden workbook: value+typeof match migrated adapter', async () => {
     const { buf, numFmtByA1 } = writeGoldenWorkbook();
     const prod = productionExcelUploadMatrix(buf);
-    const adapter = await readFirstSheetMatrix(buf, ADAPTER_CANDIDATE);
+    const adapter = await readFirstSheetMatrix(buf, ADAPTER_MIGRATED);
     const bad = collectMismatches('golden-workbook', prod, adapter, numFmtByA1);
     if (bad.length) {
       console.error('[SPIKE ExcelUpload] mismatches', JSON.stringify(bad, null, 2));
@@ -304,7 +299,7 @@ describe('SPIKE: ExcelUploadEnhanced production SheetJS vs adapter candidate', (
     created.sheet().getCell('A3').value = { formula: 'A2*2', result: 20 };
     const buf = await created.writeBuffer();
     const prod = productionExcelUploadMatrix(buf);
-    const adapter = await readFirstSheetMatrix(buf, ADAPTER_CANDIDATE);
+    const adapter = await readFirstSheetMatrix(buf, ADAPTER_MIGRATED);
     assert.equal(prod[2][0], 20);
     assert.equal(typeof prod[2][0], 'number');
     const bad = collectMismatches('formula-general', prod, adapter, { A3: 'General' });
@@ -320,7 +315,7 @@ describe('SPIKE: ExcelUploadEnhanced production SheetJS vs adapter candidate', (
     cell.numFmt = '0%';
     const buf = await created.writeBuffer();
     const prod = productionExcelUploadMatrix(buf);
-    const adapter = await readFirstSheetMatrix(buf, ADAPTER_CANDIDATE);
+    const adapter = await readFirstSheetMatrix(buf, ADAPTER_MIGRATED);
     console.log('[SPIKE ExcelUpload] formula-pct production', prod[1][0], typeof prod[1][0]);
     console.log('[SPIKE ExcelUpload] formula-pct adapter', adapter[1][0], typeof adapter[1][0]);
     const bad = collectMismatches('formula-pct', prod, adapter, { A2: '0%' });
@@ -331,7 +326,7 @@ describe('SPIKE: ExcelUploadEnhanced production SheetJS vs adapter candidate', (
   it('merged cells: production empty children vs sheetjs-anchor-only', async () => {
     const buf = writeMerged();
     const prod = productionExcelUploadMatrix(buf);
-    const adapter = await readFirstSheetMatrix(buf, ADAPTER_CANDIDATE);
+    const adapter = await readFirstSheetMatrix(buf, ADAPTER_MIGRATED);
     assert.equal(prod[1][0], 44927);
     assert.equal(typeof prod[1][0], 'number');
     assert.equal(prod[2][0], '');
@@ -343,11 +338,38 @@ describe('SPIKE: ExcelUploadEnhanced production SheetJS vs adapter candidate', (
   it('header-only workbook matches production', async () => {
     const buf = writeHeaderOnly();
     const prod = productionExcelUploadMatrix(buf);
-    const adapter = await readFirstSheetMatrix(buf, ADAPTER_CANDIDATE);
+    const adapter = await readFirstSheetMatrix(buf, ADAPTER_MIGRATED);
     assert.equal(prod.length, 1);
     const bad = collectMismatches('header-only', prod, adapter);
     if (bad.length) console.error('[SPIKE ExcelUpload] header-only', JSON.stringify(bad, null, 2));
     assert.equal(bad.length, 0);
+  });
+
+  it('trailing empty rows and columns match SheetJS !ref shape', async () => {
+    const rowsWs: XLSX.WorkSheet = {
+      A1: { t: 's', v: 'code' },
+      B1: { t: 's', v: 'name' },
+      A2: { t: 's', v: 'R1' },
+      B2: { t: 's', v: 'Ali' },
+      '!ref': 'A1:B5',
+    };
+    const rowsBuf = writeXlsx(rowsWs);
+    const rowsProd = productionExcelUploadMatrix(rowsBuf);
+    const rowsAd = await readFirstSheetMatrix(rowsBuf, ADAPTER_MIGRATED);
+    assert.equal(rowsProd.length, 5);
+    assert.equal(collectMismatches('trailing-rows', rowsProd, rowsAd).length, 0);
+
+    const colsWs: XLSX.WorkSheet = {
+      A1: { t: 's', v: 'code' },
+      A2: { t: 's', v: 'R1' },
+      A3: { t: 's', v: 'R2' },
+      '!ref': 'A1:D3',
+    };
+    const colsBuf = writeXlsx(colsWs);
+    const colsProd = productionExcelUploadMatrix(colsBuf);
+    const colsAd = await readFirstSheetMatrix(colsBuf, ADAPTER_MIGRATED);
+    assert.equal(colsProd[0].length, 4);
+    assert.equal(collectMismatches('trailing-cols', colsProd, colsAd).length, 0);
   });
 
   it('.xls/OLE: client accepts .xls; SheetJS reads; ExcelJS rejects; fallback vs production', async () => {
@@ -365,7 +387,7 @@ describe('SPIKE: ExcelUploadEnhanced production SheetJS vs adapter candidate', (
     );
 
     const adapter = await readFirstSheetMatrix(xls, {
-      ...ADAPTER_CANDIDATE,
+      ...ADAPTER_MIGRATED,
       filename: 'upload.xls',
     });
     const bad = collectMismatches('xls-ole', prod, adapter, { C2: '0%' });

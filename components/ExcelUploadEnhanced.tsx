@@ -1,8 +1,8 @@
 'use client';
 
 import { authFetch } from '@/lib/authFetch';
+import { readFirstSheetMatrix } from '@/lib/excelAdapter';
 import { useState, useCallback, useRef, useEffect } from 'react';
-import * as XLSX from 'xlsx';
 
 interface ExcelUploadEnhancedProps {
   type: 'riders' | 'performance';
@@ -110,24 +110,22 @@ export default function ExcelUploadEnhanced({ type, performanceDate, onSuccess, 
       // Read Excel file on client-side and convert to JSON
       // This reduces the payload size significantly (JSON is much smaller than Excel)
       let jsonData: any[][];
-      
+
       try {
         setUploadProgress(15); // Reading file
         const arrayBuffer = await file.arrayBuffer();
-        const data = new Uint8Array(arrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array', cellDates: false });
-        
-        if (workbook.SheetNames.length === 0) {
-          throw new Error('الملف لا يحتوي على أوراق');
-        }
-
         setUploadProgress(20); // Processing file
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        jsonData = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
+        // SheetJS-equivalent matrix: raw numbers, excel serials, anchor-only merges,
+        // preserve !ref trailing empty rows/cols (Candidate #1 migration).
+        jsonData = (await readFirstSheetMatrix(arrayBuffer, {
+          filename: file.name,
+          raw: true,
+          dateMode: 'excel-serial',
+          merged: 'sheetjs-anchor-only',
           defval: '',
-          raw: true }) as any[][];
+          legacyXlsFallback: true,
+          preserveSheetJsRefShape: true,
+        })) as any[][];
 
         // Only log for large files
         if (jsonData.length > 1000) {
