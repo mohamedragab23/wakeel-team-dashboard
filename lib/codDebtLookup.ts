@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import { readFirstSheetObjects } from '@/lib/excelAdapter';
 import { getSheetData, ensureSheetExists, appendToSheet } from '@/lib/googleSheets';
 import { normalizeRiderCodeForPerformance } from '@/lib/dataFilter';
 
@@ -41,10 +41,16 @@ function normHeader(h: string): string {
 }
 
 /** Parse Daily_COD_Wallet_Balance Excel export. */
-export function parseCodWalletExcel(buffer: ArrayBuffer, dateIso: string): Map<string, number> {
-  const wb = XLSX.read(buffer, { type: 'array', raw: false });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+export async function parseCodWalletExcel(
+  buffer: ArrayBuffer,
+  dateIso: string
+): Promise<Map<string, number>> {
+  const json = await readFirstSheetObjects(buffer, {
+    raw: true,
+    dateMode: 'excel-serial',
+    defval: '',
+    legacyXlsFallback: true,
+  });
   const map = new Map<string, number>();
 
   for (const row of json) {

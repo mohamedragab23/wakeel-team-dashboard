@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = await file.arrayBuffer();
-    const debtMap = parseCodWalletExcel(buffer, dateIso);
+    const debtMap = await parseCodWalletExcel(buffer, dateIso);
     const count = await saveCodSnapshotForDate(dateIso, debtMap, true);
 
     return NextResponse.json({

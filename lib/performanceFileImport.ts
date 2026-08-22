@@ -87,7 +87,7 @@ export async function buildPerformanceImportPreview(
   let debtMap: Map<string, number>;
   const hadCodFile = !!codBuffer?.byteLength;
   if (hadCodFile && codBuffer) {
-    debtMap = parseCodWalletExcel(codBuffer, targetDate);
+    debtMap = await parseCodWalletExcel(codBuffer, targetDate);
   } else {
     debtMap = await loadCodDebtByRiderForDate(targetDate);
   }
@@ -155,7 +155,7 @@ export async function applyPerformanceImport(
   }
 
   if (options?.codBuffer?.byteLength) {
-    const debtMap = parseCodWalletExcel(options.codBuffer, targetDate);
+    const debtMap = await parseCodWalletExcel(options.codBuffer, targetDate);
     await saveCodSnapshotForDate(targetDate, debtMap, true);
   }
 
