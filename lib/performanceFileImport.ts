@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import { readFirstSheetMatrix } from '@/lib/excelAdapter';
 import {
   parseTableauPerformanceExport,
   assessTableauPerformanceQuality,
@@ -29,13 +29,17 @@ export type PerformanceImportPreview = {
   }>;
 };
 
-function legacyToTableauRows(
+async function legacyToTableauRows(
   buffer: ArrayBuffer,
   forcedDate: string
-): { rows: TableauPerformanceRow[]; warnings: string[] } {
-  const wb = XLSX.read(buffer, { type: 'array', raw: false });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const matrix = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' }) as any[][];
+): Promise<{ rows: TableauPerformanceRow[]; warnings: string[] }> {
+  const matrix = (await readFirstSheetMatrix(buffer, {
+    raw: true,
+    dateMode: 'excel-serial',
+    defval: '',
+    merged: 'sheetjs-anchor-only',
+    legacyXlsFallback: true,
+  })) as unknown[][];
   const processed = processPerformanceExcel(matrix, { forcedDate });
   if (!processed.success || processed.data.length === 0) {
     return { rows: [], warnings: processed.errors.concat(processed.warnings) };
@@ -62,7 +66,7 @@ export async function parsePerformanceFileBuffer(
   if (tableau.rows.length > 0) {
     return { rows: tableau.rows, warnings: tableau.warnings, source: 'tableau' };
   }
-  const legacy = legacyToTableauRows(buffer, forcedDate);
+  const legacy = await legacyToTableauRows(buffer, forcedDate);
   if (legacy.rows.length > 0) {
     return { rows: legacy.rows, warnings: [...tableau.warnings, ...legacy.warnings], source: 'legacy' };
   }
