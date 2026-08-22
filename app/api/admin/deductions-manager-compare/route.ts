@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import * as XLSX from 'xlsx';
+import { readFirstSheetObjects } from '@/lib/excelAdapter';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminApiAccess';
@@ -93,13 +93,15 @@ export async function POST(request: NextRequest) {
     const { cycleLabel, monthLabel, yearNum: y } = periodFromForm(cycleKey, monthNum, yearNum);
 
     const buf = Buffer.from(await file.arrayBuffer());
-    const workbook = XLSX.read(buf, { type: 'buffer', cellDates: true });
-    const firstSheet = workbook.SheetNames[0];
-    if (!firstSheet) {
-      return NextResponse.json({ success: false, error: 'الملف فارغ' }, { status: 400 });
+    const json = await readFirstSheetObjects(buf, {
+      raw: true,
+      dateMode: 'native',
+      defval: '',
+      legacyXlsFallback: true,
+    });
+    if (!json.length) {
+      return NextResponse.json({ success: false, error: 'لا توجد صفوف في الملف' }, { status: 400 });
     }
-    const sheet = workbook.Sheets[firstSheet];
-    const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
     const { rows: adminRows, errors: parseErrors } = parseAdminExcelRows(json);
     if (adminRows.length === 0) {
       return NextResponse.json(

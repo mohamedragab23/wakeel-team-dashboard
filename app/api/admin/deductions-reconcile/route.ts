@@ -3,7 +3,7 @@ import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import { adminHasPermission } from '@/lib/adminPermissions';
-import * as XLSX from 'xlsx';
+import { readFirstSheetObjects } from '@/lib/excelAdapter';
 import { appendToSheet, ensureHeaderRow, ensureSheetExists, getSheetData } from '@/lib/googleSheets';
 import {
   DEDUCTION_CYCLE_LABELS,
@@ -74,14 +74,12 @@ export async function POST(request: NextRequest) {
     const { cycleLabel, monthLabel, yearNum: y } = periodFromForm(cycleKey, monthNum, yearNum);
 
     const buf = Buffer.from(await file.arrayBuffer());
-    const workbook = XLSX.read(buf, { type: 'buffer', cellDates: true });
-    const firstSheet = workbook.SheetNames[0];
-    if (!firstSheet) {
-      return NextResponse.json({ success: false, error: 'الملف فارغ' }, { status: 400 });
-    }
-
-    const sheet = workbook.Sheets[firstSheet];
-    const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+    const json = await readFirstSheetObjects(buf, {
+      raw: true,
+      dateMode: 'native',
+      defval: '',
+      legacyXlsFallback: true,
+    });
     if (!json.length) {
       return NextResponse.json({ success: false, error: 'لا توجد صفوف في الملف' }, { status: 400 });
     }
