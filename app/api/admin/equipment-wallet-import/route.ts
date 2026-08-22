@@ -48,7 +48,10 @@ async function auth(request: NextRequest) {
   return { decoded };
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const a = await auth(request);
+  if ('error' in a && a.error) return a.error;
+
   return NextResponse.json({
     success: true,
     sourceColumns: TALABAT_WALLET_SOURCE_COLUMNS,

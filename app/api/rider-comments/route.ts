@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { addRiderComment, getSupervisorComments, getRiderComments, getAllComments } from '@/lib/riderComments/service';
-import { AUTH_COOKIE_NAME } from '@/lib/requestAuth';
+import { extractBearerToken } from '@/lib/requestAuth';
+import { getSupervisorRiders } from '@/lib/dataService';
+import { canAccessRiderCommentsByRiderCode } from '@/lib/riderComments/access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+    const token = extractBearerToken(request);
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -24,10 +26,23 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
 
-    // If admin requesting specific rider
     if (riderCode) {
-      const comments = await getRiderComments(riderCode, startDate || undefined, endDate || undefined);
-      return NextResponse.json({ comments });
+      if (decoded.role === 'admin') {
+        const comments = await getRiderComments(riderCode, startDate || undefined, endDate || undefined);
+        return NextResponse.json({ comments });
+      }
+
+      if (decoded.role === 'supervisor') {
+        const riders = await getSupervisorRiders(decoded.code || '', false);
+        const owned = riders.map((r) => r.code);
+        if (!canAccessRiderCommentsByRiderCode(decoded, riderCode, owned)) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+        const comments = await getRiderComments(riderCode, startDate || undefined, endDate || undefined);
+        return NextResponse.json({ comments });
+      }
+
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     // If supervisor, get their comments
@@ -68,28 +83,18 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
-    console.log('[POST /api/rider-comments] Token present:', !!token);
-    console.log('[POST /api/rider-comments] Cookie name:', AUTH_COOKIE_NAME);
-    
+    const token = extractBearerToken(request);
     if (!token) {
-      console.error('[POST /api/rider-comments] No token found in cookies');
       return NextResponse.json({ error: 'Unauthorized - No token' }, { status: 401 });
     }
 
     const decoded = verifyToken(token);
-    console.log('[POST /api/rider-comments] Token decoded:', !!decoded);
-    
     if (!decoded) {
-      console.error('[POST /api/rider-comments] Invalid or expired token');
       return NextResponse.json({ error: 'Unauthorized - Invalid token' }, { status: 401 });
     }
 
-    console.log('[POST /api/rider-comments] User:', decoded.code, decoded.role);
-
     // Only supervisors and admins can add comments
     if (decoded.role !== 'supervisor' && decoded.role !== 'admin') {
-      console.error('[POST /api/rider-comments] Forbidden role:', decoded.role);
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -104,11 +109,8 @@ export async function POST(request: NextRequest) {
       notes,
     } = body;
 
-    console.log('[POST /api/rider-comments] Data:', { riderCode, riderName, date, category });
-
     // Validation
     if (!riderCode || !riderName || !date || !category) {
-      console.error('[POST /api/rider-comments] Missing fields:', { riderCode, riderName, date, category });
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
@@ -128,14 +130,12 @@ export async function POST(request: NextRequest) {
     });
 
     if (!result.success) {
-      console.error('[POST /api/rider-comments] Failed:', result.error);
       return NextResponse.json(
         { error: result.error || 'Failed to add comment' },
         { status: 500 }
       );
     }
 
-    console.log('[POST /api/rider-comments] Success!');
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('[POST /api/rider-comments] Error:', error);

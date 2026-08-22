@@ -17,9 +17,10 @@ export async function GET(
     }
 
     const sig = request.nextUrl.searchParams.get('sig');
+    const exp = request.nextUrl.searchParams.get('exp');
     const token = extractBearerToken(request);
     const authed = !!(token && verifyToken(token));
-    const sigOk = verifyPhotoSignature(photoId, sig);
+    const sigOk = verifyPhotoSignature(photoId, sig, exp);
 
     if (!authed && !sigOk) {
       return NextResponse.json({ error: 'غير مصرح' }, { status: 401 });
