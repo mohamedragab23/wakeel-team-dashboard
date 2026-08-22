@@ -1,3 +1,4 @@
+import { readFirstSheetMatrix } from '@/lib/excelAdapter';
 import * as XLSX from 'xlsx';
 
 /**
@@ -36,25 +37,24 @@ function excelSerialToDate(serial: number): string {
  */
 export async function readExcelFromBuffer(buffer: ArrayBuffer): Promise<any[][]> {
   try {
-    const data = new Uint8Array(buffer);
-    // Don't use cellDates: true - we'll handle dates manually for more control
-    const workbook = XLSX.read(data, { type: 'array', cellDates: false });
-
-    if (workbook.SheetNames.length === 0) {
-      throw new Error('الملف لا يحتوي على أوراق');
+    // SheetJS-equivalent matrix: raw numbers, excel serials, anchor-only merges,
+    // preserve !ref trailing empty rows/cols (Candidate #2 migration).
+    let jsonData: any[][];
+    try {
+      jsonData = (await readFirstSheetMatrix(buffer, {
+        raw: true,
+        dateMode: 'excel-serial',
+        merged: 'sheetjs-anchor-only',
+        defval: '',
+        legacyXlsFallback: true,
+        preserveSheetJsRefShape: true,
+      })) as any[][];
+    } catch (readErr: any) {
+      if (readErr?.message === 'Workbook has no sheets') {
+        throw new Error('الملف لا يحتوي على أوراق');
+      }
+      throw readErr;
     }
-
-    // Get first sheet
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
-
-    // Convert to array of arrays
-    // Use raw: true to get actual cell values (numbers for dates)
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-      header: 1,
-      defval: '',
-      raw: true,
-    }) as any[][];
 
     // Log first few rows for debugging
     console.log('[ExcelProcessor] First 3 rows raw:', jsonData.slice(0, 3));
