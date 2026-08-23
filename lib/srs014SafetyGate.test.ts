@@ -103,7 +103,7 @@ describe('SRS-014 safety gate — §2 liability 900/800', () => {
     );
   });
 
-  it('Scenario B PAID = exactly 800.00 with 266.67/266.67/266.66', () => {
+  it('Scenario B PAID = exactly 800.00 with 300+300+200 (300 EGP cap)', () => {
     const fields = computeLiabilityFields({
       securityPaidUpfront: true,
       bagType: 'bicycle',
@@ -122,17 +122,17 @@ describe('SRS-014 safety gate — §2 liability 900/800', () => {
     assert.equal(formatMilliemesAsEgp(fields.originalLiabilityMilli), '800.00');
     assert.notEqual(formatMilliemesAsEgp(fields.originalLiabilityMilli), '799.99');
     assert.notEqual(formatMilliemesAsEgp(fields.originalLiabilityMilli), '800.01');
-    assert.deepEqual(fields.installmentSchedule, [26667, 26667, 26666]);
+    assert.deepEqual(fields.installmentSchedule, [30000, 30000, 20000]);
     assert.equal(fields.installmentSchedule.reduce((a, b) => a + b, 0), 80000);
     assert.deepEqual(
       fields.installmentSchedule.map(formatMilliemesAsEgp),
-      ['266.67', '266.67', '266.66']
+      ['300.00', '300.00', '200.00']
     );
   });
 
   it('never uses float for split math', () => {
     for (const total of [80000, 90000, 1, 2, 3, 100, 99999]) {
-      const parts = splitInstallmentsMilliemes(total, 3);
+      const parts = splitInstallmentsMilliemes(total);
       assert.ok(parts.every((p) => Number.isInteger(p)));
       assert.equal(parts.reduce((a, b) => a + b, 0), total);
     }

@@ -5,6 +5,9 @@
 
 export const MILLIEMES_PER_EGP = 100;
 
+/** Hard cap per payout-cycle REQUEST installment (300 EGP). */
+export const MAX_CYCLE_INSTALLMENT_MILLI = 30000;
+
 /**
  * Approved CURRENT business fixture amounts (milliemes) matching Admin defaults
  * Bag 530 + 2×Shirt 135 + Security 100.
@@ -40,22 +43,18 @@ export function originalLiabilityMilliemes(security: SecurityInquiryPayment): nu
 }
 
 /**
- * Split remaining liability into `parts` installments.
- * Remainder is front-loaded into earlier installments
- * (80000 → 26667+26667+26666; 90000 → 30000×3).
+ * Split liability into per-cycle installments capped at 300 EGP each.
+ * Examples: 90000 → [30000,30000,30000]; 80000 → [30000,30000,20000]; 50000 → [30000,20000].
  */
-export function splitInstallmentsMilliemes(totalMilli: number, parts = 3): number[] {
+export function splitInstallmentsMilliemes(totalMilli: number, maxParts = 6): number[] {
   const total = Math.max(0, Math.trunc(totalMilli));
-  const n = Math.max(1, Math.trunc(parts));
-  if (total === 0) return Array.from({ length: n }, () => 0);
-
-  // Front-load remainder into earlier installments so 80000 → 26667+26667+26666
-  // (frozen SRS-014 rule; not "absorb into final" via floor+last).
-  const base = Math.floor(total / n);
-  const remainder = total - base * n;
-  const out = Array.from({ length: n }, () => base);
-  for (let i = 0; i < remainder; i++) {
-    out[i] += 1;
+  if (total === 0) return [];
+  const out: number[] = [];
+  let remaining = total;
+  while (remaining > 0 && out.length < Math.max(1, Math.trunc(maxParts))) {
+    const chunk = Math.min(MAX_CYCLE_INSTALLMENT_MILLI, remaining);
+    out.push(chunk);
+    remaining -= chunk;
   }
   return out;
 }

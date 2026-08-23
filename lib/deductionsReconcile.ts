@@ -4,6 +4,7 @@ import {
   DEDUCTION_IMPORT_HEADERS,
   type DeductionCycleKey,
 } from '@/lib/equipmentSheetConstants';
+import { normalizeRiderCodeForPerformance } from '@/lib/riderCodeUtils';
 
 const EPS = 0.02;
 
@@ -213,7 +214,7 @@ export function aggregateSupervisorDeductionsForPeriod(
     if (c !== cycleLabel || m !== monthLabel) continue;
     if (!sheetYearMatches(row[IDX.year], yearNum)) continue;
 
-    const riderId = String(row[IDX.riderCode] ?? '').replace(/\s+/g, '').trim();
+    const riderId = normalizeRiderCodeForPerformance(row[IDX.riderCode] ?? '');
     if (!riderId) continue;
 
     const amt = parseMoney(row[IDX.amount]);

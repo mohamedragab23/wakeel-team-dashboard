@@ -43,8 +43,8 @@ describe('4D.5.4.2 equipment pricing SoT + immutable snapshot', () => {
     assert.equal(fields.originalLiabilityMilli, 90000);
   });
 
-  it('Test3: 800 installments 266.67/266.67/266.66', () => {
-    assert.deepEqual(splitInstallmentsMilliemes(80000, 3), [26667, 26667, 26666]);
+  it('Test3: 800 installments 300+300+200 (300 EGP cap)', () => {
+    assert.deepEqual(splitInstallmentsMilliemes(80000, 3), [30000, 30000, 20000]);
   });
 
   it('Test4: 900 installments 300×3', () => {
@@ -136,9 +136,9 @@ describe('4D.5.4.2 equipment pricing SoT + immutable snapshot', () => {
     if (!missing.ok) assert.equal(missing.error, 'PRICING_MISSING');
   });
 
-  it('Test13: legacy persisted original remains readable via schedule helper', () => {
+  it('Test13: legacy persisted original uses 300 EGP capped schedule', () => {
     const schedule = scheduleFromPersistedOriginalMilli(80000);
-    assert.deepEqual(schedule, [26667, 26667, 26666]);
+    assert.deepEqual(schedule, [30000, 30000, 20000]);
   });
 
   it('Test14: snapshot object is distinct from later Admin config', () => {
@@ -183,7 +183,7 @@ describe('4D.5.4.2 equipment pricing SoT + immutable snapshot', () => {
         },
       ],
     });
-    assert.equal(snapExpected.lines[0]?.expectedDeductionMilli, 26667);
+    assert.equal(snapExpected.lines[0]?.expectedDeductionMilli, 30000);
     assert.equal(snapExpected.financialMutation, false);
   });
 
@@ -200,18 +200,18 @@ describe('4D.5.4.2 equipment pricing SoT + immutable snapshot', () => {
         reason: 'معدات',
         originalCycleId: '2026-08-C2',
         currentCycleId: '2026-08-C2',
-        originalAmount: 26667,
+        originalAmount: 30000,
         paidAmount: 0,
-        remainingAmount: 26667,
+        remainingAmount: 30000,
         status: 'open',
         obligationAgeKey: '2026-08-10|d1',
         equipmentIssueId: 'e1',
         installmentNumber: 1,
       },
     ];
-    const r = allocateActualToObligations({ actualTotalMilli: 26667, obligations });
-    assert.equal(r.allocatedTotalMilli, 26667);
-    assert.equal(r.lines[0]?.allocatedAmount, 26667);
+    const r = allocateActualToObligations({ actualTotalMilli: 30000, obligations });
+    assert.equal(r.allocatedTotalMilli, 30000);
+    assert.equal(r.lines[0]?.allocatedAmount, 30000);
   });
 
   it('Test18: Financial Apply remains OFF / unreachable via flag', () => {

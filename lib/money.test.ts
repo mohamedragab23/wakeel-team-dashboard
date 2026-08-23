@@ -18,8 +18,8 @@ describe('money milliemes', () => {
     assert.equal(originalLiabilityMilliemes('PAID'), 80000);
   });
 
-  it('splits 80000 as 26667+26667+26666', () => {
-    assert.deepEqual(splitInstallmentsMilliemes(80000, 3), [26667, 26667, 26666]);
+  it('splits 80000 as 30000+30000+20000 (300 EGP cap)', () => {
+    assert.deepEqual(splitInstallmentsMilliemes(80000, 3), [30000, 30000, 20000]);
     const sum = splitInstallmentsMilliemes(80000, 3).reduce((a, b) => a + b, 0);
     assert.equal(sum, 80000);
   });
@@ -28,8 +28,8 @@ describe('money milliemes', () => {
     assert.deepEqual(splitInstallmentsMilliemes(90000, 3), [30000, 30000, 30000]);
   });
 
-  it('liabilityInstallmentSchedule matches security fee', () => {
-    assert.deepEqual(liabilityInstallmentSchedule('PAID').schedule, [26667, 26667, 26666]);
+  it('liabilityInstallmentSchedule matches security fee (300 EGP cap)', () => {
+    assert.deepEqual(liabilityInstallmentSchedule('PAID').schedule, [30000, 30000, 20000]);
     assert.deepEqual(liabilityInstallmentSchedule('NOT_PAID').schedule, [30000, 30000, 30000]);
   });
 

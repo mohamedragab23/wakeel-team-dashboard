@@ -63,7 +63,7 @@ export function computeAssignmentLiabilityFields(params: {
     securityPaidUpfront: params.securityPaidUpfront,
     includeBag: true,
   });
-  const schedule = splitInstallmentsMilliemes(originalLiabilityMilli, 3);
+  const schedule = splitInstallmentsMilliemes(originalLiabilityMilli);
   return {
     bagCostMilli,
     shirtQty,

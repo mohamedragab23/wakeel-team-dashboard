@@ -93,6 +93,24 @@ export async function ensureAllEquipmentSheets(): Promise<{
   ]);
   ensured.push(SHEET_EQUIPMENT_PAYMENT_PROPOSALS);
 
+  const {
+    SHEET_SUPERVISOR_EQUIPMENT_DECLARATIONS,
+    SUPERVISOR_EQUIPMENT_DECLARATION_HEADERS,
+  } = await import('@/lib/equipmentDeductions/supervisorDeclarations');
+  await ensureSheetExists(SHEET_SUPERVISOR_EQUIPMENT_DECLARATIONS, [
+    ...SUPERVISOR_EQUIPMENT_DECLARATION_HEADERS,
+  ]);
+  ensured.push(SHEET_SUPERVISOR_EQUIPMENT_DECLARATIONS);
+
+  const {
+    SHEET_EQUIPMENT_ACTUAL_APPLY_LOG,
+    EQUIPMENT_ACTUAL_APPLY_LOG_HEADERS,
+  } = await import('@/lib/equipmentDeductions/actualLegacyApply');
+  await ensureSheetExists(SHEET_EQUIPMENT_ACTUAL_APPLY_LOG, [
+    ...EQUIPMENT_ACTUAL_APPLY_LOG_HEADERS,
+  ]);
+  ensured.push(SHEET_EQUIPMENT_ACTUAL_APPLY_LOG);
+
   await ensureMainInventoryInitialized();
   ensured.push('المخزون_الرئيسي');
 

@@ -236,7 +236,7 @@ describe('Phase D acceptance — money + schedules', () => {
     const paid = liabilityInstallmentSchedule('PAID');
     const unpaid = liabilityInstallmentSchedule('NOT_PAID');
     assert.equal(paid.originalLiabilityMilli, 80000);
-    assert.deepEqual(paid.schedule, [26667, 26667, 26666]);
+    assert.deepEqual(paid.schedule, [30000, 30000, 20000]);
     assert.equal(paid.schedule.reduce((a, b) => a + b, 0), 80000);
     assert.equal(unpaid.originalLiabilityMilli, 90000);
     assert.deepEqual(unpaid.schedule, [30000, 30000, 30000]);
@@ -368,14 +368,14 @@ describe('Phase D acceptance — settlement vs installment', () => {
       activationDate: '2026-08-01',
       riderCode: '700010',
       equipmentIssueId: 'ISSUE-S',
-      availablePayoutMilli: 26667,
+      availablePayoutMilli: 30000,
       existingIdempotencyKeys: new Set(),
     });
     assert.equal(d.action, 'deduct');
     if (d.action === 'deduct') {
-      // Full first installment still owed (26667), not reduced by settlement.
-      assert.equal(d.expectedMilli, 26667);
-      assert.equal(d.amountMilli, 26667);
+      // Full first installment still owed (30000), not reduced by settlement.
+      assert.equal(d.expectedMilli, 30000);
+      assert.equal(d.amountMilli, 30000);
       assert.equal(d.installmentNumber, 1);
       assert.notEqual(d.expectedMilli, 6667);
     }
@@ -391,12 +391,12 @@ describe('Phase D acceptance — settlement vs installment', () => {
       activationDate: '2026-08-01',
       riderCode: '700010',
       equipmentIssueId: 'ISSUE-S',
-      availablePayoutMilli: 26667,
+      availablePayoutMilli: 30000,
       existingIdempotencyKeys: new Set(),
     });
     assert.equal(polluted.action, 'deduct');
     if (polluted.action === 'deduct') {
-      assert.equal(polluted.expectedMilli, 6667); // proves why settlement must not touch amountDeducted
+      assert.equal(polluted.expectedMilli, 10000); // proves why settlement must not touch amountDeducted
     }
   });
 

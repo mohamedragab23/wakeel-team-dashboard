@@ -39,6 +39,17 @@ export default function SupervisorEquipmentStatusPage() {
   const [proposedStatus, setProposedStatus] = useState<'UNPAID' | 'PARTIALLY_PAID' | 'PAID'>('UNPAID');
   const [paidEgp, setPaidEgp] = useState('');
   const [note, setNote] = useState('');
+  const [cycleId, setCycleId] = useState('');
+
+  const cycles = useQuery({
+    queryKey: ['supervisor-payout-cycles', 2026, 8],
+    queryFn: async () => {
+      const res = await authFetch('/api/supervisor/payout-cycles?year=2026&month=8');
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'فشل تحميل دورات القبض');
+      return json.cycles as Array<{ cycleId: string; startDate: string; endDate: string; cycleNumber: number }>;
+    },
+  });
 
   const list = useQuery({
     queryKey: ['supervisor-equipment-liabilities'],
@@ -69,6 +80,37 @@ export default function SupervisorEquipmentStatusPage() {
   }, [list.data?.rows, filter, q]);
 
   const mut = useMutation({
+    mutationFn: async () => {
+      if (!proposeFor) throw new Error('اختر مندوباً');
+      if (!cycleId) throw new Error('اختر دورة القبض');
+      const res = await authFetch('/api/supervisor/equipment-declarations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cycleId,
+          equipmentIssueId: proposeFor.equipmentIssueId || undefined,
+          riderCode: proposeFor.riderCode,
+          riderName: proposeFor.riderName,
+          paymentStatus: proposedStatus,
+          declaredPaidEgp: paidEgp === '' ? null : Number(paidEgp),
+          notes: note,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'فشل حفظ الإقرار');
+      return json;
+    },
+    onSuccess: () => {
+      notify.success('تم حفظ إقرار السداد للدورة المحددة');
+      setProposeFor(null);
+      setPaidEgp('');
+      setNote('');
+      void qc.invalidateQueries({ queryKey: ['supervisor-equipment-liabilities'] });
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
+  const proposalMut = useMutation({
     mutationFn: async () => {
       if (!proposeFor) throw new Error('اختر مندوباً');
       const kind = proposeFor.hasLiability ? 'payment_update' : 'opening_report';
@@ -109,9 +151,9 @@ export default function SupervisorEquipmentStatusPage() {
           «اقتراح فتح عهدة»، واللي عنده عهدة اضغط «اقتراح تحديث».
         </p>
         <p className="text-xs text-cyan-100/90 bg-cyan-950/50 border border-cyan-500/30 rounded-lg p-3">
-          <strong>مهم:</strong> الاقتراح <u>لا يغيّر</u> أرقام العهدة فوراً (المتبقي/المخصوم تفضل «—»
-          لحد ما مدير المعدات يقبل من صفحة «اقتراحات سداد المعدات»). بعد القبول تظهر العهدة هنا، وبعدها
-          الأدمن يجهّز طلبات الاستقطاع من «دورات القبض» — مش أوتوماتيك بمجرد إرسال الاقتراح.
+          <strong>إقرار السداد:</strong> اختر دورة القبض ثم سجّل حالة السداد (مدفوع / جزئي / غير
+          مدفوع). الإقرار يُحفظ مباشرة ويُستخدم في حساب المتبقي — الاستقطاع الفعلي من Talabat يُسجّل
+          لاحقاً من «الاستقطاعات_الفعلية».
         </p>
         <p className="text-xs text-amber-100 bg-amber-950/80 border border-amber-500/40 rounded-lg p-3">
           مهم قبل الاستقطاع الأوتوماتيك: المناديب القديمة لازم تتظبط عهدتهم (Opening / اقتراح فتح) عشان
@@ -252,6 +294,21 @@ export default function SupervisorEquipmentStatusPage() {
                   : ' — لا توجد عهدة مسجّلة؛ مدير المعدات يراجع وينشئ العهدة'}
               </p>
               <label className="block text-sm text-[#EAF0FF]">
+                دورة القبض
+                <select
+                  className="mt-1 w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-2"
+                  value={cycleId}
+                  onChange={(e) => setCycleId(e.target.value)}
+                >
+                  <option value="">— اختر —</option>
+                  {(cycles.data || []).map((c) => (
+                    <option key={c.cycleId} value={c.cycleId} className="bg-[#0B1020]">
+                      دورة {c.cycleNumber}: {c.startDate} → {c.endDate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm text-[#EAF0FF]">
                 الحالة المقترحة
                 <select
                   className="mt-1 w-full rounded-md border border-white/25 bg-[#0B1020] text-[#EAF0FF] px-2 py-2"
@@ -287,7 +344,7 @@ export default function SupervisorEquipmentStatusPage() {
                   onChange={(e) => setNote(e.target.value)}
                 />
               </label>
-              <div className="flex gap-2 justify-end pt-1">
+              <div className="flex gap-2 justify-end pt-1 flex-wrap">
                 <button
                   type="button"
                   className="px-3 py-1.5 rounded-md border border-white/25 text-[#EAF0FF] hover:bg-white/10"
@@ -301,7 +358,15 @@ export default function SupervisorEquipmentStatusPage() {
                   className="px-3 py-1.5 rounded-md bg-cyan-600 text-white hover:bg-cyan-500 disabled:opacity-50"
                   onClick={() => mut.mutate()}
                 >
-                  إرسال للمراجعة
+                  حفظ الإقرار
+                </button>
+                <button
+                  type="button"
+                  disabled={proposalMut.isPending}
+                  className="px-3 py-1.5 rounded-md bg-slate-600 text-white hover:bg-slate-500 disabled:opacity-50 text-xs"
+                  onClick={() => proposalMut.mutate()}
+                >
+                  إرسال اقتراح (قديم)
                 </button>
               </div>
             </div>

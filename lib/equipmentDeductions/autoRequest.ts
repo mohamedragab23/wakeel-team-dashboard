@@ -21,7 +21,7 @@ import {
   DEDUCTION_CYCLE_LABELS,
   type DeductionCycleKey,
 } from '@/lib/equipmentSheetConstants';
-import { expectedInstallmentMilliemes } from '@/lib/money';
+import { computeCycleRequestMilli } from '@/lib/equipmentDeductions/equipmentFinancialModel';
 import { scheduleFromPersistedOriginalMilli } from '@/lib/equipmentPricing';
 import {
   isCycleEligibleForEquipmentDeduction,
@@ -41,6 +41,12 @@ import {
   type EmitRequestResult,
   type ObligationLedgerStore,
 } from '@/lib/equipmentDeductions/requestPersistence';
+import {
+  buildRiderCycleHistory,
+  carryForwardForCycle,
+  cycleKeyFromParts,
+} from '@/lib/equipmentDeductions/carryForward';
+import { getSheetData } from '@/lib/googleSheets';
 
 export type AutoRequestDecision =
   | { action: 'skip'; reason: string }
@@ -91,6 +97,8 @@ export function computeAutoRequestDecision(params: {
   equipmentIssueId: string;
   /** Opening / old-fleet liabilities: do not wait for a post-activation cycle. */
   existingFleetLiability?: boolean;
+  /** Unfulfilled REQUEST shortfall carried from prior cycles (milliemes). */
+  carryForwardShortfallMilli?: number;
 }): AutoRequestDecision {
   const remaining = Math.trunc(params.remainingMilli);
   if (!Number.isFinite(remaining)) {
@@ -119,23 +127,13 @@ export function computeAutoRequestDecision(params: {
   }
 
   const installmentNumber = Math.max(1, Math.trunc(params.installmentsCompleted) + 1);
-  const scheduleTarget = expectedInstallmentMilliemes({
-    remainingMilli: remaining,
-    schedule: params.schedule,
-    installmentIndex: Math.max(0, Math.trunc(params.installmentsCompleted)),
+  const carry = Math.max(0, Math.trunc(params.carryForwardShortfallMilli ?? 0));
+  const originalAmountMilli = computeCycleRequestMilli({
+    payrollOutstandingMilli: remaining,
+    carryForwardShortfallMilli: carry,
   });
-  if (scheduleTarget <= 0) {
-    return { action: 'skip', reason: 'zero_installment' };
-  }
-
-  const deducted = Math.max(0, Math.trunc(params.amountDeductedMilli ?? 0));
-  const completedSum = params.schedule
-    .slice(0, Math.max(0, Math.trunc(params.installmentsCompleted)))
-    .reduce((a, b) => a + Math.max(0, Math.trunc(b)), 0);
-  const paidTowardCurrent = Math.max(0, deducted - completedSum);
-  const originalAmountMilli = Math.min(remaining, Math.max(0, scheduleTarget - paidTowardCurrent));
   if (originalAmountMilli <= 0) {
-    return { action: 'skip', reason: 'installment_already_satisfied' };
+    return { action: 'skip', reason: 'zero_installment' };
   }
 
   const deductionId = stableEquipmentInstallmentDeductionId(
@@ -301,6 +299,27 @@ export async function runEquipmentAutoRequestsForDate(
   const cycleLabel = cycleLabelForPayout(cycle);
   const monthLabel = monthLabelForPayout(cycle);
   const uploadedAt = new Date().toISOString();
+  const targetCycleKey = cycleKeyFromParts(cycleLabel, monthLabel, cycle.year);
+
+  let requestSheetRows: unknown[][] = [];
+  let actualSheetRows: unknown[][] = [];
+  try {
+    requestSheetRows = (await getSheetData('الاستقطاعات', false)) || [];
+    actualSheetRows = (await getSheetData('الاستقطاعات_الفعلية', false)) || [];
+  } catch {
+    /* carry-forward falls back to 0 when sheets unavailable */
+  }
+
+  const orderedPriorCycles = cycles
+    .filter((c) => c.year === cycle.year && c.month === cycle.month)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate))
+    .map((c) => ({
+      cycleKey: cycleKeyFromParts(cycleLabelForPayout(c), monthLabelForPayout(c), c.year),
+      cycleLabel: cycleLabelForPayout(c),
+      monthLabel: monthLabelForPayout(c),
+      year: c.year,
+    }))
+    .filter((c) => c.cycleKey !== targetCycleKey);
 
   let persisted;
   try {
@@ -414,6 +433,15 @@ export async function runEquipmentAutoRequestsForDate(
       riderCode: issue.riderCode,
       equipmentIssueId: issue.equipmentIssueId,
       existingFleetLiability: adminExplicitPrep || isExistingFleetLiability(issue),
+      carryForwardShortfallMilli: carryForwardForCycle(
+        buildRiderCycleHistory({
+          riderCode: issue.riderCode,
+          orderedCycles: orderedPriorCycles,
+          requestRows: requestSheetRows,
+          actualRows: actualSheetRows,
+        }),
+        targetCycleKey
+      ),
     });
 
     if (decision.action === 'skip') {
