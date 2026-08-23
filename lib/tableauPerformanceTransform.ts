@@ -1,5 +1,4 @@
-import * as XLSX from 'xlsx';
-import { readFirstSheetMatrix } from '@/lib/excelAdapter';
+import { parseCsvToMatrix, readFirstSheetMatrix } from '@/lib/excelAdapter';
 import { normalizeRiderCodeForPerformance } from '@/lib/dataFilter';
 
 export type TableauPerformanceRow = {
@@ -90,9 +89,7 @@ function detectColumns(headers: string[]): ColMap | null {
 async function matrixFromBuffer(buffer: ArrayBuffer, format: 'excel' | 'csv'): Promise<any[][]> {
   if (format === 'csv') {
     const text = new TextDecoder('utf-8').decode(new Uint8Array(buffer));
-    const wb = XLSX.read(text, { type: 'string', raw: false });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    return XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' }) as any[][];
+    return parseCsvToMatrix(text, { defval: '' }) as any[][];
   }
   // Production Tableau Excel contract (Golden Spike):
   // XLSX.read({ raw:false }) + sheet_to_json({ header:1, defval:'' }) without raw

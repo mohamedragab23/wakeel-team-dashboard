@@ -174,6 +174,21 @@ export async function filterRowsBySupervisorInZoneScope<
   return rows.filter((r) => adminScopeHasSupervisorCode(allowed, String(r.supervisorCode ?? '').trim()));
 }
 
+/** System-wide admin operations (e.g. POST /api/sync) — full admin only, not limited: feature packs. */
+export function assertFullAdminOnlyOperationDenied(decoded: AdminDataScopeJwt): NextResponse | null {
+  if (!decoded || decoded.role !== 'admin') return null;
+  if (parseLimitedFeatures(decoded.permissions) === null) return null;
+  return NextResponse.json(
+    {
+      success: false,
+      error:
+        'هذه العملية متاحة للمدير العام فقط ولا تتوفر لحساب الأدمن المحدود. تواصل مع المدير العام.',
+      code: 'FULL_ADMIN_ONLY',
+    },
+    { status: 403 }
+  );
+}
+
 /** Block limited-scope admins from system-wide performance writes (sync, import apply, clear, delete-day). */
 export function assertLimitedAdminGlobalWriteDenied(decoded: AdminDataScopeJwt): NextResponse | null {
   if (!isLimitedAdminDataScopeActive(decoded)) return null;

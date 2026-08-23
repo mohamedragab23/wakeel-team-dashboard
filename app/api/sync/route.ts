@@ -7,7 +7,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
 import { syncEngine } from '@/lib/syncEngine';
-import { assertLimitedAdminGlobalWriteDenied } from '@/lib/adminZoneScope';
+import {
+  assertFullAdminOnlyOperationDenied,
+  assertLimitedAdminGlobalWriteDenied,
+} from '@/lib/adminZoneScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +26,9 @@ export async function POST(request: NextRequest) {
     if (!decoded || decoded.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+
+    const fullAdminDeny = assertFullAdminOnlyOperationDenied(decoded);
+    if (fullAdminDeny) return fullAdminDeny;
 
     const globalDeny = assertLimitedAdminGlobalWriteDenied(decoded);
     if (globalDeny) return globalDeny;

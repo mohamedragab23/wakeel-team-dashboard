@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 import { getAllSupervisors } from '@/lib/adminService';
 import { filterSupervisorsForAdminDataScope } from '@/lib/adminZoneScope';
 
@@ -13,9 +14,8 @@ export async function GET(request: NextRequest) {
     if (!token) return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'admin') {
-      return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
-    }
+    const access = await assertAdminApiAccess(decoded, 'shifts');
+    if (access) return access;
 
     let supervisors = await getAllSupervisors(false);
     supervisors = await filterSupervisorsForAdminDataScope(decoded, supervisors);
