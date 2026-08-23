@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { extractBearerToken } from '@/lib/requestAuth';
-import { verifyToken } from '@/lib/auth';
-import { isCronAuthorized } from '@/lib/cronAuth';
+import { isGoogleSheetsHealthAuthorized } from '@/lib/healthGoogleSheetsAuth';
 import { getMainSpreadsheetId, getSheetsClientFor } from '@/lib/googleSheetsAuth';
 
 export const dynamic = 'force-dynamic';
@@ -9,16 +7,6 @@ export const runtime = 'nodejs';
 
 function safeBool(v: unknown) {
   return !!(v && String(v).trim());
-}
-
-function isAuthorized(request: NextRequest): boolean {
-  if (process.env.NODE_ENV !== 'production') return true;
-  if (isCronAuthorized(request)) return true;
-
-  const token = extractBearerToken(request);
-  if (!token) return false;
-  const decoded = verifyToken(token);
-  return !!(decoded && decoded.role === 'admin');
 }
 
 async function tryReadTab(tab: string) {
@@ -43,7 +31,7 @@ async function tryReadTab(tab: string) {
 }
 
 export async function GET(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isGoogleSheetsHealthAuthorized(request)) {
     return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
   }
 

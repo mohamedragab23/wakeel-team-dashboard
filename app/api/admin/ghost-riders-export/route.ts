@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { buildStrategicOpsReport, type StrategicOpsFilters } from '@/lib/strategicOps/buildReport';
 import { buildGhostRidersExcelBuffer } from '@/lib/strategicOps/ghostRidersExcelExport';
-import { AUTH_COOKIE_NAME } from '@/lib/requestAuth';
+import { extractBearerToken } from '@/lib/requestAuth';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,15 +11,17 @@ export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+    const token = extractBearerToken(request);
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden - Admins only' }, { status: 403 });
+    if (!decoded) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const deny = await assertAdminApiAccess(decoded, 'ghost_riders_export');
+    if (deny) return deny;
 
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get('startDate') || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];

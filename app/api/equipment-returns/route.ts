@@ -78,8 +78,11 @@ export async function GET(request: NextRequest) {
     if (!decoded) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
+    if (decoded.role !== 'admin' && decoded.role !== 'supervisor') {
+      return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
+    }
 
-    // أي مدير يمكنه الاطلاع؛ المعالجة تبقى لمن لديه صلاحية equipment.
+    // أدمن (بما فيهم المحدودين للنطاق) ومشرفون فقط؛ المعالجة تبقى لمن لديه صلاحية equipment.
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { getAllRiders, getAllSupervisors } from '@/lib/adminService';
-import { AUTH_COOKIE_NAME } from '@/lib/requestAuth';
+import { extractBearerToken } from '@/lib/requestAuth';
+import { assertAdminApiAccess } from '@/lib/adminApiAccess';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,33 +19,24 @@ type MissingDataRider = {
 };
 
 export async function GET(request: NextRequest) {
-  console.log('[GET /api/admin/missing-data-audit] Start');
-  
   try {
-    const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+    const token = extractBearerToken(request);
     if (!token) {
-      console.log('[GET /api/admin/missing-data-audit] No token');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'admin') {
-      console.log('[GET /api/admin/missing-data-audit] Not admin:', decoded?.role);
-      return NextResponse.json({ error: 'Forbidden - Admins only' }, { status: 403 });
+    if (!decoded) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const deny = await assertAdminApiAccess(decoded, 'missing_data_audit');
+    if (deny) return deny;
 
-    console.log('[GET /api/admin/missing-data-audit] Loading riders and supervisors...');
-    
     // Load all riders and supervisors
     const [riders, supervisors] = await Promise.all([
       getAllRiders(false),
       getAllSupervisors(false),
     ]);
-
-    console.log('[GET /api/admin/missing-data-audit] Loaded:', {
-      ridersCount: riders.length,
-      supervisorsCount: supervisors.length,
-    });
 
     const ridersWithIssues: MissingDataRider[] = [];
 
