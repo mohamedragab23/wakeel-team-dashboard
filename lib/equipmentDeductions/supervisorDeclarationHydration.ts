@@ -22,7 +22,8 @@ import {
   type SupervisorEquipmentDeskRow,
 } from '@/lib/equipmentLiability/paymentProposals';
 import { SHEET_PAYOUT_CYCLES } from '@/lib/payoutCycles/constants';
-import { rowToPayoutCycle, type PayoutCycle } from '@/lib/payoutCycles/store';
+import { rowToPayoutCycle } from '@/lib/payoutCycles/store';
+import type { PayoutCycle } from '@/lib/payoutCycles/types';
 import { buildFreshDeclarationQueue } from '@/lib/equipmentDeductions/exceptionQueues';
 import {
   cycleLabelForPayout,
