@@ -15,10 +15,15 @@ import {
   validateDeclaredPaid,
   type SupervisorPaymentStatus,
 } from '@/lib/equipmentDeductions/equipmentFinancialModel';
+import {
+  buildDeclarationNotes,
+  type MissingLiabilityOutcome,
+} from '@/lib/equipmentDeductions/declarationReview';
 import { applySettlementPayment, getById, listIssues } from '@/lib/equipmentLiability/store';
 import { normalizeSupervisorCodeForMatch } from '@/lib/dataFilter';
 import { getSupervisorRiders } from '@/lib/dataService';
 import type { PayoutCycle } from '@/lib/payoutCycles/types';
+import { egpToMilliemes } from '@/lib/money';
 import {
   ARABIC_MONTH_NAMES,
   DEDUCTION_CYCLE_LABELS,
@@ -201,10 +206,16 @@ export async function createSupervisorEquipmentDeclaration(input: {
   declaredPaidEgp?: number | null;
   notes?: string;
   equipmentIssueId?: string;
-  /** When true, sync settlementPaid on liability to match declaration. */
+  /** Explicit opt-in only. Save declaration NEVER mutates liability by default. */
   applyToLiability?: boolean;
+  /**
+   * Required when rider has no liability row (outcomes A–E).
+   * OWES / PARTIAL → ADMIN_LIABILITY_CREATION_REQUIRED (no auto-create).
+   */
+  missingLiabilityOutcome?: MissingLiabilityOutcome | null;
 }): Promise<
-  | { ok: true; declaration: SupervisorEquipmentDeclaration }
+  | { ok: true; declaration: SupervisorEquipmentDeclaration; liabilityMutated: false }
+  | { ok: true; declaration: SupervisorEquipmentDeclaration; liabilityMutated: true }
   | { ok: false; error: string }
 > {
   const riderCode = String(input.riderCode || '').trim();
@@ -217,6 +228,7 @@ export async function createSupervisorEquipmentDeclaration(input: {
 
   let originalMilli = 0;
   let issueId = String(input.equipmentIssueId || '').trim();
+  let missingLiability = false;
   if (issueId) {
     const issue = await getById(issueId);
     if (!issue) return { ok: false, error: 'عهدة المعدات غير موجودة' };
@@ -227,24 +239,49 @@ export async function createSupervisorEquipmentDeclaration(input: {
     if (open) {
       originalMilli = open.originalLiabilityMilli;
       issueId = open.equipmentIssueId;
+    } else {
+      // Allow declaration without liability — do NOT invent a liability amount.
+      missingLiability = true;
+      originalMilli = 0;
     }
   }
-  if (originalMilli <= 0) {
-    return { ok: false, error: 'لا توجد عهدة معدات مسجّلة لهذا المندوب' };
+
+  if (missingLiability && !input.missingLiabilityOutcome) {
+    return {
+      ok: false,
+      error: 'حدد نتيجة مراجعة العهدة المفقودة (استلم وما زال مدين / سدد جزئياً / سدد بالكامل / لم يستلم / بيانات خاطئة)',
+    };
   }
 
-  const validated = validateDeclaredPaid({
-    status: input.paymentStatus,
-    declaredPaidEgp: input.declaredPaidEgp,
-    originalLiabilityMilli: originalMilli,
-  });
-  if (!validated.ok) return { ok: false, error: validated.error };
+  let paidMilli = 0;
+  if (missingLiability) {
+    // Without a liability row we only record supervisor evidence; amounts are not invented.
+    if (
+      input.paymentStatus === 'PARTIALLY_PAID' ||
+      input.missingLiabilityOutcome === 'PARTIAL'
+    ) {
+      const egp = Number(input.declaredPaidEgp);
+      if (!Number.isFinite(egp) || egp < 0) {
+        return { ok: false, error: 'المبلغ المدفوع مطلوب للدفع الجزئي' };
+      }
+      paidMilli = egpToMilliemes(egp);
+    } else {
+      paidMilli = 0;
+    }
+  } else {
+    const validated = validateDeclaredPaid({
+      status: input.paymentStatus,
+      declaredPaidEgp: input.declaredPaidEgp,
+      originalLiabilityMilli: originalMilli,
+    });
+    if (!validated.ok) return { ok: false, error: validated.error };
 
-  const paidMilli = declaredPaidFromStatus({
-    status: input.paymentStatus,
-    declaredPaidMilli: validated.paidMilli,
-    originalLiabilityMilli: originalMilli,
-  });
+    paidMilli = declaredPaidFromStatus({
+      status: input.paymentStatus,
+      declaredPaidMilli: validated.paidMilli,
+      originalLiabilityMilli: originalMilli,
+    });
+  }
 
   const prior = await listSupervisorEquipmentDeclarations({
     supervisorCode: input.supervisorCode,
@@ -254,6 +291,12 @@ export async function createSupervisorEquipmentDeclaration(input: {
   const latest = latestDeclarationsByRiderCycle(prior).get(
     `${want}|${input.cycle.cycleId}`
   );
+
+  const notes = buildDeclarationNotes({
+    userNote: input.notes,
+    missingLiabilityOutcome: missingLiability ? input.missingLiabilityOutcome : null,
+    extraTags: missingLiability ? ['MISSING_LIABILITY_NEEDS_SUPERVISOR_REVIEW'] : [],
+  });
 
   const declaration: SupervisorEquipmentDeclaration = {
     declarationId: newDeclarationId(),
@@ -268,7 +311,7 @@ export async function createSupervisorEquipmentDeclaration(input: {
     paymentStatus: input.paymentStatus,
     declaredPaidMilli: paidMilli,
     originalLiabilityMilli: originalMilli,
-    notes: String(input.notes || '').trim(),
+    notes,
     createdAt: new Date().toISOString(),
     supersedesDeclarationId: latest?.declarationId || '',
   };
@@ -293,10 +336,13 @@ export async function createSupervisorEquipmentDeclaration(input: {
       cycleId: input.cycle.cycleId,
       paymentStatus: input.paymentStatus,
       declaredPaidMilli: paidMilli,
+      missingLiability,
+      applyToLiability: false,
     },
   }).catch(() => undefined);
 
-  if (input.applyToLiability !== false && issueId) {
+  // Explicit opt-in ONLY — never mutate on normal Save.
+  if (input.applyToLiability === true && issueId && !missingLiability) {
     const issue = await getById(issueId);
     if (issue) {
       const targetSettlement = paidMilli;
@@ -306,16 +352,18 @@ export async function createSupervisorEquipmentDeclaration(input: {
           code: input.supervisorCode,
           name: input.supervisorName,
         });
+        return { ok: true, declaration, liabilityMutated: true };
       } else if (input.paymentStatus === 'FULLY_PAID' && issue.outstandingMilli > 0) {
         await applySettlementPayment(issueId, issue.outstandingMilli, {
           code: input.supervisorCode,
           name: input.supervisorName,
         });
+        return { ok: true, declaration, liabilityMutated: true };
       }
     }
   }
 
-  return { ok: true, declaration };
+  return { ok: true, declaration, liabilityMutated: false };
 }
 
 export function mapUiStatusToSupervisor(

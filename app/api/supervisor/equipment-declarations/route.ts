@@ -9,6 +9,10 @@ import { listPayoutCycles } from '@/lib/payoutCycles/store';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Save authoritative supervisor declaration.
+ * Does NOT mutate liability unless body.applyToLiability === true (admin/controlled path).
+ */
 export async function POST(request: NextRequest) {
   const token = extractBearerToken(request);
   if (!token) {
@@ -41,6 +45,16 @@ export async function POST(request: NextRequest) {
       | 'PARTIALLY_PAID'
       | 'PAID';
 
+    const missingOutcomeRaw = String(body.missingLiabilityOutcome || '').trim();
+    const missingLiabilityOutcome =
+      missingOutcomeRaw === 'OWES' ||
+      missingOutcomeRaw === 'PARTIAL' ||
+      missingOutcomeRaw === 'FULLY_PAID' ||
+      missingOutcomeRaw === 'NO_EQUIPMENT' ||
+      missingOutcomeRaw === 'DATA_ERROR'
+        ? missingOutcomeRaw
+        : null;
+
     const result = await createSupervisorEquipmentDeclaration({
       riderCode: String(body.riderCode || '').trim(),
       riderName: String(body.riderName || '').trim(),
@@ -54,14 +68,23 @@ export async function POST(request: NextRequest) {
           : Number(body.declaredPaidEgp),
       notes: String(body.notes || '').trim(),
       equipmentIssueId: String(body.equipmentIssueId || '').trim() || undefined,
-      applyToLiability: body.applyToLiability !== false,
+      // Explicit opt-in only — normal Save never mutates ledger.
+      applyToLiability: body.applyToLiability === true,
+      missingLiabilityOutcome,
     });
 
     if (!result.ok) {
       return NextResponse.json({ success: false, error: result.error }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, declaration: result.declaration });
+    return NextResponse.json({
+      success: true,
+      declaration: result.declaration,
+      liabilityMutated: result.liabilityMutated,
+      message: result.liabilityMutated
+        ? 'تم حفظ الإقرار وتطبيق التسوية على العهدة'
+        : 'تم حفظ الإفادة النهائية (بدون تعديل رصيد العهدة تلقائياً)',
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'حدث خطأ';
     console.error('[supervisor/equipment-declarations POST]', error);

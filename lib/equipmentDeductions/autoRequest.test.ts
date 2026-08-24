@@ -20,6 +20,48 @@ import { isEconomicallyConsistent } from '@/lib/equipmentDeductions/obligations'
 import type { EquipmentLiabilityIssue } from '@/lib/equipmentLiability/store';
 import type { PayoutCycle } from '@/lib/payoutCycles/types';
 import { liabilityInstallmentSchedule } from '@/lib/money';
+import type { SupervisorEquipmentDeclaration } from '@/lib/equipmentDeductions/supervisorDeclarations';
+
+function notPaidDecl(
+  riderCode: string,
+  cycleId: string,
+  originalMilli = 90000
+): SupervisorEquipmentDeclaration {
+  return {
+    declarationId: `decl-${riderCode}-${cycleId}`,
+    riderCode,
+    riderName: 'Rider',
+    supervisorCode: 'S1',
+    supervisorName: 'Sup',
+    cycleId,
+    cycleLabel: 'الثانية',
+    monthLabel: 'أغسطس',
+    year: 2026,
+    paymentStatus: 'NOT_PAID',
+    declaredPaidMilli: 0,
+    originalLiabilityMilli: originalMilli,
+    notes: 'FINAL_AUTHORITATIVE',
+    createdAt: '2026-08-10T00:00:00.000Z',
+    supersedesDeclarationId: '',
+  };
+}
+
+function withDecls(
+  deps: {
+    isEnabled?: () => boolean;
+    listPayoutCycles?: () => Promise<PayoutCycle[]>;
+    listOpenIssues?: () => Promise<EquipmentLiabilityIssue[]>;
+    obligationStore?: ReturnType<typeof createMemoryObligationLedgerStore>;
+  },
+  cycleId: string,
+  riders: string[] = ['1001']
+) {
+  return {
+    ...deps,
+    listDeclarationsForCycle: async (id: string) =>
+      riders.map((r) => notPaidDecl(r, id || cycleId)),
+  };
+}
 
 function c(
   partial: Partial<PayoutCycle> & Pick<PayoutCycle, 'cycleId' | 'startDate' | 'endDate'>
@@ -148,12 +190,15 @@ describe('Phase 4C — Auto REQUEST integration', () => {
       '2026-08-10',
       { code: 'test', name: 'test' },
       {
-        deps: {
-          isEnabled: () => true,
-          listPayoutCycles: async () => cycles,
-          listOpenIssues: async () => open,
-          obligationStore: store,
-        },
+        deps: withDecls(
+          {
+            isEnabled: () => true,
+            listPayoutCycles: async () => cycles,
+            listOpenIssues: async () => open,
+            obligationStore: store,
+          },
+          'C2'
+        ),
       }
     );
 
@@ -210,12 +255,15 @@ describe('Phase 4C — Auto REQUEST integration', () => {
       '2026-08-10',
       { code: 't', name: 't' },
       {
-        deps: {
-          isEnabled: () => true,
-          listPayoutCycles: async () => cycles,
-          listOpenIssues: async () => open,
-          obligationStore: store,
-        },
+        deps: withDecls(
+          {
+            isEnabled: () => true,
+            listPayoutCycles: async () => cycles,
+            listOpenIssues: async () => open,
+            obligationStore: store,
+          },
+          'C2'
+        ),
       }
     );
     assert.equal(first.requested, 1);
@@ -235,12 +283,15 @@ describe('Phase 4C — Auto REQUEST integration', () => {
       '2026-08-17',
       { code: 't', name: 't' },
       {
-        deps: {
-          isEnabled: () => true,
-          listPayoutCycles: async () => cycles,
-          listOpenIssues: async () => open,
-          obligationStore: store,
-        },
+        deps: withDecls(
+          {
+            isEnabled: () => true,
+            listPayoutCycles: async () => cycles,
+            listOpenIssues: async () => open,
+            obligationStore: store,
+          },
+          'C3'
+        ),
       }
     );
 
@@ -263,12 +314,15 @@ describe('Phase 4C — Auto REQUEST integration', () => {
       c({ cycleId: 'C2', cycleNumber: 2, startDate: '2026-08-08', endDate: '2026-08-14' }),
     ];
     const open = [issue({ equipmentIssueId: 'ISSUE-C', activationDate: '2026-08-01' })];
-    const deps = {
-      isEnabled: () => true,
-      listPayoutCycles: async () => cycles,
-      listOpenIssues: async () => open,
-      obligationStore: store,
-    };
+    const deps = withDecls(
+      {
+        isEnabled: () => true,
+        listPayoutCycles: async () => cycles,
+        listOpenIssues: async () => open,
+        obligationStore: store,
+      },
+      'C2'
+    );
     const a = await runEquipmentAutoRequestsForDate('2026-08-10', { code: 't', name: 't' }, { deps });
     const b = await runEquipmentAutoRequestsForDate('2026-08-10', { code: 't', name: 't' }, { deps });
     assert.equal(a.requested, 1);
@@ -347,12 +401,15 @@ describe('Phase 4C — Auto REQUEST integration', () => {
       { code: 't', name: 't' },
       {
         cycleId: 'C2',
-        deps: {
-          isEnabled: () => true,
-          listPayoutCycles: async () => cycles,
-          listOpenIssues: async () => open,
-          obligationStore: store,
-        },
+        deps: withDecls(
+          {
+            isEnabled: () => true,
+            listPayoutCycles: async () => cycles,
+            listOpenIssues: async () => open,
+            obligationStore: store,
+          },
+          'C2'
+        ),
       }
     );
     assert.equal(result.requested, 1);
@@ -376,12 +433,15 @@ describe('Phase 4C — Auto REQUEST integration', () => {
       { code: 't', name: 't' },
       {
         cycleId: 'C2',
-        deps: {
-          isEnabled: () => true,
-          listPayoutCycles: async () => cycles,
-          listOpenIssues: async () => open,
-          obligationStore: store,
-        },
+        deps: withDecls(
+          {
+            isEnabled: () => true,
+            listPayoutCycles: async () => cycles,
+            listOpenIssues: async () => open,
+            obligationStore: store,
+          },
+          'C2'
+        ),
       }
     );
     assert.equal(blocked.requested, 0);
@@ -393,15 +453,132 @@ describe('Phase 4C — Auto REQUEST integration', () => {
       {
         cycleId: 'C2',
         adminExplicitPrep: true,
-        deps: {
-          isEnabled: () => true,
-          listPayoutCycles: async () => cycles,
-          listOpenIssues: async () => open,
-          obligationStore: store2,
-        },
+        deps: withDecls(
+          {
+            isEnabled: () => true,
+            listPayoutCycles: async () => cycles,
+            listOpenIssues: async () => open,
+            obligationStore: store2,
+          },
+          'C2'
+        ),
       }
     );
     assert.equal(allowed.requested, 1);
+  });
+
+  it('YELLOW without declaration → no REQUEST', async () => {
+    const store = createMemoryObligationLedgerStore();
+    const cycles = [
+      c({ cycleId: 'C2', cycleNumber: 2, startDate: '2026-08-08', endDate: '2026-08-14' }),
+    ];
+    const result = await runEquipmentAutoRequestsForDate(
+      '2026-08-10',
+      { code: 't', name: 't' },
+      {
+        cycleId: 'C2',
+        deps: {
+          isEnabled: () => true,
+          listPayoutCycles: async () => cycles,
+          listOpenIssues: async () => [issue({ equipmentIssueId: 'ISSUE-Y' })],
+          obligationStore: store,
+          listDeclarationsForCycle: async () => [],
+        },
+      }
+    );
+    assert.equal(result.requested, 0);
+    assert.ok((result.skipReasons.operational_yellow_blocked || 0) >= 1);
+  });
+
+  it('GREEN FULLY_PAID declaration → no REQUEST', async () => {
+    const store = createMemoryObligationLedgerStore();
+    const cycles = [
+      c({ cycleId: 'C2', cycleNumber: 2, startDate: '2026-08-08', endDate: '2026-08-14' }),
+    ];
+    const result = await runEquipmentAutoRequestsForDate(
+      '2026-08-10',
+      { code: 't', name: 't' },
+      {
+        cycleId: 'C2',
+        deps: {
+          isEnabled: () => true,
+          listPayoutCycles: async () => cycles,
+          listOpenIssues: async () => [
+            issue({
+              equipmentIssueId: 'ISSUE-G',
+              outstandingMilli: 0,
+              settlementPaidMilli: 90000,
+            }),
+          ],
+          obligationStore: store,
+          listDeclarationsForCycle: async () => [
+            {
+              ...notPaidDecl('1001', 'C2'),
+              paymentStatus: 'FULLY_PAID',
+              declaredPaidMilli: 90000,
+            },
+          ],
+        },
+      }
+    );
+    assert.equal(result.requested, 0);
+    assert.ok(
+      (result.skipReasons.operational_green_no_deduct || 0) +
+        (result.skipReasons.no_outstanding || 0) >=
+        1
+    );
+  });
+
+  it('FULLY_PAID vs open outstanding → YELLOW admin correction, no REQUEST', async () => {
+    const store = createMemoryObligationLedgerStore();
+    const cycles = [
+      c({ cycleId: 'C2', cycleNumber: 2, startDate: '2026-08-08', endDate: '2026-08-14' }),
+    ];
+    const result = await runEquipmentAutoRequestsForDate(
+      '2026-08-10',
+      { code: 't', name: 't' },
+      {
+        cycleId: 'C2',
+        deps: {
+          isEnabled: () => true,
+          listPayoutCycles: async () => cycles,
+          listOpenIssues: async () => [issue({ equipmentIssueId: 'ISSUE-G2' })],
+          obligationStore: store,
+          listDeclarationsForCycle: async () => [
+            {
+              ...notPaidDecl('1001', 'C2'),
+              paymentStatus: 'FULLY_PAID',
+              declaredPaidMilli: 90000,
+            },
+          ],
+        },
+      }
+    );
+    assert.equal(result.requested, 0);
+    assert.ok((result.skipReasons.operational_yellow_blocked || 0) >= 1);
+  });
+
+  it('carry-forward may make total REQUEST 400 (base 300 + carry 100)', () => {
+    const cycles = [
+      c({ cycleId: '1', cycleNumber: 1, startDate: '2026-08-01', endDate: '2026-08-07' }),
+      c({ cycleId: '2', cycleNumber: 2, startDate: '2026-08-08', endDate: '2026-08-14' }),
+    ];
+    const decision = computeAutoRequestDecision({
+      remainingMilli: 30000,
+      schedule: liabilityInstallmentSchedule('NOT_PAID').schedule,
+      installmentsCompleted: 1,
+      cycle: cycles[1],
+      allCycles: cycles,
+      activationDate: '2026-08-01',
+      riderCode: '1001',
+      equipmentIssueId: 'E1',
+      carryForwardShortfallMilli: 10000,
+      operationalBucket: 'RED',
+    });
+    assert.equal(decision.action, 'request');
+    if (decision.action === 'request') {
+      assert.equal(decision.originalAmountMilli, 40000);
+    }
   });
 
   it('REQUEST emit path never increments paidAmount (AT-18)', async () => {

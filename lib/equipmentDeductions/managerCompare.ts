@@ -130,7 +130,7 @@ export function computeEvidenceIdentityKey(
   const pairs = population
     .map((p) => ({
       riderCode: String(p.riderCode || '').replace(/\s+/g, '').trim(),
-      actualMilli: Math.max(0, Math.trunc(p.actualMilli || 0)),
+      actualMilli: Math.abs(Math.trunc(p.actualMilli || 0)),
     }))
     .filter((p) => p.riderCode)
     .sort((a, b) => (a.riderCode < b.riderCode ? -1 : a.riderCode > b.riderCode ? 1 : 0));
@@ -258,7 +258,8 @@ export function isFileValidForCycle(
 }
 
 export function egpWalletToActualMilli(egp: number): number {
-  return egpToMilliemes(egp);
+  // Proven Applied_Deduction_on_Wallet semantics: signed accounting value → magnitude.
+  return egpToMilliemes(Math.abs(Number(egp) || 0));
 }
 
 /**
@@ -305,7 +306,7 @@ export function buildManagerCompareResult(params: {
   for (const a of params.managerActuals) {
     const code = String(a.riderCode || '').replace(/\s+/g, '').trim();
     if (!code) continue;
-    actualMap.set(code, Math.max(0, Math.trunc(a.actualMilli)));
+    actualMap.set(code, Math.abs(Math.trunc(a.actualMilli)));
   }
 
   const riders = new Set<string>([...requestMap.keys(), ...actualMap.keys()]);

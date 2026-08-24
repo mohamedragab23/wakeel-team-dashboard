@@ -10,6 +10,7 @@ import {
   cycleShortfallMilli,
   normalizeRiderCodeKey,
   sumCarryForwardShortfall,
+  actualDeductedEgpFromWalletRaw,
   type CycleRequestActual,
 } from '@/lib/equipmentDeductions/equipmentFinancialModel';
 import { egpToMilliemes } from '@/lib/money';
@@ -80,8 +81,10 @@ export function aggregateActualPayrollByRiderCycle(
     if (Number.isFinite(yNum) && Math.round(yNum) !== year) continue;
     const rider = normalizeRiderCodeKey(row[actIdx('كود_المندوب')]);
     if (!rider) continue;
-    const wallet = parseMoney(row[actIdx('خصم_المحفظة_شيت_المدير')]);
-    map.set(rider, (map.get(rider) || 0) + egpToMilliemes(wallet));
+    // Proven legacy semantics: wallet column is signed; actual deducted = abs(raw).
+    const walletRaw = parseMoney(row[actIdx('خصم_المحفظة_شيت_المدير')]);
+    const actualEgp = actualDeductedEgpFromWalletRaw(walletRaw);
+    map.set(rider, (map.get(rider) || 0) + egpToMilliemes(actualEgp));
   }
   return map;
 }

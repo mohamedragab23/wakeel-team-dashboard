@@ -27,6 +27,13 @@ const scope = {
 };
 
 describe('Phase 4D.1 — Manager Compare foundation', () => {
+  it('wallet Applied_Deduction_on_Wallet: negative → magnitude milli', () => {
+    assert.equal(egpWalletToActualMilli(-300), 30000);
+    assert.equal(egpWalletToActualMilli(-200), 20000);
+    assert.equal(egpWalletToActualMilli(0), 0);
+    assert.equal(egpWalletToActualMilli(150), 15000);
+  });
+
   it('technical OK alone is never FILE_VALID (confirmation required)', () => {
     const technical = evaluateTechnicalManagerFile({ parsedValidRowCount: 3, parseErrorCount: 0 });
     assert.equal(technical.ok, true);

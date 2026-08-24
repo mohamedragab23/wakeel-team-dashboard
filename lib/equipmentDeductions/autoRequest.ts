@@ -47,6 +47,20 @@ import {
   cycleKeyFromParts,
 } from '@/lib/equipmentDeductions/carryForward';
 import { getSheetData } from '@/lib/googleSheets';
+import { classifyOperationalBucket } from '@/lib/equipmentDeductions/operationalEngine';
+import {
+  declaredPaidFromStatus,
+  ledgerOutstandingInvariant,
+  normalizeRiderCodeKey,
+} from '@/lib/equipmentDeductions/equipmentFinancialModel';
+import {
+  evaluatePostDeclarationReview,
+  isFinalAuthoritativeDeclaration,
+} from '@/lib/equipmentDeductions/declarationReview';
+import {
+  latestDeclarationsByRiderCycle,
+  listSupervisorEquipmentDeclarations,
+} from '@/lib/equipmentDeductions/supervisorDeclarations';
 
 export type AutoRequestDecision =
   | { action: 'skip'; reason: string }
@@ -99,7 +113,21 @@ export function computeAutoRequestDecision(params: {
   existingFleetLiability?: boolean;
   /** Unfulfilled REQUEST shortfall carried from prior cycles (milliemes). */
   carryForwardShortfallMilli?: number;
+  /**
+   * Operational gate (GREEN/RED/YELLOW). When provided:
+   * - GREEN / YELLOW → skip (no auto REQUEST)
+   * - RED → proceed
+   * When omitted, legacy callers keep prior behavior (tests / prep).
+   */
+  operationalBucket?: 'GREEN' | 'RED' | 'YELLOW';
 }): AutoRequestDecision {
+  if (params.operationalBucket === 'GREEN') {
+    return { action: 'skip', reason: 'operational_green_no_deduct' };
+  }
+  if (params.operationalBucket === 'YELLOW') {
+    return { action: 'skip', reason: 'operational_yellow_blocked' };
+  }
+
   const remaining = Math.trunc(params.remainingMilli);
   if (!Number.isFinite(remaining)) {
     return { action: 'skip', reason: 'malformed_outstanding' };
@@ -185,6 +213,10 @@ export type AutoRequestRunDeps = {
   obligationStore?: ObligationLedgerStore;
   /** Override flag check (tests). */
   isEnabled?: () => boolean;
+  /** Override supervisor declarations for cycle (tests / dry-run). */
+  listDeclarationsForCycle?: (
+    cycleId: string
+  ) => Promise<Awaited<ReturnType<typeof listSupervisorEquipmentDeclarations>>>;
   /** Optional audit sink (defaults to appendAuditLog). */
   appendAudit?: (entry: {
     domain: 'equipment';
@@ -310,6 +342,20 @@ export async function runEquipmentAutoRequestsForDate(
     /* carry-forward falls back to 0 when sheets unavailable */
   }
 
+  let declarationMap = new Map<
+    string,
+    Awaited<ReturnType<typeof listSupervisorEquipmentDeclarations>>[number]
+  >();
+  try {
+    const listDecls =
+      deps.listDeclarationsForCycle ??
+      ((cycleId: string) => listSupervisorEquipmentDeclarations({ cycleId }));
+    const decls = await listDecls(cycle.cycleId);
+    declarationMap = latestDeclarationsByRiderCycle(decls);
+  } catch {
+    /* missing sheet ⇒ all riders treated as declaration_missing (YELLOW) */
+  }
+
   const orderedPriorCycles = cycles
     .filter((c) => c.year === cycle.year && c.month === cycle.month)
     .sort((a, b) => a.startDate.localeCompare(b.startDate))
@@ -422,8 +468,60 @@ export async function runEquipmentAutoRequestsForDate(
       continue;
     }
 
+    const riderKey = normalizeRiderCodeKey(issue.riderCode);
+    const decl = declarationMap.get(`${riderKey}|${cycle.cycleId}`) || null;
+    const authoritative = isFinalAuthoritativeDeclaration(decl);
+    const inv = ledgerOutstandingInvariant({
+      originalLiabilityMilli: issue.originalLiabilityMilli,
+      amountDeductedMilli: issue.amountDeductedMilli,
+      settlementPaidMilli: issue.settlementPaidMilli,
+      outstandingMilli: issue.outstandingMilli,
+    });
+
+    let remainingAfterDeclaration = Math.max(0, Math.trunc(issue.outstandingMilli));
+    if (decl && authoritative) {
+      const paid = declaredPaidFromStatus({
+        status: decl.paymentStatus,
+        declaredPaidMilli: decl.declaredPaidMilli,
+        originalLiabilityMilli: issue.originalLiabilityMilli,
+      });
+      if (decl.paymentStatus === 'FULLY_PAID') {
+        remainingAfterDeclaration = 0;
+      } else {
+        const afterDecl = Math.max(0, issue.originalLiabilityMilli - paid);
+        remainingAfterDeclaration = Math.min(remainingAfterDeclaration, afterDecl);
+      }
+    }
+
+    const postReview =
+      decl && authoritative
+        ? evaluatePostDeclarationReview({
+            hasLiability: true,
+            declaration: decl,
+            originalLiabilityMilli: issue.originalLiabilityMilli,
+            settlementPaidMilli: issue.settlementPaidMilli,
+            amountDeductedMilli: issue.amountDeductedMilli,
+            outstandingMilli: issue.outstandingMilli,
+            sheetActualMilli: 0,
+            hadSheetVsLedgerDisagree: false,
+          })
+        : null;
+
+    const classified = classifyOperationalBucket({
+      hasLiability: true,
+      declaration: decl,
+      declarationIsAuthoritative: authoritative,
+      systemOutstandingMilli: issue.outstandingMilli,
+      remainingAfterDeclarationMilli: remainingAfterDeclaration,
+      sheetVsLedgerDisagree: false,
+      ledgerInvariantOk: inv.ok,
+      duplicateRider: false,
+      invalidCycle: false,
+      postReview,
+    });
+
     const decision = computeAutoRequestDecision({
-      remainingMilli: issue.outstandingMilli,
+      remainingMilli: remainingAfterDeclaration,
       schedule,
       installmentsCompleted: issue.installmentsCompleted,
       amountDeductedMilli: issue.amountDeductedMilli,
@@ -442,6 +540,7 @@ export async function runEquipmentAutoRequestsForDate(
         }),
         targetCycleKey
       ),
+      operationalBucket: classified.bucket,
     });
 
     if (decision.action === 'skip') {

@@ -11,8 +11,40 @@
 import { egpToMilliemes, milliemesToEgp } from '@/lib/money';
 import { normalizeRiderCodeForPerformance } from '@/lib/riderCodeUtils';
 
-/** Hard maximum REQUEST per payout cycle (300 EGP). */
+/** Hard maximum NEW installment portion per payout cycle (300 EGP). */
 export const MAX_CYCLE_INSTALLMENT_MILLI = 30000;
+
+/**
+ * Legacy manager-compare wallet column (`Applied_Deduction_on_Wallet` /
+ * `خصم_المحفظة_شيت_المدير`) stores Talabat deductions as a signed accounting
+ * value (typically negative). Operational actual deducted = magnitude.
+ *
+ * ONLY apply to that proven column — never blanket-abs all money fields.
+ */
+export function actualDeductedMilliFromWalletRaw(rawWalletEgpOrMilli: number, unit: 'egp' | 'milli' = 'egp'): number {
+  const n = Number(rawWalletEgpOrMilli);
+  if (!Number.isFinite(n)) return 0;
+  if (unit === 'milli') return Math.abs(Math.trunc(n));
+  return egpToMilliemes(Math.abs(n));
+}
+
+export function actualDeductedEgpFromWalletRaw(rawWalletEgp: number): number {
+  const n = Number(rawWalletEgp);
+  if (!Number.isFinite(n)) return 0;
+  return Math.abs(n);
+}
+
+export type OperationalBucket = 'GREEN' | 'RED' | 'YELLOW';
+
+export type OperationalExceptionCode =
+  | 'MISSING_LIABILITY_NEEDS_SUPERVISOR_REVIEW'
+  | 'ADMIN_LEDGER_CORRECTION_REQUIRED'
+  | 'ADMIN_LIABILITY_CREATION_REQUIRED'
+  | 'DECLARATION_MISSING'
+  | 'SHEET_VS_LEDGER_DISAGREE'
+  | 'INVALID_CYCLE'
+  | 'DUPLICATE_RIDER'
+  | 'DATA_QUALITY';
 
 export type SupervisorPaymentStatus = 'NOT_PAID' | 'PARTIALLY_PAID' | 'FULLY_PAID';
 
@@ -119,18 +151,68 @@ export function sumCarryForwardShortfall(
 }
 
 /**
- * Next-cycle REQUEST amount.
- * Rule: previous shortfall + min(300, payroll outstanding), capped at outstanding + shortfall.
+ * Next-cycle EQUIPMENT REQUEST breakdown.
+ *
+ * - baseInstallment = min(300, remaining)  — never exceeds 300
+ * - carryForward = validated prior shortfall (may be any non-negative)
+ * - totalRequest = base + carry, capped at remaining + carry
+ *
+ * Total MAY exceed 300 solely because of carry-forward (authoritative rule).
+ */
+export function computeCycleRequestBreakdown(params: {
+  remainingLiabilityMilli: number;
+  carryForwardShortfallMilli: number;
+}): {
+  baseInstallmentMilli: number;
+  carryForwardMilli: number;
+  totalRequestMilli: number;
+  exceedsThreeHundredDueToCarry: boolean;
+} {
+  const remaining = Math.max(0, Math.trunc(params.remainingLiabilityMilli));
+  const carry = Math.max(0, Math.trunc(params.carryForwardShortfallMilli));
+  const baseInstallmentMilli = Math.min(MAX_CYCLE_INSTALLMENT_MILLI, remaining);
+  const totalRequestMilli = Math.min(baseInstallmentMilli + carry, remaining + carry);
+  return {
+    baseInstallmentMilli,
+    carryForwardMilli: carry,
+    totalRequestMilli,
+    exceedsThreeHundredDueToCarry: totalRequestMilli > MAX_CYCLE_INSTALLMENT_MILLI,
+  };
+}
+
+/**
+ * Next-cycle REQUEST amount (total including validated carry-forward).
  */
 export function computeCycleRequestMilli(params: {
   payrollOutstandingMilli: number;
   carryForwardShortfallMilli: number;
 }): number {
-  const outstanding = Math.max(0, Math.trunc(params.payrollOutstandingMilli));
-  const carry = Math.max(0, Math.trunc(params.carryForwardShortfallMilli));
-  const newInstallment = Math.min(MAX_CYCLE_INSTALLMENT_MILLI, outstanding);
-  const raw = carry + newInstallment;
-  return Math.min(raw, outstanding + carry);
+  return computeCycleRequestBreakdown({
+    remainingLiabilityMilli: params.payrollOutstandingMilli,
+    carryForwardShortfallMilli: params.carryForwardShortfallMilli,
+  }).totalRequestMilli;
+}
+
+/**
+ * Ledger invariant: outstanding is ALREADY net of settlement + amountDeducted.
+ * Do NOT subtract sheet actuals again from outstandingMilli.
+ */
+export function ledgerOutstandingInvariant(params: {
+  originalLiabilityMilli: number;
+  amountDeductedMilli: number;
+  settlementPaidMilli: number;
+  outstandingMilli: number;
+  toleranceMilli?: number;
+}): { ok: boolean; expectedOutstandingMilli: number; deltaMilli: number } {
+  const expected = Math.max(
+    0,
+    Math.trunc(params.originalLiabilityMilli) -
+      Math.trunc(params.amountDeductedMilli) -
+      Math.trunc(params.settlementPaidMilli)
+  );
+  const delta = Math.trunc(params.outstandingMilli) - expected;
+  const tol = params.toleranceMilli ?? 1;
+  return { ok: Math.abs(delta) <= tol, expectedOutstandingMilli: expected, deltaMilli: delta };
 }
 
 export function validateDeclaredPaid(params: {
