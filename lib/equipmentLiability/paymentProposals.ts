@@ -202,27 +202,36 @@ function proposalToRow(p: EquipmentPaymentProposal): unknown[] {
   ];
 }
 
+/** Pure parse — used by batched hydration (no Sheets I/O). */
+export function parseEquipmentPaymentProposalsFromRows(
+  data: unknown[][]
+): EquipmentPaymentProposal[] {
+  const out: EquipmentPaymentProposal[] = [];
+  for (let i = 1; i < data.length; i++) {
+    const p = rowToProposal(data[i] || [], i + 1);
+    if (p) out.push(p);
+  }
+  return out;
+}
+
 export async function listEquipmentPaymentProposals(filters?: {
   status?: ProposalWorkflowStatus;
   supervisorCode?: string;
 }): Promise<EquipmentPaymentProposal[]> {
   await ensureProposalsSheet();
   const data = await getSheetDataOrThrow(SHEET_EQUIPMENT_PAYMENT_PROPOSALS, false);
-  const out: EquipmentPaymentProposal[] = [];
-  for (let i = 1; i < data.length; i++) {
-    const p = rowToProposal(data[i] || [], i + 1);
-    if (!p) continue;
-    if (filters?.status && p.status !== filters.status) continue;
+  const out = parseEquipmentPaymentProposalsFromRows(data);
+  return out.filter((p) => {
+    if (filters?.status && p.status !== filters.status) return false;
     if (
       filters?.supervisorCode &&
       normalizeSupervisorCodeForMatch(p.supervisorCode) !==
         normalizeSupervisorCodeForMatch(filters.supervisorCode)
     ) {
-      continue;
+      return false;
     }
-    out.push(p);
-  }
-  return out;
+    return true;
+  });
 }
 
 export function issueToSupervisorView(issue: EquipmentLiabilityIssue) {
@@ -300,33 +309,40 @@ export async function listLiabilitiesForSupervisor(
   return { issues, rosterRiderCount: riders.length };
 }
 
-/** Full roster + optional liability join for supervisor desk. */
-export async function listSupervisorEquipmentDesk(
-  supervisorCode: string
-): Promise<{
+/**
+ * Pure desk join (no Sheets). Hydration / tests supply preloaded tables.
+ * Roster is the ACL boundary — never emit riders not in `riders`.
+ */
+export function buildSupervisorEquipmentDeskFromParts(params: {
+  supervisorCode: string;
+  riders: Array<{ code: string; name: string; region?: string }>;
+  issues: EquipmentLiabilityIssue[];
+  pendingProposals: EquipmentPaymentProposal[];
+}): {
   rows: SupervisorEquipmentDeskRow[];
   rosterRiderCount: number;
   liabilityCount: number;
-}> {
-  const riders = await getSupervisorRiders(supervisorCode, false);
+} {
+  const { supervisorCode, riders, issues, pendingProposals } = params;
   const rosterCodes = riders.map((r) => r.code);
-  const all = await listIssues();
-  const pendingProps = await listEquipmentPaymentProposals({
-    status: 'pending',
-    supervisorCode,
-  });
   const pendingByRider = new Map<string, EquipmentPaymentProposal>();
-  for (const p of pendingProps) {
+  for (const p of pendingProposals) {
+    if (p.status !== 'pending') continue;
+    if (
+      normalizeSupervisorCodeForMatch(p.supervisorCode) !==
+      normalizeSupervisorCodeForMatch(supervisorCode)
+    ) {
+      continue;
+    }
     const key = normalizeRiderCodeForPerformance(p.riderCode);
     if (!key) continue;
-    // Keep newest pending per rider.
     const prev = pendingByRider.get(key);
     if (!prev || String(p.createdAt) > String(prev.createdAt)) {
       pendingByRider.set(key, p);
     }
   }
   const byRider = new Map<string, EquipmentLiabilityIssue>();
-  for (const issue of all) {
+  for (const issue of issues) {
     if (
       !issueMatchesSupervisorScope({
         riderCode: issue.riderCode,
@@ -406,6 +422,28 @@ export async function listSupervisorEquipmentDesk(
     rosterRiderCount: riders.length,
     liabilityCount: rows.filter((r) => r.hasLiability).length,
   };
+}
+
+/** Full roster + optional liability join for supervisor desk. */
+export async function listSupervisorEquipmentDesk(
+  supervisorCode: string
+): Promise<{
+  rows: SupervisorEquipmentDeskRow[];
+  rosterRiderCount: number;
+  liabilityCount: number;
+}> {
+  const riders = await getSupervisorRiders(supervisorCode, false);
+  const all = await listIssues();
+  const pendingProps = await listEquipmentPaymentProposals({
+    status: 'pending',
+    supervisorCode,
+  });
+  return buildSupervisorEquipmentDeskFromParts({
+    supervisorCode,
+    riders,
+    issues: all,
+    pendingProposals: pendingProps,
+  });
 }
 
 async function supervisorOwnsRider(

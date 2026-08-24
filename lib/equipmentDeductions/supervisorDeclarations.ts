@@ -93,13 +93,17 @@ function newDeclarationId(): string {
   return `sed_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+let declarationsSheetReady = false;
+
 async function ensureDeclarationsSheet(): Promise<void> {
+  if (declarationsSheetReady) return;
   await ensureSheetExists(SHEET_SUPERVISOR_EQUIPMENT_DECLARATIONS, [
     ...SUPERVISOR_EQUIPMENT_DECLARATION_HEADERS,
   ]);
   await ensureHeaderRow(SHEET_SUPERVISOR_EQUIPMENT_DECLARATIONS, [
     ...SUPERVISOR_EQUIPMENT_DECLARATION_HEADERS,
   ]);
+  declarationsSheetReady = true;
 }
 
 function rowToDeclaration(row: unknown[], sheetRow: number): SupervisorEquipmentDeclaration | null {
@@ -213,6 +217,18 @@ export async function createSupervisorEquipmentDeclaration(input: {
    * OWES / PARTIAL → ADMIN_LIABILITY_CREATION_REQUIRED (no auto-create).
    */
   missingLiabilityOutcome?: MissingLiabilityOutcome | null;
+  /**
+   * Optional preloaded ACL / liability (from batch hydration cache).
+   * When set, avoids extra Sheets reads on Save.
+   */
+  preloaded?: {
+    riderOnRoster?: boolean;
+    originalLiabilityMilli?: number;
+    equipmentIssueId?: string;
+    missingLiability?: boolean;
+    /** Skip prior-declaration sheet read; leave supersedes empty. */
+    skipPriorDeclarationLookup?: boolean;
+  };
 }): Promise<
   | { ok: true; declaration: SupervisorEquipmentDeclaration; liabilityMutated: false }
   | { ok: true; declaration: SupervisorEquipmentDeclaration; liabilityMutated: true }
@@ -221,15 +237,21 @@ export async function createSupervisorEquipmentDeclaration(input: {
   const riderCode = String(input.riderCode || '').trim();
   if (!riderCode) return { ok: false, error: 'كود المندوب مطلوب' };
 
-  const riders = await getSupervisorRiders(input.supervisorCode, false);
   const want = normalizeRiderCodeKey(riderCode);
-  const onRoster = riders.some((r) => normalizeRiderCodeKey(r.code) === want);
+  let onRoster = input.preloaded?.riderOnRoster;
+  if (onRoster == null) {
+    // Prefer short-lived riders cache (true) — Save must not force a cold roster read.
+    const riders = await getSupervisorRiders(input.supervisorCode, true);
+    onRoster = riders.some((r) => normalizeRiderCodeKey(r.code) === want);
+  }
   if (!onRoster) return { ok: false, error: 'المندوب غير تابع لك' };
 
   let originalMilli = 0;
-  let issueId = String(input.equipmentIssueId || '').trim();
-  let missingLiability = false;
-  if (issueId) {
+  let issueId = String(input.equipmentIssueId || input.preloaded?.equipmentIssueId || '').trim();
+  let missingLiability = input.preloaded?.missingLiability === true;
+  if (input.preloaded && (input.preloaded.originalLiabilityMilli != null || missingLiability)) {
+    originalMilli = Math.trunc(Number(input.preloaded.originalLiabilityMilli) || 0);
+  } else if (issueId) {
     const issue = await getById(issueId);
     if (!issue) return { ok: false, error: 'عهدة المعدات غير موجودة' };
     originalMilli = issue.originalLiabilityMilli;
@@ -283,14 +305,18 @@ export async function createSupervisorEquipmentDeclaration(input: {
     });
   }
 
-  const prior = await listSupervisorEquipmentDeclarations({
-    supervisorCode: input.supervisorCode,
-    riderCode,
-    cycleId: input.cycle.cycleId,
-  });
-  const latest = latestDeclarationsByRiderCycle(prior).get(
-    `${want}|${input.cycle.cycleId}`
-  );
+  let supersedesDeclarationId = '';
+  if (!input.preloaded?.skipPriorDeclarationLookup) {
+    const prior = await listSupervisorEquipmentDeclarations({
+      supervisorCode: input.supervisorCode,
+      riderCode,
+      cycleId: input.cycle.cycleId,
+    });
+    const latest = latestDeclarationsByRiderCycle(prior).get(
+      `${want}|${input.cycle.cycleId}`
+    );
+    supersedesDeclarationId = latest?.declarationId || '';
+  }
 
   const notes = buildDeclarationNotes({
     userNote: input.notes,
@@ -313,10 +339,11 @@ export async function createSupervisorEquipmentDeclaration(input: {
     originalLiabilityMilli: originalMilli,
     notes,
     createdAt: new Date().toISOString(),
-    supersedesDeclarationId: latest?.declarationId || '',
+    supersedesDeclarationId,
   };
 
   await ensureDeclarationsSheet();
+  // Single append write — never retry blindly on write failures.
   const ok = await appendToSheet(
     SHEET_SUPERVISOR_EQUIPMENT_DECLARATIONS,
     [declarationToRow(declaration)],

@@ -79,6 +79,26 @@ export default function SupervisorEquipmentStatusPage() {
     '' | 'OWES' | 'PARTIAL' | 'FULLY_PAID' | 'NO_EQUIPMENT' | 'DATA_ERROR'
   >('');
 
+  const list = useQuery({
+    queryKey: ['supervisor-equipment-liabilities'],
+    queryFn: async () => {
+      const res = await authFetch('/api/supervisor/equipment-liabilities?year=2026&month=8');
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'فشل التحميل');
+      const embeddedCycles = (json.cycles || []) as CycleOption[];
+      if (embeddedCycles.length) {
+        qc.setQueryData(['supervisor-payout-cycles', 2026, 8], embeddedCycles);
+      }
+      return {
+        rows: (json.rows || []) as DeskRow[],
+        rosterRiderCount: Number(json.rosterRiderCount || 0),
+        liabilityCount: Number(json.liabilityCount || 0),
+      };
+    },
+    staleTime: 20_000,
+    refetchOnWindowFocus: false,
+  });
+
   const cycles = useQuery({
     queryKey: ['supervisor-payout-cycles', 2026, 8],
     queryFn: async () => {
@@ -87,6 +107,10 @@ export default function SupervisorEquipmentStatusPage() {
       if (!json.success) throw new Error(json.error || 'فشل تحميل دورات القبض');
       return (json.cycles || []) as CycleOption[];
     },
+    // Avoid a second Sheets hydration: only fetch cycles if desk load did not embed them.
+    enabled: list.isFetched && !qc.getQueryData(['supervisor-payout-cycles', 2026, 8]),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   useEffect(() => {
@@ -94,20 +118,6 @@ export default function SupervisorEquipmentStatusPage() {
       setCycleId(pickDefaultCycleId(cycles.data));
     }
   }, [cycles.data, cycleId]);
-
-  const list = useQuery({
-    queryKey: ['supervisor-equipment-liabilities'],
-    queryFn: async () => {
-      const res = await authFetch('/api/supervisor/equipment-liabilities');
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'فشل التحميل');
-      return {
-        rows: (json.rows || []) as DeskRow[],
-        rosterRiderCount: Number(json.rosterRiderCount || 0),
-        liabilityCount: Number(json.liabilityCount || 0),
-      };
-    },
-  });
 
   const selectedCycle = useMemo(
     () => (cycles.data || []).find((c) => c.cycleId === cycleId) || null,
@@ -171,14 +181,48 @@ export default function SupervisorEquipmentStatusPage() {
         json?.message ||
           'تم حفظ إقرار المشرف كدليل نهائي (بدون تعديل رصيد العهدة تلقائياً)'
       );
+      const savedRider = proposeFor?.riderCode;
       setProposeFor(null);
       setPaidEgp('');
       setNote('');
       setMissingOutcome('');
       setShowLegacyProposal(false);
-      void qc.invalidateQueries({ queryKey: ['supervisor-equipment-liabilities'] });
+      // Local update only — do NOT invalidate (avoids full multi-sheet reload storm).
+      if (savedRider) {
+        qc.setQueryData(
+          ['supervisor-equipment-liabilities'],
+          (prev: {
+            rows: DeskRow[];
+            rosterRiderCount: number;
+            liabilityCount: number;
+          } | undefined) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              rows: prev.rows.map((r) =>
+                r.riderCode === savedRider
+                  ? {
+                      ...r,
+                      warnings: (r.warnings || []).filter(
+                        (w) => w !== 'DECLARATION_MISSING'
+                      ),
+                      needsFreshDeclaration: false,
+                    }
+                  : r
+              ),
+            };
+          }
+        );
+      }
     },
-    onError: (e: Error) => notify.error(e.message),
+    onError: (e: Error) => {
+      const msg = e.message || '';
+      if (/Quota|Read requests|sheets\.googleapis|ضغط مؤقت/i.test(msg)) {
+        notify.error('البيانات عليها ضغط مؤقت. حاول مرة أخرى بعد لحظات.');
+        return;
+      }
+      notify.error(msg);
+    },
   });
 
   const proposalMut = useMutation({
