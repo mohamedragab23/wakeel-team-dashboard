@@ -27,7 +27,7 @@
  *   ~5s (`forwardOktaOtpsForWindow`) so codes typically reach جروب الأكواد
  *   within a few seconds of the email landing — closer to جروب الإشعارات.
  */
-import { createImapClient, getGmailImapConfig, isGmailImapConfigured } from '@/lib/gmailImap';
+import { createImapClient, getGmailImapConfig, isGmailImapConfigured, describeImapError } from '@/lib/gmailImap';
 import { redisCacheGet, redisCacheSet } from '@/lib/redisCache.optional';
 import { isUpstashConfigured, redisDel, redisGet, redisSetNx } from '@/lib/upstashRest';
 import { logStructured } from '@/lib/requestTrace';
@@ -81,6 +81,60 @@ async function downloadDecodedText(client: any, uid: number, bodyStructure: any)
   return '';
 }
 
+/**
+ * Classifies a failed Telegram `sendMessage` call into an actionable reason.
+ * Added 2026-08-29 — the group had silently stopped receiving codes and
+ * there was no way to tell *why* without this (see the loop-swallowing bug
+ * fixed in `forwardOktaOtpsForWindow` below: every failure here used to be
+ * caught, logged, and thrown away with zero alert).
+ *
+ * Common real-world causes covered:
+ *   401 Unauthorized        -> bot token revoked/regenerated via @BotFather
+ *   403 Forbidden            -> bot was removed/kicked from جروب الأكواد, or blocked
+ *   400 "chat not found"     -> wrong TELEGRAM_OTP_CODES_CHAT_ID, or the group
+ *                                was deleted
+ *   400 "upgraded to a supergroup" -> the group's chat_id CHANGED (Telegram
+ *                                gives the new id in `parameters.migrate_to_chat_id`)
+ *                                — the old TELEGRAM_OTP_CODES_CHAT_ID is now dead
+ */
+export function describeTelegramSendError(status: number, rawBody: string): string {
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    // non-JSON body, fall through to generic handling below
+  }
+  const description = String(parsed?.description || rawBody || '').trim();
+  const migratedTo = parsed?.parameters?.migrate_to_chat_id;
+
+  if (migratedTo) {
+    return (
+      `telegram_group_migrated_to_supergroup (new chat_id: ${migratedTo}) — جروب الأكواد تحول لـ supergroup, ` +
+      `القيمة القديمة لـ TELEGRAM_OTP_CODES_CHAT_ID مش شغالة دلوقتي. الحل: حدّث TELEGRAM_OTP_CODES_CHAT_ID ` +
+      `في Vercel للقيمة الجديدة (${migratedTo}) وأعد النشر.`
+    );
+  }
+  if (status === 401) {
+    return (
+      `telegram_bot_token_invalid (${description || 'Unauthorized'}) — TELEGRAM_OTP_BOT_TOKEN غير صالح أو ` +
+      'تم إلغاؤه من @BotFather. الحل: اعمل توكن جديد للبوت وحدّث TELEGRAM_OTP_BOT_TOKEN في Vercel.'
+    );
+  }
+  if (status === 403) {
+    return (
+      `telegram_bot_forbidden (${description || 'Forbidden'}) — البوت غير موجود في جروب الأكواد (تمت إزالته ` +
+      'أو حظره). الحل: ضيف البوت تاني للجروب وأعطه صلاحية إرسال الرسائل.'
+    );
+  }
+  if (status === 400 && /chat not found/i.test(description)) {
+    return (
+      `telegram_chat_not_found (${description}) — TELEGRAM_OTP_CODES_CHAT_ID غير صحيح أو الجروب محذوف. ` +
+      'الحل: تأكد من رقم الشات الصحيح للجروب وحدّثه في Vercel.'
+    );
+  }
+  return `telegram_send_failed_${status}: ${description || rawBody}`.trim();
+}
+
 async function sendOtpToTelegram(otp: string): Promise<void> {
   const token = process.env.TELEGRAM_OTP_BOT_TOKEN?.trim();
   const chatId = process.env.TELEGRAM_OTP_CODES_CHAT_ID?.trim();
@@ -99,7 +153,7 @@ async function sendOtpToTelegram(otp: string): Promise<void> {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Telegram send failed (${res.status}): ${body}`);
+    throw new Error(describeTelegramSendError(res.status, body));
   }
 }
 
@@ -287,6 +341,17 @@ export async function forwardLatestOktaOtp(): Promise<ForwardResult> {
  *
  * Vercel cron min schedule is 1 minute; this burst fills the gap inside that minute.
  */
+/** Best-effort classification of a caught poll error — Telegram errors are
+ *  already labeled by `describeTelegramSendError` (prefixed `telegram_`),
+ *  anything else is assumed IMAP-shaped and run through the same
+ *  classifier the daily health-check uses, for a consistent, actionable
+ *  reason string either way. */
+export function describePollError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/^telegram_/.test(message)) return message;
+  return describeImapError(err);
+}
+
 export async function forwardOktaOtpsForWindow(opts?: {
   windowMs?: number;
   intervalMs?: number;
@@ -295,6 +360,16 @@ export async function forwardOktaOtpsForWindow(opts?: {
   last?: ForwardResult;
   polls: number;
   skippedForAuthRecovery?: boolean;
+  /** Set when at least one poll in this window threw — previously this was
+   *  logged and silently discarded, so the cron route always returned
+   *  success:true even if EVERY poll failed (the 2026-08-29 "جروب الأكواد
+   *  stopped and nobody knew" incident). Now surfaced so the route can
+   *  count consecutive failed runs and alert once, instead of forever. */
+  lastError?: string;
+  /** True only when every single poll in this window errored (0 forwarded,
+   *  0 clean "nothing to do" results) — the strong signal something is
+   *  actually broken, as opposed to a normal "no new OTP this minute" run. */
+  allPollsErrored?: boolean;
 }> {
   // Yield Gmail to Layer-3 Okta recovery — same inbox, same IMAP account.
   try {
@@ -313,7 +388,9 @@ export async function forwardOktaOtpsForWindow(opts?: {
   const deadline = Date.now() + windowMs;
   let forwardedCount = 0;
   let polls = 0;
+  let errorCount = 0;
   let last: ForwardResult | undefined;
+  let lastError: string | undefined;
 
   while (Date.now() < deadline) {
     polls += 1;
@@ -333,13 +410,13 @@ export async function forwardOktaOtpsForWindow(opts?: {
           result.reason === 'telegram_otp_not_configured' ||
           result.reason === 'chat_collision')
       ) {
+        lastError = result.reason;
         break;
       }
     } catch (err) {
-      logStructured('error', 'otp_forwarder_burst_poll_failed', {
-        error: err instanceof Error ? err.message : String(err),
-        polls,
-      });
+      errorCount += 1;
+      lastError = describePollError(err);
+      logStructured('error', 'otp_forwarder_burst_poll_failed', { error: lastError, polls });
     }
 
     const remaining = deadline - Date.now();
@@ -347,8 +424,9 @@ export async function forwardOktaOtpsForWindow(opts?: {
     await new Promise((r) => setTimeout(r, Math.min(intervalMs, remaining)));
   }
 
-  logStructured('info', 'otp_forwarder_burst_done', { forwardedCount, polls, windowMs });
-  return { forwardedCount, last, polls };
+  const allPollsErrored = polls > 0 && errorCount === polls;
+  logStructured('info', 'otp_forwarder_burst_done', { forwardedCount, polls, errorCount, windowMs });
+  return { forwardedCount, last, polls, lastError, allPollsErrored };
 }
 
 /**

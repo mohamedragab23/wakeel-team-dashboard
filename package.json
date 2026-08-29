@@ -18,6 +18,7 @@
     "test:ops-validation": "npx --yes tsx --test lib/strategicOps/opsValidation/opsValidation.test.ts",
     "test:rooster-recovery-lock": "npx --yes tsx --test lib/roosterLive/authRecovery/recoveryLock.test.ts",
     "test:rooster-gmail-otp-reader": "npx --yes tsx --test lib/roosterLive/authRecovery/gmailOtpReader.test.ts",
+    "test:otp-forwarder": "npx --yes tsx --test lib/otpForwarder.test.ts",
     "test:srs014": "npx --yes tsx --test lib/money.test.ts lib/payoutCycles/validation.test.ts lib/payoutCycles/eligibility.test.ts lib/equipmentDeductions/engine.test.ts lib/equipmentDeductions/manualV2Request.test.ts lib/equipmentLiability/liability.test.ts lib/equipmentLiability/phaseC.test.ts lib/equipmentLiability/phaseD.test.ts lib/equipmentLiability/equipmentDesk.test.ts lib/equipmentLiability/paymentReconcile.test.ts lib/equipmentLiability/paymentProposals.test.ts lib/equipmentInventory/anomalies.test.ts lib/recruitment/phaseB.test.ts lib/srs014SafetyGate.test.ts",
     "test:rbac": "npx --yes tsx --test lib/rbacOperationalRoles.test.ts lib/recruitment/phaseB.test.ts lib/sessionVersion.test.ts lib/equipmentLiability/paymentProposals.test.ts",
     "test:srs014:phaseD": "npx --yes tsx --test lib/equipmentLiability/phaseD.test.ts",
