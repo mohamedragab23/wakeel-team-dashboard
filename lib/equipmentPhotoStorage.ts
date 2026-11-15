@@ -1,3 +1,4 @@
+import { getAppBaseUrl } from './appBaseUrl';
 import { randomBytes } from 'crypto';
 import { appendToSheet, ensureSheetExists, getSheetData } from './googleSheets';
 import { SHEET_EQUIPMENT_PHOTOS } from './equipmentSheetConstants';
@@ -11,16 +12,7 @@ const MAX_PAYLOAD_CHARS = 7_000_000;
 /** عنوان الإنتاج — روابط صور التسليم في Google Sheets */
 export const PRODUCTION_APP_URL = 'https://wakeel-team-dashboard.vercel.app';
 
-function getAppBaseUrl(): string {
-  const fromEnv = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (fromEnv) return fromEnv.replace(/\/$/, '');
-  if (process.env.VERCEL_ENV === 'production') {
-    return PRODUCTION_APP_URL;
-  }
-  const vercel = process.env.VERCEL_URL?.trim();
-  if (vercel) return `https://${vercel}`;
-  return 'http://127.0.0.1:3000';
-}
+
 
 export function isPhotoUrl(value: string): boolean {
   const v = value.trim();

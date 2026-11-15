@@ -1,3 +1,4 @@
+import { getAppBaseUrl } from '@/lib/appBaseUrl';
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
@@ -221,9 +222,7 @@ export async function POST(request: NextRequest) {
 
     // إشعار الإدمن عبر Telegram
     const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}` 
-      : 'http://localhost:3000';
+    const baseUrl = getAppBaseUrl();
     
     const items = [];
     if (m > 0) items.push({ name: 'باوتش موتوسيكل', quantity: m });

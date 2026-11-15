@@ -1,3 +1,4 @@
+import { getAppBaseUrl } from '@/lib/appBaseUrl';
 import { NextRequest, NextResponse } from 'next/server';
 import { isCronAuthorized } from '@/lib/cronAuth';
 import { logStructured } from '@/lib/requestTrace';
@@ -29,9 +30,7 @@ export async function GET(req: NextRequest) {
     // إشعار الإدمن بالطيارين ذوي البيانات الناقصة
     if (alerts.length > 0) {
       const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL 
-        ? `https://${process.env.VERCEL_URL}` 
-        : 'http://localhost:3000';
+      const baseUrl = getAppBaseUrl();
       
       // جمع كل الطيارين من جميع التنبيهات
       const allMissingRiders = alerts.flatMap((alert) => 

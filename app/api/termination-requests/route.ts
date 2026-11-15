@@ -1,3 +1,4 @@
+import { getAppBaseUrl } from '@/lib/appBaseUrl';
 /**
  * Termination Requests API
  * Handles creation, listing, and approval of termination requests
@@ -434,9 +435,7 @@ export async function POST(request: NextRequest) {
 
     // إشعار الإدمن عبر Telegram
     const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}` 
-      : 'http://localhost:3000';
+    const baseUrl = getAppBaseUrl();
     
     sendAdminTelegramNotificationSafe({
       type: 'termination_request',

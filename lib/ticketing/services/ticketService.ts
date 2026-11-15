@@ -1,3 +1,4 @@
+import { getAppBaseUrl } from '@/lib/appBaseUrl';
 import { getTicketingSql } from '@/lib/ticketing/db/client';
 import { appendTicketAudit } from '@/lib/ticketing/services/auditService';
 import { notifyTicketEvent } from '@/lib/ticketing/services/notificationService';
@@ -133,9 +134,7 @@ export async function createTicket(input: CreateInput, actor: Actor): Promise<Ti
 
   // إشعار الإدمن عبر Telegram
   const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL 
-    ? `https://${process.env.VERCEL_URL}` 
-    : 'http://localhost:3000';
+  const baseUrl = getAppBaseUrl();
   
   sendAdminTelegramNotificationSafe({
     type: 'new_ticket',
