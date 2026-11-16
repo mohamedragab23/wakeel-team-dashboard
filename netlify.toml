@@ -1,6 +1,6 @@
 # Secrets belong in Netlify environment variables, never in this file.
 [build]
-  command = "npm run build"
+  command = "NODE_OPTIONS=--max-old-space-size=6144 npm run build"
   publish = ".next"
 
 [build.environment]

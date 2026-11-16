@@ -13,6 +13,10 @@ const nextConfig = {
   },
 
   experimental: {
+    // Avoid duplicating large server SDK dependency graphs during builds.
+    serverComponentsExternalPackages: ['googleapis', 'postgres', 'imapflow', '@resvg/resvg-js'],
+    webpackBuildWorker: true,
+    cpus: 1,
     optimizePackageImports: ['@tanstack/react-query', 'recharts'],
     instrumentationHook: true,
     serverActions: {
