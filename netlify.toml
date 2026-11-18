@@ -6,6 +6,9 @@
 [build.environment]
   NODE_VERSION = "22.16.0"
   NEXT_TELEMETRY_DISABLED = "1"
+  # Boolean feature flags and the public S3 region are configuration, not credentials.
+  # Keep scanning every credential and every source/output path.
+  SECRETS_SCAN_OMIT_KEYS = "FEATURE_AUTO_EQUIPMENT_DEDUCTIONS_ENABLED,FEATURE_EQUIPMENT_LEDGER_ENABLED,FEATURE_EQUIPMENT_RETURNS_V2_ENABLED,FEATURE_MANUAL_DEDUCTIONS_V2_ENABLED,FEATURE_PAYOUT_CYCLES_ENABLED,FEATURE_RECRUITMENT_V2_ENABLED,TICKETING_S3_REGION"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
