@@ -11,7 +11,7 @@ export default async () => {
   const results = await Promise.all(dueJobs(now).map(async job => {
     const response = await fetch(new URL('/.netlify/functions/sync-worker-background', origin), {
       method: 'POST',
-      headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+      headers: { 'x-cron-secret': secret, 'content-type': 'application/json' },
       body: JSON.stringify({ job }),
       signal: AbortSignal.timeout(20000),
     });
