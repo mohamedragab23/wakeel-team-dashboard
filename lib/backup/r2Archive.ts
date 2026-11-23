@@ -1,3 +1,4 @@
+import { putPrivateObject } from '@/lib/privateObjectStore';
 import { ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 export type BackupS3Config = {
@@ -39,6 +40,11 @@ export async function putDailyBackupObject(
   body: string | Buffer,
   contentType = 'application/json'
 ): Promise<string> {
+  if (process.env.BACKUP_STORAGE_PROVIDER === 'postgres') {
+    const key = `backups/daily/${stamp}/${relativeKey.replace(/^\/+/, '')}`;
+    await putPrivateObject(key, Buffer.isBuffer(body) ? body : Buffer.from(body), contentType, true);
+    return key;
+  }
   const cfg = getBackupS3Config();
   if (!cfg) throw new Error('R2/S3 not configured for backup archive');
 

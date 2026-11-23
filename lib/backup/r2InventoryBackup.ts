@@ -1,7 +1,10 @@
+import { listPrivateAttachments } from '@/lib/privateObjectStore';
 import { listTicketingObjects, putDailyBackupObject } from '@/lib/backup/r2Archive';
 
 export type R2InventoryBackupResult = {
   ok: boolean;
+  provider?: 'postgres' | 's3';
+  legacyR2Included?: boolean;
   objectCount?: number;
   totalBytes?: number;
   r2Key?: string;
@@ -14,11 +17,14 @@ export async function runR2InventoryBackup(
   uploadToR2: boolean
 ): Promise<R2InventoryBackupResult> {
   try {
-    const objects = await listTicketingObjects();
+    const inPostgres = process.env.BACKUP_STORAGE_PROVIDER === 'postgres';
+    const objects = inPostgres ? await listPrivateAttachments() : await listTicketingObjects();
     const prefix = (process.env.TICKETING_S3_PREFIX?.trim() || 'ticketing').replace(/\/$/, '');
     const bucket = process.env.TICKETING_S3_BUCKET?.trim() || '';
 
     const manifest = {
+      provider: inPostgres ? 'postgres' : 's3',
+      legacyR2Included: !inPostgres,
       exportedAt: new Date().toISOString(),
       readOnly: true,
       bucket,
@@ -39,6 +45,8 @@ export async function runR2InventoryBackup(
 
     return {
       ok: true,
+      provider: inPostgres ? 'postgres' : 's3',
+      legacyR2Included: !inPostgres,
       objectCount: objects.length,
       totalBytes: manifest.totalBytes,
       r2Key,
