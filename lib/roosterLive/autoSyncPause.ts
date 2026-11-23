@@ -11,7 +11,8 @@
  * actions (e.g. the dashboard "استيراد تلقائي من Rooster" button) are always
  * active regardless of this flag.
  */
-export const ROOSTER_AUTO_SYNC_PAUSED = false;
+// Paused at the owner's request while Delivery Hero repairs Rooster (2026-11-23).
+export const ROOSTER_AUTO_SYNC_PAUSED = true;
 
 export const ROOSTER_AUTO_SYNC_PAUSE_REASON =
   'تم إيقاف السحب التلقائي من Rooster مؤقتًا — راجع lib/roosterLive/autoSyncPause.ts للتفاصيل.';

@@ -12,10 +12,10 @@ export function authorized(request: Request): boolean {
 
 export function dueJobs(date: Date): JobName[] {
   if (!Number.isFinite(date.getTime())) throw new Error('Invalid schedule time');
-  const jobs: JobName[] = ['live-sync'];
+  // Rooster pulls are paused while the upstream provider is unavailable.
+  const jobs: JobName[] = [];
   if (date.getUTCMinutes() === 0) {
     if (date.getUTCHours() === 3) jobs.push('daily-backup');
-    if (date.getUTCHours() === 10) jobs.push('performance-sync');
   }
   return jobs;
 }

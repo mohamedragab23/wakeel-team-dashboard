@@ -1,7 +1,7 @@
 import { dueJobs } from '../../lib/netlifyJobs';
 
 // UTC; Netlify invokes scheduled functions only on the published production deploy.
-export const config = { schedule: '* * * * *' };
+export const config = { schedule: '0 3 * * *' };
 
 export default async () => {
   const secret = process.env.CRON_SECRET?.trim();

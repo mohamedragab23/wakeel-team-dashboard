@@ -10,7 +10,7 @@ export default async (request: Request) => {
   const body = await request.json() as { job?: JobName };
   const job = body.job;
   if (!job || !jobNames.includes(job)) return;
-  if (job === 'live-sync' && ROOSTER_AUTO_SYNC_PAUSED) return;
+  if ((job === 'live-sync' || job === 'performance-sync') && ROOSTER_AUTO_SYNC_PAUSED) return;
   const lock = `netlify:jobs:lock:${job}`;
   // Longer than the platform's 15 minute limit; fails closed if Redis is unavailable.
   const acquired = await redisSetNxDetailed(lock, 'running', 960);
