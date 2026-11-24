@@ -265,7 +265,7 @@ these are not):
    automate login. This is qualitatively different from a cookie.
    **Strong recommendation, elevated to a near-hard-requirement here:**
    use a **dedicated bot/service Okta account**, not
-   `eg.wakeel.ext@talabat.com`'s real human-owned credential if that's a
+   `your-okta-account@example.invalid`'s real human-owned credential if that's a
    personal account — for two independent reasons:
    - **Blast radius:** a leaked bot password is scoped/revocable by IT
      independently of a human's real corporate identity.

@@ -62,8 +62,22 @@ export default function TerminationRequestsPage() {
     ]);
   };
 
-  const { data: requests, isLoading, refetch } = useQuery({
+  const { data: baseRequests, isLoading, isError, refetch } = useQuery({
+    queryKey: ['termination-requests', statusFilter],
+    queryFn: async () => {
+      const url = new URL('/api/termination-requests', window.location.origin);
+      if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
+      const res = await authFetch(url);
+      const result = await res.json();
+      if (!res.ok || !result.success) throw new Error('تعذر تحميل طلبات الإقالة');
+      return result.data as TerminationRequest[];
+    },
+  });
+
+  const { data: periodStatsById, isError: periodStatsError } = useQuery({
     queryKey: ['termination-requests', statusFilter, statsFrom, statsTo],
+    enabled: !!baseRequests?.length && !!statsFrom && !!statsTo && statsFrom <= statsTo,
+    retry: false,
     queryFn: async () => {
       const url = new URL('/api/termination-requests', window.location.origin);
       if (statusFilter !== 'all') {
@@ -72,10 +86,16 @@ export default function TerminationRequestsPage() {
       url.searchParams.set('statsFrom', statsFrom);
       url.searchParams.set('statsTo', statsTo);
 
-      const res = await authFetch(url.toString());
+      const res = await authFetch(url);
       const data = await res.json();
-      return data.success ? (data.data as TerminationRequest[]) : [];
+      if (!res.ok || !data.success) throw new Error('تعذر تحميل إحصاءات الفترة');
+      return new Map((data.data as TerminationRequest[]).map((request) => [request.id, request.periodStats]));
     } });
+
+  const requests = baseRequests?.map((request) => ({
+    ...request,
+    periodStats: periodStatsById?.get(request.id),
+  }));
 
   const { data: supervisors = [] } = useQuery({
     queryKey: ['admin', 'supervisors'],
@@ -263,6 +283,9 @@ export default function TerminationRequestsPage() {
               آخر 30 يوماً
             </button>
           </div>
+          {periodStatsError && (
+            <p role="status" className="text-sm text-amber-700">تعذر تحميل إحصاءات الفترة.</p>
+          )}
         </div>
 
         {/* Status Filter */}
@@ -316,6 +339,13 @@ export default function TerminationRequestsPage() {
           <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-100 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
             <p className="mt-4 text-gray-600">جاري تحميل البيانات...</p>
+          </div>
+        ) : isError && !requests ? (
+          <div role="alert" className="bg-white rounded-xl shadow-sm p-8 border border-gray-100 text-center">
+            <p className="text-red-700">تعذر تحميل طلبات الإقالة.</p>
+            <button type="button" onClick={() => void refetch()} className="mt-3 text-blue-700 underline">
+              إعادة المحاولة
+            </button>
           </div>
         ) : requests && requests.length > 0 ? (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">

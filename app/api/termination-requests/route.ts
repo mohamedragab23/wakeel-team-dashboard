@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { getSupervisorRiders } from '@/lib/dataService';
-import { appendToSheet, getSheetData, updateSheetRow, ensureSheetExists } from '@/lib/googleSheets';
+import { appendToSheet, getSheetData, getSheetDataOrThrow, updateSheetRow, ensureSheetExists } from '@/lib/googleSheets';
 import { updateRider } from '@/lib/adminService';
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { computeWorkDaysByRider, type PerformanceRecord } from '@/lib/riderPerformanceAggregate';
@@ -177,7 +177,7 @@ export async function GET(request: NextRequest) {
     let allRequests: any[] = [];
     let riderCodesForDebt = new Set<string>();
     try {
-      const requestsData = await getSheetData('طلبات_الإقالة', false);
+      const requestsData = await getSheetDataOrThrow('طلبات_الإقالة', false);
       // Skip header row
       for (let i = 1; i < requestsData.length; i++) {
         const row = requestsData[i];
@@ -200,9 +200,11 @@ export async function GET(request: NextRequest) {
           });
         }
       }
-    } catch (error) {
-      // Sheet might not exist yet, return empty array
-      console.log('Termination requests sheet not found, returning empty array');
+    } catch {
+      return NextResponse.json(
+        { success: false, error: 'تعذر قراءة طلبات الإقالة من Google Sheets' },
+        { status: 503 }
+      );
     }
 
     // Fill missing debt values from latest performance (البيانات اليومية)

@@ -9,7 +9,7 @@
  * something else) before any further implementation.
  *
  * Requires (in .env.local, NOT pasted anywhere else):
- *   ROOSTER_OKTA_USERNAME=eg.wakeel.ext@talabat.com
+ *   ROOSTER_OKTA_USERNAME=your-okta-account@example.invalid
  *   ROOSTER_OKTA_PASSWORD=...
  *
  * Usage: node scripts/phase0-okta-probe.mjs

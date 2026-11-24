@@ -4,12 +4,22 @@ import { join } from 'path';
 
 let sql: ReturnType<typeof postgres> | null = null;
 
+function getTicketingDatabaseUrl(): string | undefined {
+  const ticketingUrl = process.env.TICKETING_DATABASE_URL?.trim();
+  // The Vercel export substitutes this marker for sensitive values. The
+  // original production setup used POSTGRES_URL for both variables.
+  if (ticketingUrl && /^\[SENSITIVE\]$/.test(ticketingUrl)) {
+    return process.env.POSTGRES_URL?.trim();
+  }
+  return ticketingUrl;
+}
+
 export function isTicketingDbConfigured(): boolean {
-  return Boolean(process.env.TICKETING_DATABASE_URL?.trim());
+  return Boolean(getTicketingDatabaseUrl());
 }
 
 export function getTicketingSql(): ReturnType<typeof postgres> {
-  const url = process.env.TICKETING_DATABASE_URL?.trim();
+  const url = getTicketingDatabaseUrl();
   if (!url) {
     throw new Error(
       'TICKETING_DATABASE_URL is not configured. See docs/operations-ticketing/MIGRATION.md'
