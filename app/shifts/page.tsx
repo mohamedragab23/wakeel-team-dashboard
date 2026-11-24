@@ -23,6 +23,31 @@ import {
 
 type ShiftsTab = 'upload' | 'overview' | 'hours' | 'unassigned' | 'supervisors';
 
+function isJsonResponse(response: Response) {
+  return (response.headers.get('content-type') || '').toLowerCase().includes('json');
+}
+
+function isTemporaryUploadError(response: Response) {
+  return [408, 502, 503, 504, 520, 521, 522, 523, 524].includes(response.status)
+    || (response.status === 500 && !isJsonResponse(response));
+}
+
+async function readAnalysisResponse(response: Response) {
+  if (response.status === 401) throw new Error('انتهت الجلسة. سجّل الدخول وجرب تاني.');
+  if (response.status === 413) throw new Error('حجم الملفات أكبر من حد الرفع. جرّب رفع الملفات على دفعات أصغر.');
+
+  if (isJsonResponse(response)) {
+    try {
+      return await response.json();
+    } catch {
+      // The server can close the connection before returning a complete response.
+    }
+  }
+
+  const trace = response.headers.get('x-request-id') || response.headers.get('cf-ray');
+  throw new Error(`الخادم لم يرجّع نتيجة التحليل. جرّب مرة تانية (${response.status}${trace ? `، مرجع ${trace}` : ''}).`);
+}
+
 function safeFilePart(s: string) {
   return String(s).replace(/[^\w.-]+/g, '_');
 }
@@ -223,10 +248,14 @@ export default function ShiftsPage() {
       }
       for (const d of pickedDates) q.append('dates', d);
 
-      const res = await authFetch(`/api/shifts/legacy-analyze?${q.toString()}`, {
-        method: 'POST',
-        body: fd });
-      const data = await res.json();
+      const upload = () => authFetch(`/api/shifts/legacy-analyze?${q.toString()}`, { method: 'POST', body: fd });
+      let res = await upload();
+      // Manual analysis only reads the workbook and uploaded file. It can be retried safely.
+      if (isTemporaryUploadError(res)) {
+        await res.body?.cancel().catch(() => {});
+        res = await upload();
+      }
+      const data = await readAnalysisResponse(res);
       if (!data.success) {
         setMessage({ type: 'err', text: data.error || 'فشل التحليل' });
         return;
@@ -252,7 +281,7 @@ export default function ShiftsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ zone: autoImportZone, startDate: autoImportStart, endDate: autoImportEnd }),
       });
-      const data = await res.json();
+      const data = await readAnalysisResponse(res);
       if (!data.success) {
         // `data.detail` (when present) is the raw auth-recovery failure reason
         // (e.g. "layer3:otp_email_timeout") -- shown alongside the friendly

@@ -641,7 +641,7 @@ export async function ensureSheetExists(sheetName: string, headers?: string[]): 
  * Reads a tab from the Shifts Streamlit spreadsheet (`spreadsheet_id` in `.streamlit/secrets.toml`).
  * Uses `GOOGLE_SHEETS_SHIFTS_CREDENTIALS_*` when set; otherwise the same credentials as the main app.
  */
-export async function getShiftsSheetData(sheetName: string = 'all', useCache: boolean = true): Promise<any[][]> {
+export async function getShiftsSheetData(sheetName: string = 'all', useCache: boolean = true, signal?: AbortSignal): Promise<any[][]> {
   const shiftsSpreadsheetId = getShiftsSpreadsheetIdFromEnv();
   if (!shiftsSpreadsheetId) {
     console.warn('[GoogleSheets] GOOGLE_SHEETS_SHIFTS_SPREADSHEET_ID is not set');
@@ -663,7 +663,7 @@ export async function getShiftsSheetData(sheetName: string = 'all', useCache: bo
       range: `${sheetName}!A:Z`,
       majorDimension: 'ROWS',
       valueRenderOption: 'FORMATTED_VALUE',
-    });
+    }, { signal });
 
     const data = response.data.values || [];
     if (useCache) {

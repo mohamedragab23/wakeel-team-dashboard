@@ -44,10 +44,12 @@ export async function analyzeLegacyShifts(input: AnalyzeLegacyShiftsInput) {
   // Try multiple tab names for employee data
   const TAB_CANDIDATES = ['all', 'المناديب', 'الموظفين', 'employees'];
   let shiftsAllMatrix: any[][] = [];
+  const lookupSignal = AbortSignal.timeout(10_000);
   
   for (const tabName of TAB_CANDIDATES) {
-    shiftsAllMatrix = await getShiftsSheetData(tabName, false);
+    shiftsAllMatrix = await getShiftsSheetData(tabName, false, lookupSignal);
     if (shiftsAllMatrix?.length) break;
+    if (lookupSignal.aborted) throw new Error('قراءة شيت الموظفين استغرقت وقتًا طويلًا. جرّب التحليل مرة تانية.');
   }
   
   if (!shiftsAllMatrix?.length) {
