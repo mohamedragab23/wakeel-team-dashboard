@@ -10,7 +10,7 @@ import {
 } from '@/lib/ticketing/ticketingAuth';
 import { createTicket, listTickets } from '@/lib/ticketing/services/ticketService';
 import { createTicketSchema, listTicketsQuerySchema } from '@/lib/ticketing/validators';
-import { saveTicketAttachment } from '@/lib/ticketing/services/attachmentService';
+import { validateUpload } from '@/lib/ticketing/storage/sanitize';
 import * as Sentry from '@sentry/nextjs';
 
 export const dynamic = 'force-dynamic';
@@ -66,17 +66,18 @@ export const POST = wrapTicketingHandler(async (request: NextRequest) => {
     return NextResponse.json({ success: false, error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const actor = actorFromJwt(decoded!);
-  const ticket = await createTicket(parsed.data, actor);
-
   for (const file of files) {
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await saveTicketAttachment({
-      ticketId: ticket.id,
-      file: { name: file.name, type: file.type, size: file.size, buffer },
-      uploadedByCode: actor.code,
-    });
+    const error = validateUpload(file);
+    if (error) return NextResponse.json({ success: false, error }, { status: 400 });
   }
+
+  const uploads = await Promise.all(files.map(async (file) => ({
+    name: file.name,
+    type: file.type,
+    size: file.size,
+    buffer: Buffer.from(await file.arrayBuffer()),
+  })));
+  const ticket = await createTicket(parsed.data, actorFromJwt(decoded!), uploads);
 
   return NextResponse.json({ success: true, data: ticket }, { status: 201 });
 });

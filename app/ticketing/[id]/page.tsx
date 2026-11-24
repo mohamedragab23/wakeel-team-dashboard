@@ -25,6 +25,8 @@ export default function TicketDetailPage() {
   const [comment, setComment] = useState('');
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [attachmentError, setAttachmentError] = useState('');
 
   useEffect(() => {
     try {
@@ -69,6 +71,23 @@ export default function TicketDetailPage() {
       body: JSON.stringify(patch) });
     refetch();
     queryClient.invalidateQueries({ queryKey: ['ticketing'] });
+  };
+
+  const uploadAttachment = async (form: HTMLFormElement) => {
+    const body = new FormData(form);
+    setUploadingAttachment(true);
+    setAttachmentError('');
+    try {
+      const response = await authFetch(`/api/ticketing/${id}/attachments`, { method: 'POST', body });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'تعذر رفع المرفق');
+      form.reset();
+      await refetch();
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : 'تعذر رفع المرفق');
+    } finally {
+      setUploadingAttachment(false);
+    }
   };
 
   if (isLoading) return <p className="text-sm">جاري التحميل…</p>;
@@ -134,6 +153,18 @@ export default function TicketDetailPage() {
 
       <section>
         <h3 className="text-sm font-semibold mb-2">المرفقات ({attachments.length})</h3>
+        {(!closed || isAdmin) && (
+          <form className="flex flex-wrap items-center gap-2 mb-3 text-sm" onSubmit={(event) => {
+            event.preventDefault();
+            void uploadAttachment(event.currentTarget);
+          }}>
+            <input type="file" name="file" aria-label="اختيار مرفق" accept=".pdf,.png,.jpg,.jpeg" required />
+            <button type="submit" className="text-cyan-400 disabled:opacity-50" disabled={uploadingAttachment}>
+              {uploadingAttachment ? 'جاري رفع المرفق…' : 'إضافة مرفق'}
+            </button>
+            {attachmentError && <p role="alert" className="text-red-400">{attachmentError}</p>}
+          </form>
+        )}
         <ul className="space-y-1 text-sm">
           {attachments.map((a) => (
             <li key={a.id} className="flex items-center gap-2">

@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { getAppBaseUrl } from '@/lib/appBaseUrl';
 import { getTicketingSql } from '@/lib/ticketing/db/client';
 import { appendTicketAudit } from '@/lib/ticketing/services/auditService';
+import { stageTicketAttachment, type TicketUpload } from '@/lib/ticketing/services/attachmentService';
 import { notifyTicketEvent } from '@/lib/ticketing/services/notificationService';
 import type {
   Actor,
@@ -76,51 +78,66 @@ function slaDueHours(priority: string): number {
   }
 }
 
-export async function createTicket(input: CreateInput, actor: Actor): Promise<TicketRow> {
-  const sql = getTicketingSql();
+export async function createTicket(input: CreateInput, actor: Actor, files: TicketUpload[] = []): Promise<TicketRow> {
+  const ticketId = randomUUID();
   const payload = buildPayload(input);
   const subject = deriveSubject(input);
   const description = deriveDescription(input);
   const priority = 'normal';
 
-  const [row] = await sql`
-    INSERT INTO tickets (
-      type, status, priority, zone, supervisor_code, supervisor_name,
-      subject, description, payload, sla_due_at
-    ) VALUES (
-      ${input.type},
-      'new',
-      ${priority},
-      ${input.zone},
-      ${actor.code},
-      ${actor.name},
-      ${subject},
-      ${description},
-      ${JSON.stringify(payload)}::jsonb,
-      NOW() + (${slaDueHours(priority)}::int * INTERVAL '1 hour')
-    )
-    RETURNING
-      id::text,
-      ticket_number AS "ticketNumber",
-      type, status, priority, zone,
-      supervisor_code AS "supervisorCode",
-      supervisor_name AS "supervisorName",
-      subject, description, payload,
-      created_at::text AS "createdAt",
-      updated_at::text AS "updatedAt",
-      closed_at::text AS "closedAt",
-      sla_due_at::text AS "slaDueAt",
-      assigned_admin_code AS "assignedAdminCode"
-  `;
+  const staged: Awaited<ReturnType<typeof stageTicketAttachment>>[] = [];
+  let ticket: TicketRow;
+  try {
+    for (const file of files) {
+      staged.push(await stageTicketAttachment({ ticketId, file, uploadedByCode: actor.code }));
+    }
 
-  const ticket = mapTicket(row as Record<string, unknown>);
-  await appendTicketAudit({
-    ticketId: ticket.id,
-    actor,
-    action: 'ticket_created',
-    toStatus: 'new',
-    metadata: { type: input.type },
-  });
+    ticket = await getTicketingSql().begin(async (sql) => {
+      const [row] = await sql`
+          INSERT INTO tickets (
+            id, type, status, priority, zone, supervisor_code, supervisor_name,
+            subject, description, payload, sla_due_at
+          ) VALUES (
+            ${ticketId}::uuid,
+            ${input.type},
+            'new',
+            ${priority},
+            ${input.zone},
+            ${actor.code},
+            ${actor.name},
+            ${subject},
+            ${description},
+            ${JSON.stringify(payload)}::jsonb,
+            NOW() + (${slaDueHours(priority)}::int * INTERVAL '1 hour')
+          )
+          RETURNING
+            id::text,
+            ticket_number AS "ticketNumber",
+            type, status, priority, zone,
+            supervisor_code AS "supervisorCode",
+            supervisor_name AS "supervisorName",
+            subject, description, payload,
+            created_at::text AS "createdAt",
+            updated_at::text AS "updatedAt",
+            closed_at::text AS "closedAt",
+            sla_due_at::text AS "slaDueAt",
+            assigned_admin_code AS "assignedAdminCode"
+        `;
+
+      for (const attachment of staged) await attachment.insert(sql);
+      await appendTicketAudit({
+        ticketId,
+        actor,
+        action: 'ticket_created',
+        toStatus: 'new',
+        metadata: { type: input.type },
+      }, sql);
+      return mapTicket(row as Record<string, unknown>);
+    });
+  } catch (error) {
+    await Promise.all(staged.map((attachment) => attachment.discard()));
+    throw error;
+  }
 
   await notifyTicketEvent({
     ticketId: ticket.id,
@@ -130,7 +147,7 @@ export async function createTicket(input: CreateInput, actor: Actor): Promise<Ti
     eventType: 'ticket_created',
     message: `طلب جديد #${ticket.ticketNumber} من ${ticket.supervisorName}`,
     notifyAdmin: true,
-  });
+  }).catch((error) => console.error('[ticketing] Failed to notify after ticket creation', error));
 
   // إشعار الإدمن عبر Telegram
   const { sendAdminTelegramNotificationSafe } = await import('@/lib/adminTelegramNotifier');

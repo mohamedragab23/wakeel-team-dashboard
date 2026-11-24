@@ -8,8 +8,7 @@ export async function appendTicketAudit(input: {
   fromStatus?: string | null;
   toStatus?: string | null;
   metadata?: Record<string, unknown>;
-}): Promise<void> {
-  const sql = getTicketingSql();
+}, sql: ReturnType<typeof getTicketingSql> | import('postgres').TransactionSql = getTicketingSql()): Promise<void> {
   await sql`
     INSERT INTO ticket_audit_logs (
       ticket_id, actor_role, actor_code, actor_name,

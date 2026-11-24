@@ -3,12 +3,16 @@ import { getTicketingStorage } from '@/lib/ticketing/storage';
 import { buildStorageKey, sanitizeFilename, validateUpload } from '@/lib/ticketing/storage/sanitize';
 import type { TicketAttachmentMeta } from '@/lib/ticketing/types';
 
-export async function saveTicketAttachment(input: {
+export type TicketUpload = { name: string; type: string; size: number; buffer: Buffer };
+type AttachmentInput = {
   ticketId: string;
   commentId?: string | null;
-  file: { name: string; type: string; size: number; buffer: Buffer };
+  file: TicketUpload;
   uploadedByCode: string;
-}): Promise<TicketAttachmentMeta> {
+};
+type AttachmentSql = ReturnType<typeof getTicketingSql> | import('postgres').TransactionSql;
+
+export async function stageTicketAttachment(input: AttachmentInput) {
   const err = validateUpload(input.file);
   if (err) throw new Error(err);
 
@@ -16,59 +20,50 @@ export async function saveTicketAttachment(input: {
   const storage = getTicketingStorage();
   await storage.put(storageKey, input.file.buffer, input.file.type);
 
-  const sql = getTicketingSql();
-  const commentId = input.commentId ?? null;
-  const [row] =
-    commentId === null
-      ? await sql<TicketAttachmentMeta[]>`
-          INSERT INTO ticket_attachments (
-            ticket_id, comment_id, storage_key, original_name, mime_type, size_bytes, uploaded_by_code
-          ) VALUES (
-            ${input.ticketId}::uuid,
-            NULL,
-            ${storageKey},
-            ${sanitizeFilename(input.file.name)},
-            ${input.file.type},
-            ${input.file.size},
-            ${input.uploadedByCode}
-          )
-          RETURNING
-            id::text,
-            ticket_id::text AS "ticketId",
-            comment_id::text AS "commentId",
-            original_name AS "originalName",
-            mime_type AS "mimeType",
-            size_bytes::text AS "sizeBytes",
-            uploaded_by_code AS "uploadedByCode",
-            created_at::text AS "createdAt"
-        `
-      : await sql<TicketAttachmentMeta[]>`
-          INSERT INTO ticket_attachments (
-            ticket_id, comment_id, storage_key, original_name, mime_type, size_bytes, uploaded_by_code
-          ) VALUES (
-            ${input.ticketId}::uuid,
-            ${commentId}::uuid,
-            ${storageKey},
-            ${sanitizeFilename(input.file.name)},
-            ${input.file.type},
-            ${input.file.size},
-            ${input.uploadedByCode}
-          )
-          RETURNING
-            id::text,
-            ticket_id::text AS "ticketId",
-            comment_id::text AS "commentId",
-            original_name AS "originalName",
-            mime_type AS "mimeType",
-            size_bytes::text AS "sizeBytes",
-            uploaded_by_code AS "uploadedByCode",
-            created_at::text AS "createdAt"
-        `;
-
   return {
-    ...row,
-    sizeBytes: Number(row.sizeBytes),
+    async insert(sql: AttachmentSql): Promise<TicketAttachmentMeta> {
+      const [row] = await sql<TicketAttachmentMeta[]>`
+        INSERT INTO ticket_attachments (
+          ticket_id, comment_id, storage_key, original_name, mime_type, size_bytes, uploaded_by_code
+        ) VALUES (
+          ${input.ticketId}::uuid,
+          ${input.commentId ?? null}::uuid,
+          ${storageKey},
+          ${sanitizeFilename(input.file.name)},
+          ${input.file.type},
+          ${input.file.size},
+          ${input.uploadedByCode}
+        )
+        RETURNING
+          id::text,
+          ticket_id::text AS "ticketId",
+          comment_id::text AS "commentId",
+          original_name AS "originalName",
+          mime_type AS "mimeType",
+          size_bytes::text AS "sizeBytes",
+          uploaded_by_code AS "uploadedByCode",
+          created_at::text AS "createdAt"
+      `;
+      return { ...row, sizeBytes: Number(row.sizeBytes) };
+    },
+    async discard() {
+      try {
+        await storage.delete(storageKey);
+      } catch (error) {
+        console.error('[ticketing] Failed to discard staged attachment', error);
+      }
+    },
   };
+}
+
+export async function saveTicketAttachment(input: AttachmentInput): Promise<TicketAttachmentMeta> {
+  const staged = await stageTicketAttachment(input);
+  try {
+    return await staged.insert(getTicketingSql());
+  } catch (error) {
+    await staged.discard();
+    throw error;
+  }
 }
 
 export async function listTicketAttachments(ticketId: string): Promise<TicketAttachmentMeta[]> {
