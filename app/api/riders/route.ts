@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken } from '@/lib/requestAuth';
 import { verifyToken } from '@/lib/auth';
-import { getSupervisorRiders, getAllAssignedRiders, getLatestRiderData } from '@/lib/dataService';
+import { getCurrentSupervisorRiders, getAllAssignedRiders, getLatestRiderData } from '@/lib/dataService';
 import { getSupervisorPerformanceFiltered } from '@/lib/dataFilter';
 import { aggregateRidersInDateRange } from '@/lib/riderPerformanceAggregate';
 import { parseAdminAllowedZonesList } from '@/lib/zones';
@@ -14,6 +14,13 @@ import { getSupervisorCodesInAdminDataScope } from '@/lib/adminZoneScope';
 import { enrichWithRoosterOps } from '@/lib/rooster/enrichRiderOps';
 
 export const dynamic = 'force-dynamic';
+
+function riderList(data: unknown[]) {
+  return NextResponse.json(
+    { success: true, data },
+    { headers: { 'Cache-Control': 'private, no-store' } }
+  );
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -28,6 +35,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 401 });
     }
 
+    if (decoded.role !== 'admin' && decoded.role !== 'supervisor') {
+      return NextResponse.json({ success: false, error: 'غير مصرح' }, { status: 403 });
+    }
+
     const { searchParams } = new URL(request.url);
     const startDateParam = searchParams.get('startDate');
     const endDateParam = searchParams.get('endDate');
@@ -38,7 +49,7 @@ export async function GET(request: NextRequest) {
     let riders =
       decoded.role === 'admin'
         ? await getAllAssignedRiders(useCache)
-        : await getSupervisorRiders(decoded.code, useCache);
+        : await getCurrentSupervisorRiders(decoded.code);
 
     if (decoded.role === 'admin') {
       const allowedSup = await getSupervisorCodesInAdminDataScope(decoded as Parameters<typeof getSupervisorCodesInAdminDataScope>[0]);
@@ -65,7 +76,6 @@ export async function GET(request: NextRequest) {
       console.log(`[Riders API] Date range requested: ${startDateParam} to ${endDateParam}`);
       console.log(`[Riders API] Parsed dates: ${startDate.toISOString()} to ${endDate.toISOString()}`);
       console.log(`[Riders API] Viewer: ${decoded.role} ${decoded.code}, Riders list size: ${riders.length}`);
-      console.log(`[Riders API] Rider codes: ${riders.map(r => r.code).join(', ')}`);
 
       const performanceData = await getSupervisorPerformanceFiltered(performanceScope, startDate, endDate, {
         useCache: false,
@@ -109,10 +119,7 @@ export async function GET(request: NextRequest) {
       );
       
       // Always return riders, even if no performance data (so supervisor can see their assigned riders)
-      return NextResponse.json({
-        success: true,
-        data: ridersWithData,
-      });
+      return riderList(ridersWithData);
     }
 
     // Backward compatibility: If single date is provided
@@ -138,25 +145,21 @@ export async function GET(request: NextRequest) {
       const ridersWithData = await enrichWithRoosterOps(
         aggregateRidersInDateRange(seeds, performanceData, dateParam)
       );
-      return NextResponse.json({
-        success: true,
-        data: ridersWithData,
-      });
+      return riderList(ridersWithData);
     }
 
     // Lightweight roster for pages that only need code/name/region (e.g. daily comments).
     // Avoids N× full scans of البيانات اليومية via getLatestRiderData.
     if (searchParams.get('fields') === 'basic') {
-      return NextResponse.json({
-        success: true,
-        data: riders.map((r) => ({
+      return riderList(
+        riders.map((r) => ({
           code: r.code,
           name: r.name,
           region: r.region,
           supervisorCode: r.supervisorCode || null,
           supervisorName: r.supervisorName || null,
         })),
-      });
+      );
     }
 
     // Get latest performance data for each rider (no date filter)
@@ -183,12 +186,9 @@ export async function GET(request: NextRequest) {
       )
     );
 
-    return NextResponse.json({
-      success: true,
-      data: ridersWithData,
-    });
+    return riderList(ridersWithData);
   } catch (error: any) {
     console.error('Get riders error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'حدث خطأ' }, { status: 500 });
+    return NextResponse.json({ success: false, error: 'تعذر تحميل المناديب' }, { status: 500 });
   }
 }

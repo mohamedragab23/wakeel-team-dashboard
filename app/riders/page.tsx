@@ -194,8 +194,7 @@ export default function RidersPage() {
         url.searchParams.append('t', Date.now().toString());
       }
       
-      const response = await authFetch(url.toString(), {
-        headers: { } });
+      const response = await authFetch(url, { cache: 'no-store' });
 
       const data = await response.json();
 

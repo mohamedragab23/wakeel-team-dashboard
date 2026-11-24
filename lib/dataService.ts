@@ -1,4 +1,4 @@
-import { getSheetData, findDataInSheet, isSameDay } from './googleSheets';
+import { getSheetData, getSheetDataOrThrow, findDataInSheet, isSameDay } from './googleSheets';
 import { CACHE_KEYS } from './cache';
 import { tieredCacheGet, tieredCacheSet } from './tieredCache';
 import { parseSupervisorRowFromSheet, resolveSupervisorsSheetLayout } from './supervisorsSheetParser';
@@ -68,6 +68,37 @@ function normSupervisorCodeForMatch(code: string): string {
     .replace(/^0+(?=\d)/, '');
 }
 
+function readAssignedRiders(rows: unknown[][], ownsRider: (code: string) => boolean): Rider[] {
+  const riders: Rider[] = [];
+  for (const row of rows.slice(1)) {
+    const code = String(row[0] ?? '').trim();
+    const supervisorCode = String(row[3] ?? '').replace(/\uFEFF/g, '').trim();
+    if (!code || !supervisorCode || !ownsRider(supervisorCode)) continue;
+
+    riders.push({
+      code,
+      name: String(row[1] ?? '').trim(),
+      region: String(row[2] ?? '').trim(),
+      supervisorCode,
+      supervisorName: String(row[4] ?? '').trim(),
+      phone: String(row[5] ?? '').trim(),
+      joinDate: String(row[6] ?? '').trim(),
+      status: String(row[7] || 'نشط').trim(),
+      contractEndDate: String(row[9] ?? '').trim(),
+    });
+  }
+  return riders;
+}
+
+/** The signed-in supervisor's current roster is an access boundary. */
+export async function getCurrentSupervisorRiders(supervisorCode: string): Promise<Rider[]> {
+  const code = supervisorCode.replace(/\uFEFF/g, '').trim();
+  if (!code) return [];
+
+  const rows = await getSheetDataOrThrow('المناديب', false);
+  return readAssignedRiders(rows, (owner) => owner === code);
+}
+
 export async function getSupervisorRiders(supervisorCode: string, useCache: boolean = true): Promise<Rider[]> {
   const cacheKey = CACHE_KEYS.supervisorRiders(supervisorCode);
   
@@ -82,36 +113,8 @@ export async function getSupervisorRiders(supervisorCode: string, useCache: bool
   try {
     // Always fetch fresh data from sheet (don't use cache for sheet data when useCache is false)
     const ridersData = await getSheetData('المناديب', useCache);
-    const riders: Rider[] = [];
-
     const supNorm = normSupervisorCodeForMatch(supervisorCode);
-
-    for (let i = 1; i < ridersData.length; i++) {
-      const row = ridersData[i];
-      if (!row[0] || row[0].toString().trim() === '') continue;
-
-      const riderCode = row[0].toString().trim();
-      const riderName = row[1] ? row[1].toString().trim() : '';
-      const riderRegion = row[2] ? row[2].toString().trim() : '';
-      const riderSupervisorCode = row[3] ? row[3].toString().trim() : '';
-      const riderSupNorm = normSupervisorCodeForMatch(riderSupervisorCode);
-
-      // Only include riders that are assigned to this supervisor (not empty/null)
-      // IMPORTANT: Empty string means rider is unassigned, so exclude it
-      if (riderSupNorm && riderSupNorm === supNorm) {
-        riders.push({
-          code: riderCode,
-          name: riderName,
-          region: riderRegion,
-          supervisorCode: riderSupervisorCode,
-          supervisorName: row[4] ? row[4].toString().trim() : '',
-          phone: row[5] ? row[5].toString().trim() : '',
-          joinDate: row[6] ? row[6].toString().trim() : '',
-          status: row[7] ? row[7].toString().trim() : 'نشط',
-          contractEndDate: row[9] ? row[9].toString().trim() : '',
-        });
-      }
-    }
+    const riders = readAssignedRiders(ridersData, (owner) => normSupervisorCodeForMatch(owner) === supNorm);
 
     // Cache for 15 minutes (optimized for mobile performance) - only if useCache is true
     if (useCache) {
