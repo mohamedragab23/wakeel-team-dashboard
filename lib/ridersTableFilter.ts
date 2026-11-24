@@ -192,11 +192,11 @@ function opsStatusLabel(r: RiderRowForFilter): string {
   return '—';
 }
 
-export function applyRiderTableFilters(
-  rows: RiderRowForFilter[],
+export function applyRiderTableFilters<T extends RiderRowForFilter>(
+  rows: T[],
   filters: RiderColumnFilters,
   sort: RiderSortState
-): RiderRowForFilter[] {
+): T[] {
   let out = rows.filter((r) => {
     if (!applyTextFilter((r.code ?? '').toString(), filters.code)) return false;
     if (!applyTextFilter((r.name ?? '').toString(), filters.name)) return false;
