@@ -1,5 +1,5 @@
 import { getSupervisorRiders } from './dataService';
-import { getSheetData } from './googleSheets';
+import { getSheetData, getSheetDataOrThrow } from './googleSheets';
 
 import { normalizeRiderCodeForPerformance } from '@/lib/riderCodeUtils';
 
@@ -484,7 +484,7 @@ export async function getSupervisorPerformanceFiltered(
   supervisorCode: string | null,
   startDate?: Date,
   endDate?: Date,
-  options?: { useCache?: boolean }
+  options?: { useCache?: boolean; riders?: Awaited<ReturnType<typeof getSupervisorRiders>>; strict?: boolean }
 ) {
   try {
     const useCache = options?.useCache ?? true;
@@ -499,7 +499,7 @@ export async function getSupervisorPerformanceFiltered(
 
     if (!allRidersMode) {
       const supCode = (supervisorCode ?? '').toString().trim();
-      const attr = await buildSupervisorRiderAttribution(supCode);
+      const attr = await buildSupervisorRiderAttribution(supCode, { riders: options?.riders });
       inclusiveEndByRider = attr.inclusiveEndByRider;
       riderCodesExact = attr.riderCodesExact;
       riderCodesNormalized = attr.riderCodesNormalized;
@@ -511,7 +511,8 @@ export async function getSupervisorPerformanceFiltered(
       }
     }
 
-    const allData = await getSheetData('البيانات اليومية', useCache);
+    const readSheet = options?.strict ? getSheetDataOrThrow : getSheetData;
+    const allData = await readSheet('البيانات اليومية', useCache);
     /** دمج تكرار (نفس اليوم + نفس المندوب): آخر صف في الشيت يفوز */
     const mergedByDayRider = new Map<string, any>();
 
@@ -652,6 +653,7 @@ export async function getSupervisorPerformanceFiltered(
 
     return filtered;
   } catch (error) {
+    if (options?.strict) throw error;
     console.error('Error filtering performance data:', error);
     return [];
   }

@@ -1,7 +1,7 @@
 'use client';
 
 import { authFetch } from '@/lib/authFetch';
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import Layout from '@/components/Layout';
 import SupervisorTableSection from '@/components/SupervisorTableSection';
 import { downloadBuffer } from '@/lib/excelAdapter';
@@ -44,6 +44,7 @@ interface RiderData {
   /** null = Rooster unavailable / not on active roster */
   roosterSuspended?: boolean | null;
   contractEndDate?: string | null;
+  hasPerformance?: boolean;
 }
 
 function formatContractEnd(value: string | null | undefined): string {
@@ -56,7 +57,9 @@ function formatContractEnd(value: string | null | undefined): string {
 export default function RidersPage() {
   const [riders, setRiders] = useState<RiderData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [performanceStatus, setPerformanceStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [error, setError] = useState('');
+  const activeRequest = useRef<AbortController | null>(null);
   const [searchRiderCode, setSearchRiderCode] = useState('');
   const [exporting, setExporting] = useState(false);
   const [startDate, setStartDate] = useState(() => {
@@ -108,6 +111,7 @@ export default function RidersPage() {
   useEffect(() => {
     fetchRiders();
     fetchPendingTerminations();
+    return () => activeRequest.current?.abort();
   }, [startDate, endDate]);
 
   const fetchPendingTerminations = async () => {
@@ -182,8 +186,41 @@ export default function RidersPage() {
   const sortDirFor = (col: string): 'asc' | 'desc' | null => (sort.col === col ? sort.dir : null);
 
   const fetchRiders = async (forceRefresh: boolean = false) => {
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const { signal } = controller;
+    setError('');
+    setPerformanceStatus('loading');
+    const rosterUrl = new URL('/api/riders?fields=basic', window.location.origin);
+    if (forceRefresh) rosterUrl.searchParams.set('refresh', 'true');
+
     try {
-      setLoading(true);
+      const response = await authFetch(rosterUrl, { cache: 'no-store', signal });
+      const payload = await response.json();
+      if (signal.aborted) return;
+      if (!response.ok || !payload.success || !Array.isArray(payload.data)) {
+        throw new Error('تعذر تحميل قائمة المناديب');
+      }
+      setRiders(payload.data.map((rider: Pick<RiderData, 'code' | 'name' | 'region' | 'contractEndDate'>) => ({
+        ...rider, hours: 0, break: 0, delay: 0, absence: '', orders: 0, acceptance: 0, debt: 0,
+      })));
+      if (payload.data.length === 0) {
+        setPerformanceStatus('ready');
+        return;
+      }
+    } catch {
+      if (!signal.aborted) {
+        setRiders([]);
+        setError('تعذر تحميل قائمة المناديب. اضغط تحديث للمحاولة مرة تانية.');
+        setPerformanceStatus('unavailable');
+      }
+      return;
+    } finally {
+      if (!signal.aborted) setLoading(false);
+    }
+
+    try {
       const url = new URL('/api/riders', window.location.origin);
       if (startDate && endDate) {
         url.searchParams.append('startDate', startDate);
@@ -194,20 +231,20 @@ export default function RidersPage() {
         url.searchParams.append('t', Date.now().toString());
       }
       
-      const response = await authFetch(url, { cache: 'no-store' });
-
-      const data = await response.json();
-
-      if (data.success) {
-        // Debt is already included in rider data from performance (المحفظة column)
-        setRiders(data.data);
-      } else {
-        setError(data.error || 'فشل تحميل البيانات');
+      const response = await authFetch(url, { cache: 'no-store', signal });
+      const payload = await response.json();
+      if (signal.aborted) return;
+      if (!response.ok || !payload.success || !Array.isArray(payload.data)) {
+        throw new Error('تعذر تحميل الأداء');
       }
-    } catch (err) {
-      setError('حدث خطأ في الاتصال بالخادم');
-    } finally {
-      setLoading(false);
+      const performanceByCode = new Map<string, RiderData>(payload.data.map((rider: RiderData) => [rider.code, rider]));
+      setRiders((current) => current.map((rider) => {
+        const performance = performanceByCode.get(rider.code);
+        return performance ? { ...performance, hasPerformance: true } : rider;
+      }));
+      setPerformanceStatus('ready');
+    } catch {
+      if (!signal.aborted) setPerformanceStatus('unavailable');
     }
   };
 
@@ -363,6 +400,13 @@ export default function RidersPage() {
             {error}
           </div>
         )}
+        {!error && performanceStatus !== 'ready' && (
+          <p role="status" className="text-sm text-amber-200">
+            {performanceStatus === 'loading'
+              ? 'جاري تحميل أداء المناديب للفترة المحددة…'
+              : 'تعذر تحميل أداء الفترة. قائمة المناديب الحالية ظاهرة وتقدر تعيد المحاولة من زر تحديث.'}
+          </p>
+        )}
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           <SupervisorTableSection
@@ -370,7 +414,7 @@ export default function RidersPage() {
             fileNameBase="riders_performance"
             toolbarOnLight
             onExportExcel={downloadExcel}
-            exportDisabled={exporting || columnFilteredRiders.length === 0}
+            exportDisabled={exporting || !columnFilteredRiders.length || columnFilteredRiders.some((rider) => !rider.hasPerformance)}
             className="p-4 sm:p-5"
           >
           <div className="overflow-x-auto">
@@ -734,6 +778,7 @@ export default function RidersPage() {
                       <td className="py-4 px-4 text-sm text-gray-700 tabular-nums whitespace-nowrap">
                         {formatContractEnd(rider.contractEndDate)}
                       </td>
+                      {rider.hasPerformance ? <>
                       <td className="py-4 px-4 text-sm text-gray-600">
                         {rider.date ? (() => {
                           try {
@@ -782,6 +827,9 @@ export default function RidersPage() {
                       <td className="py-4 px-4 text-sm text-gray-600">{rider.orders}</td>
                       <td className="py-4 px-4 text-sm text-gray-600">{((rider.acceptance || 0)).toFixed(1)}%</td>
                       <td className="py-4 px-4 text-sm text-gray-600">{((rider.debt || 0)).toFixed(2)}</td>
+                      </> : Array.from({ length: 9 }, (_, index) => (
+                        <td key={index} className="py-4 px-4 text-sm text-gray-400">—</td>
+                      ))}
                       <td className="py-4 px-4 text-sm">
                         <button
                           onClick={() => handleRequestTermination(rider)}

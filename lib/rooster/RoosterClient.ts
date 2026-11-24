@@ -24,6 +24,8 @@
  */
 import { exportRoosterCsv, resolveFreshRoosterExportHeaders, type RoosterExportParams } from '@/lib/roosterExport';
 import { withRoosterCache } from '@/lib/rooster/roosterCache';
+import { tieredCacheGet } from '@/lib/tieredCache';
+import { ROOSTER_AUTO_SYNC_PAUSED } from '@/lib/roosterLive/autoSyncPause';
 import { withRoosterQueue } from '@/lib/rooster/roosterQueue';
 import { getRoosterLiveHeaders, getRoosterAppOrigin } from '@/lib/roosterLive/tokenProvider';
 import { smartRefreshRoosterAuth } from '@/lib/roosterLive/authRefresh';
@@ -273,9 +275,11 @@ export class RoosterClient {
 
     let all: RoosterEmployeeRaw[];
     try {
-      all = await withRoosterCache<RoosterEmployeeRaw[]>(ALL_ACTIVE_EMPLOYEES_CACHE_KEY, () =>
-        withRoosterQueue(() => fetchAllActiveEmployeesUncached())
-      );
+      all = ROOSTER_AUTO_SYNC_PAUSED
+        ? (await tieredCacheGet<RoosterEmployeeRaw[]>(ALL_ACTIVE_EMPLOYEES_CACHE_KEY)) ?? []
+        : await withRoosterCache<RoosterEmployeeRaw[]>(ALL_ACTIVE_EMPLOYEES_CACHE_KEY, () =>
+          withRoosterQueue(() => fetchAllActiveEmployeesUncached())
+        );
     } catch (err: any) {
       logStructured('warn', 'rooster_ops_status_roster_failed', { message: err?.message || String(err) });
       return {};
